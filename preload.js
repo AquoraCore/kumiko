@@ -53,4 +53,8 @@ contextBridge.exposeInMainWorld('api', {
   vaultConfigRead: (key) => ipcRenderer.invoke('vault:configRead', { key }),
   vaultConfigWrite: (key, data) => ipcRenderer.invoke('vault:configWrite', { key, data }),
   vaultStateReadSync: () => ipcRenderer.sendSync('vault:stateReadSync'),
+
+  aiGetConfig: () => ipcRenderer.invoke('ai:getConfig'),
+  aiSetConfig: (patch) => ipcRenderer.invoke('ai:setConfig', patch),
+  aiSetKey: (provider, key) => ipcRenderer.invoke('ai:setKey', { provider, key }),
 });

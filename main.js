@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -6,12 +6,70 @@ const pty = require('node-pty');
 const chokidar = require('chokidar');
 const { wikiTargets, linksTo, rewriteLinkTargets } = require('./core/wikilinks');
 const { safeRel, baseName, vaultName } = require('./core/pathutil');
-const { buildEngineInvocation } = require('./core/ai');
+const { buildEngineInvocation, aiConfigView, setConfigKey } = require('./core/ai');
 
 // In dev, notes live beside the source. When packaged, __dirname is inside the
 // read-only app.asar, so notes must live in a writable user location instead.
 const BUNDLED_NOTES = path.join(__dirname, 'notes');
 let NOTES_DIR = BUNDLED_NOTES;
+
+// ---- AI provider config (per-user JSON in userData; keys encrypted) ----
+// Stored separately from the vault so a vault switch does NOT move API keys.
+// Safe view only ever crosses the IPC boundary (aiConfigView); raw keys stay
+// main-process-side and are decrypted on demand by the API provider (step 3b).
+function aiConfigFile(){ return path.join(app.getPath('userData'), 'ai-config.json'); }
+function readAiConfig(){
+  try {
+    const a = JSON.parse(fs.readFileSync(aiConfigFile(), 'utf8'));
+    return {
+      mode: (a && typeof a.mode === 'string' && a.mode) ? a.mode : 'cli',
+      provider: (a && typeof a.provider === 'string' && a.provider) ? a.provider : 'anthropic',
+      model: (a && typeof a.model === 'string') ? a.model : '',
+      keys: (a && a.keys && typeof a.keys === 'object') ? a.keys : {},
+      _plain: !!(a && a._plain),
+    };
+  } catch (_) { return { mode: 'cli', provider: 'anthropic', model: '', keys: {} }; }
+}
+function writeAiConfig(cfg){
+  try { fs.writeFileSync(aiConfigFile(), JSON.stringify(cfg, null, 2), 'utf8'); } catch (_) {}
+}
+// ponytail: when OS keychain is unavailable (headless/test), fall back to plain
+// base64 and tag the config with _plain=true so decKey knows the encoding.
+// Upgrade path: only ever hit when safeStorage is genuinely missing; real
+// installs use the encrypted branch.
+function encKey(plain){
+  if (safeStorage.isEncryptionAvailable()) return safeStorage.encryptString(plain).toString('base64');
+  return Buffer.from(plain, 'utf8').toString('base64');
+}
+function decKey(enc){
+  if (!enc || typeof enc !== 'string') return '';
+  try {
+    if (safeStorage.isEncryptionAvailable()) return safeStorage.decryptString(Buffer.from(enc, 'base64'));
+    return Buffer.from(enc, 'base64').toString('utf8');
+  } catch (_) { return ''; }
+}
+// INTERNAL — never exposed to the renderer. The API provider (step 3b) calls this.
+function getDecryptedKey(provider){ const cfg = readAiConfig(); return decKey(cfg.keys && cfg.keys[provider]); }
+
+ipcMain.handle('ai:getConfig', () => aiConfigView(readAiConfig()));
+ipcMain.handle('ai:setConfig', (e, patch) => {
+  const cfg = readAiConfig();
+  if (patch && typeof patch === 'object') {
+    if (patch.mode) cfg.mode = patch.mode;
+    if (patch.provider) cfg.provider = patch.provider;
+    if ('model' in patch) cfg.model = patch.model;
+  }
+  writeAiConfig(cfg);
+  return aiConfigView(cfg);
+});
+ipcMain.handle('ai:setKey', (e, { provider, key } = {}) => {
+  let cfg = readAiConfig();
+  const enc = (key && String(key).length) ? encKey(String(key)) : null;
+  cfg = setConfigKey(cfg, provider, enc);
+  if (!safeStorage.isEncryptionAvailable()) cfg._plain = true;
+  writeAiConfig(cfg);
+  return aiConfigView(cfg);
+});
 
 // ---- Vault registry (per-user JSON: which folder is the active vault) ----
 function vaultsFile(){ return path.join(app.getPath('userData'), 'vaults.json'); }
