@@ -78,7 +78,17 @@ async function launchApp(opts) {
 
 async function teardown(ctx) {
   if (!ctx) return;
-  try { if (ctx.app) await ctx.app.close(); } catch (_) {}
+  try {
+    if (ctx.app) {
+      // don't let a hung close() consume the whole worker-teardown budget
+      await Promise.race([ ctx.app.close(), new Promise((r) => setTimeout(r, 8000)) ]);
+    }
+  } catch (_) {}
+  // if the Electron process is still alive, hard-kill it so the worker can exit
+  try {
+    const proc = ctx.app && typeof ctx.app.process === 'function' ? ctx.app.process() : null;
+    if (proc && proc.pid) { try { process.kill(proc.pid, 'SIGKILL'); } catch (_) {} }
+  } catch (_) {}
   (ctx.dirs || []).forEach((d) => { try { fs.rmSync(d, { recursive: true, force: true }); } catch (_) {} });
 }
 
