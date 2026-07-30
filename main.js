@@ -7,6 +7,7 @@ const chokidar = require('chokidar');
 const { wikiTargets, linksTo, rewriteLinkTargets } = require('./core/wikilinks');
 const { safeRel, baseName, vaultName } = require('./core/pathutil');
 const { buildEngineInvocation, aiConfigView, setConfigKey, buildApiRequest, parseSseDelta } = require('./core/ai');
+const CoreRag = require('./core/rag');
 
 // In dev, notes live beside the source. When packaged, __dirname is inside the
 // read-only app.asar, so notes must live in a writable user location instead.
@@ -89,6 +90,54 @@ ipcMain.handle('ai:testConnection', async () => {
     return { ok: false, error: String(err) };
   }
 });
+
+// ---- RAG: build vault context for a question (reads notes live, pure core ranks them) ----
+// ponytail: SCAN_CAP=300 / FILE_CAP=40000 are known ceilings; very large vaults
+// miss tail notes and very large notes get head-truncated. Upgrade only if a real
+// vault exceeds either. Never throws — the renderer treats '' as "no notes, normal chat".
+function buildVaultContext(question){
+  try {
+    const SCAN_CAP = 300, FILE_CAP = 40000;
+    const rels = walkNotes(NOTES_DIR, '');
+    const docs = [], baseToId = {};
+    for (let i = 0; i < rels.length && i < SCAN_CAP; i++) {
+      const rel = rels[i];
+      let text;
+      try { text = fs.readFileSync(path.join(NOTES_DIR, rel), 'utf8'); } catch (_) { continue; }
+      if (text.length > FILE_CAP) text = text.slice(0, FILE_CAP);
+      docs.push({ id: rel, name: baseName(rel), text });
+      const k = baseName(rel).toLowerCase();      // first wins, like graph:data's fileByBase
+      if (!(k in baseToId)) baseToId[k] = rel;
+    }
+    const linkGraph = {};                          // id -> [neighbour ids]
+    for (const d of docs) {
+      const seen = new Set(), nb = [];
+      for (const raw of wikiTargets(d.text)) {
+        const tid = baseToId[raw.toLowerCase().trim()];
+        if (!tid || tid === d.id || seen.has(tid)) continue;
+        seen.add(tid); nb.push(tid);
+      }
+      linkGraph[d.id] = nb;
+    }
+    const ranked = CoreRag.rank(question, CoreRag.buildIndex(docs), 6);
+    if (ranked.length === 0) return { context: '', sources: [] };
+    let orderedIds = CoreRag.expandByLinks(ranked.map((r) => r.id), linkGraph, 1);
+    if (orderedIds.length > 10) orderedIds = orderedIds.slice(0, 10);
+    const byId = {}; for (const d of docs) byId[d.id] = d;
+    const entries = [];
+    for (const id of orderedIds) {
+      const d = byId[id];
+      if (d) entries.push({ id: d.id, name: d.name, text: d.text });
+    }
+    const context = CoreRag.buildContextBlock(entries, 6000);
+    const sources = entries.filter((d) => d.text && String(d.text).trim() !== '').map((d) => d.name);
+    return { context, sources };
+  } catch (_) {
+    return { context: '', sources: [] };
+  }
+}
+
+ipcMain.handle('rag:context', (e, { question } = {}) => buildVaultContext(typeof question === 'string' ? question : ''));
 
 // ---- Vault registry (per-user JSON: which folder is the active vault) ----
 function vaultsFile(){ return path.join(app.getPath('userData'), 'vaults.json'); }

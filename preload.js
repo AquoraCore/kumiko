@@ -58,4 +58,5 @@ contextBridge.exposeInMainWorld('api', {
   aiSetConfig: (patch) => ipcRenderer.invoke('ai:setConfig', patch),
   aiSetKey: (provider, key) => ipcRenderer.invoke('ai:setKey', { provider, key }),
   aiTestConnection: () => ipcRenderer.invoke('ai:testConnection'),
+  ragContext: (question) => ipcRenderer.invoke('rag:context', { question }),
 });
