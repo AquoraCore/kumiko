@@ -6,6 +6,7 @@ const pty = require('node-pty');
 const chokidar = require('chokidar');
 const { wikiTargets, linksTo, rewriteLinkTargets } = require('./core/wikilinks');
 const { safeRel, baseName, vaultName } = require('./core/pathutil');
+const { buildEngineInvocation } = require('./core/ai');
 
 // In dev, notes live beside the source. When packaged, __dirname is inside the
 // read-only app.asar, so notes must live in a writable user location instead.
@@ -192,15 +193,9 @@ ipcMain.handle('engine:run', (e, { engine, model, prompt, runId }) => {
   }
   const env = Object.assign({}, process.env);
   env.PATH = ['/opt/homebrew/bin', '/usr/local/bin', env.PATH || ''].join(':');
-  let proc;
-  if (engine === 'glm') {
-    // NOTE: `opencode run` reads the prompt from STDIN (argv would hang forever).
-    proc = spawn('opencode', ['run', '-m', model], { cwd: NOTES_DIR, env });
-  } else if (engine === 'claude') {
-    proc = spawn('claude', ['-p', prompt, '--permission-mode', 'acceptEdits'], { cwd: NOTES_DIR, env });
-  } else {
-    return;
-  }
+  const inv = buildEngineInvocation(engine, model, prompt);
+  if (!inv) return;
+  const proc = spawn(inv.cmd, inv.args, { cwd: NOTES_DIR, env });
   engineProcs.set(rid, proc);
   const killer = setTimeout(() => {
     if (engineProcs.has(rid)) { try { proc.kill('SIGKILL'); } catch (_) {} emit('\r\n[timeout — engine killed]\r\n'); }
@@ -210,8 +205,8 @@ ipcMain.handle('engine:run', (e, { engine, model, prompt, runId }) => {
   proc.stderr.on('data', (d) => emit(d.toString()));
   proc.on('close', (code) => finish(code));
   proc.on('error', (err) => { emit('\r\n[error] ' + err.message + '\r\n'); finish(-1); });
-  if (engine === 'glm') {
-    try { proc.stdin.write(prompt); proc.stdin.end(); } catch (_) {}
+  if (inv.stdin != null) {
+    try { proc.stdin.write(inv.stdin); proc.stdin.end(); } catch (_) {}
   }
 });
 
