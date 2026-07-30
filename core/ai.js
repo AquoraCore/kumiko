@@ -35,4 +35,40 @@ function setConfigKey(cfg, provider, encrypted){
   return next;
 }
 
-module.exports = { buildEngineInvocation, aiConfigView, setConfigKey };
+// ---- API request builders: PURE, side-effect-free ---------------------------
+// Maps (provider, model, prompt, key) -> { url, headers, body } for the HTTPS
+// streaming call. `body` is a plain JS object; the caller JSON.stringifies.
+// Unknown provider -> null (mirrors buildEngineInvocation). Kept pure so main.js
+// stays free of network I/O and this is unit-testable in isolation.
+function buildApiRequest(provider, model, prompt, key){
+  if (provider === 'anthropic') return {
+    url: 'https://api.anthropic.com/v1/messages',
+    headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+    body: { model, max_tokens: 4096, stream: true, messages: [{ role: 'user', content: prompt }] },
+  };
+  if (provider === 'zai') return {
+    url: 'https://api.z.ai/api/paas/v4/chat/completions',
+    headers: { 'content-type': 'application/json', 'authorization': 'Bearer ' + key },
+    body: { model, stream: true, messages: [{ role: 'user', content: prompt }] },
+  };
+  return null;
+}
+
+// Parse ONE SSE `data:` payload (the string AFTER 'data: ') into a text delta.
+// '' for [DONE], parse errors, or non-text events. PURE.
+function parseSseDelta(provider, dataStr){
+  const s = (typeof dataStr === 'string') ? dataStr : '';
+  if (s.trim() === '[DONE]') return '';
+  let obj;
+  try { obj = JSON.parse(s); } catch (_) { return ''; }
+  if (!obj || typeof obj !== 'object') return '';
+  if (provider === 'anthropic') {
+    if (obj.type === 'content_block_delta' && obj.delta && obj.delta.type === 'text_delta') return obj.delta.text || '';
+    return '';
+  }
+  // zai / openai-compatible
+  if (obj.choices && obj.choices[0] && obj.choices[0].delta && obj.choices[0].delta.content) return obj.choices[0].delta.content;
+  return '';
+}
+
+module.exports = { buildEngineInvocation, aiConfigView, setConfigKey, buildApiRequest, parseSseDelta };

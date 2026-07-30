@@ -6,7 +6,7 @@ const pty = require('node-pty');
 const chokidar = require('chokidar');
 const { wikiTargets, linksTo, rewriteLinkTargets } = require('./core/wikilinks');
 const { safeRel, baseName, vaultName } = require('./core/pathutil');
-const { buildEngineInvocation, aiConfigView, setConfigKey } = require('./core/ai');
+const { buildEngineInvocation, aiConfigView, setConfigKey, buildApiRequest, parseSseDelta } = require('./core/ai');
 
 // In dev, notes live beside the source. When packaged, __dirname is inside the
 // read-only app.asar, so notes must live in a writable user location instead.
@@ -69,6 +69,25 @@ ipcMain.handle('ai:setKey', (e, { provider, key } = {}) => {
   if (!safeStorage.isEncryptionAvailable()) cfg._plain = true;
   writeAiConfig(cfg);
   return aiConfigView(cfg);
+});
+// Minimal NON-streaming probe against the saved config. Uses buildApiRequest
+// (stream:false, small max_tokens) so it stays cheap. Returns {ok,status} or
+// {ok:false,error}. Never throws — the renderer just shows the inline result.
+ipcMain.handle('ai:testConnection', async () => {
+  const aicfg = readAiConfig();
+  if (aicfg.mode !== 'api') return { ok: false, error: 'no key' };
+  const key = getDecryptedKey(aicfg.provider);
+  if (!key) return { ok: false, error: 'no key' };
+  try {
+    const built = buildApiRequest(aicfg.provider, aicfg.model || '', 'hi', key);
+    if (!built) return { ok: false, error: 'unknown provider' };
+    const body = Object.assign({}, built.body, { stream: false });
+    if ('max_tokens' in body) body.max_tokens = 8;
+    const res = await fetch(built.url, { method: 'POST', headers: built.headers, body: JSON.stringify(body) });
+    return { ok: res.ok, status: res.status };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
 });
 
 // ---- Vault registry (per-user JSON: which folder is the active vault) ----
@@ -215,6 +234,51 @@ ipcMain.on('pty:resize', (e, size) => {
   }
 });
 
+// ---- API provider runner (HTTPS streaming over global fetch) ----
+// Streaming twin of the CLI spawn path. Same emit/finish/engineProcs shape, so
+// engine:stop (which calls .kill() on the stored handle) aborts API runs too.
+// Pure request/parse logic lives in core/ai.js; only the fetch+stream plumbing
+// is here. engineProcs[rid] holds { kill() -> ctrl.abort() } so SIGINT/SIGKILL
+// calls from engine:stop become a no-op abort on the AbortController.
+async function runApiProvider({ provider, model, prompt, key, rid, emit }){
+  const ctrl = new AbortController();
+  engineProcs.set(rid, { kill(){ try { ctrl.abort(); } catch (_) {} } });
+  const killer = setTimeout(() => {
+    if (engineProcs.has(rid)) { try { ctrl.abort(); } catch (_) {} emit('\r\n[timeout — engine killed]\r\n'); }
+  }, 300000);
+  const finish = (code) => { clearTimeout(killer); engineProcs.delete(rid); win.webContents.send('engine:done', { runId: rid, code }); };
+  const emitLine = (line) => {
+    const trimmed = line.trim();
+    if (trimmed.indexOf('data:') !== 0) return;     // skip event:/ping/blank lines
+    let rest = trimmed.slice(5);                    // drop "data:"
+    if (rest.charCodeAt(0) === 32) rest = rest.slice(1);   // drop one leading space
+    const delta = parseSseDelta(provider, rest);
+    if (delta) emit(delta);
+  };
+  const built = buildApiRequest(provider, model, prompt, key);
+  if (!built) { finish(-1); return; }
+  try {
+    const res = await fetch(built.url, { method: 'POST', headers: built.headers, body: JSON.stringify(built.body), signal: ctrl.signal });
+    if (!res.ok) { emit('\r\n[API error ' + res.status + ']\r\n'); finish(res.status); return; }
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) { emitLine(buf.slice(0, nl)); buf = buf.slice(nl + 1); }
+    }
+    if (buf) emitLine(buf);                          // flush a trailing un-newlined line
+    finish(0);
+  } catch (err) {
+    if (err && err.name === 'AbortError') { finish(130); return; }   // aborted via engine:stop / timeout
+    emit('\r\n[API error] ' + (err && err.message ? err.message : String(err)) + '\r\n');
+    finish(-1);
+  }
+}
+
 // ---- One-shot engine runner (no shell, argv array) ----
 ipcMain.handle('engine:run', (e, { engine, model, prompt, runId }) => {
   const rid = runId || 'default';
@@ -247,6 +311,17 @@ ipcMain.handle('engine:run', (e, { engine, model, prompt, runId }) => {
   if (engineProcs.size >= MAX_ENGINES) {
     emit('\r\n[คิว engine เต็ม (สูงสุด ' + MAX_ENGINES + ' พร้อมกัน) — รอสักครู่แล้วลองใหม่]\r\n');
     win.webContents.send('engine:done', { runId: rid, code: -1 });
+    return;
+  }
+  // API-key mode: route to the streaming provider instead of the CLI. Sits
+  // after the cap check above (so the queue limit still applies) and after the
+  // WASHI_TEST_ENGINE stub (so E2E never hits the network). CLI path below is
+  // the default (mode 'cli') and unchanged.
+  const aicfg = readAiConfig();
+  if (aicfg.mode === 'api') {
+    const key = getDecryptedKey(aicfg.provider);
+    if (!key) { emit('\r\n[ยังไม่ได้ตั้งค่า API key — ไปที่ ⚙ ตั้งค่า AI]\r\n'); win.webContents.send('engine:done', { runId: rid, code: -1 }); return; }
+    runApiProvider({ provider: aicfg.provider, model: aicfg.model || model, prompt, key, rid, emit });
     return;
   }
   const env = Object.assign({}, process.env);

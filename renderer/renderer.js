@@ -404,6 +404,8 @@ const I18N_EN = {
   '••• ตั้งค่าไว้แล้ว (ใส่ใหม่เพื่อเปลี่ยน)': '••• set (enter a new one to change)',
   '🔒 กุญแจถูกเข้ารหัสเก็บในเครื่อง — ไม่ถูกส่งไปที่ไหนนอกจากผู้ให้บริการที่เลือก': '🔒 Key is encrypted on your device — never sent anywhere except the provider you choose',
   'ทดสอบการเชื่อมต่อ': 'Test connection',
+  'เชื่อมต่อได้ ✓': 'Connected ✓',
+  'เชื่อมต่อไม่ได้': 'Connection failed',
 };
 
 let termFontSize = parseInt(localStorage.getItem('termFontSize') || '13', 10);
@@ -2545,7 +2547,15 @@ async function openAiSettings(){
 
   // FOOTER
   const foot=document.createElement('div'); foot.className='settings-actions ai-settings-foot';
-  const testBtn=document.createElement('button'); testBtn.type='button'; testBtn.id='aiTestBtn'; testBtn.className='ghost'; testBtn.disabled=true; testBtn.title=t('เร็ว ๆ นี้'); testBtn.textContent=t('ทดสอบการเชื่อมต่อ');
+  const testBtn=document.createElement('button'); testBtn.type='button'; testBtn.id='aiTestBtn'; testBtn.className='ghost'; testBtn.textContent=t('ทดสอบการเชื่อมต่อ');
+  const testRes=document.createElement('span'); testRes.id='aiTestResult'; testRes.className='ai-test-result';
+  testBtn.onclick=async ()=>{
+    testRes.textContent='…';
+    let r;
+    try { r=await window.api.aiTestConnection(); } catch (e) { r={ok:false,error:String(e)}; }
+    if (r && r.ok) testRes.textContent=t('เชื่อมต่อได้ ✓');
+    else testRes.textContent=t('เชื่อมต่อไม่ได้') + ' (' + ((r && (r.status||r.error)) || '') + ')';
+  };
   const cancelBtn=document.createElement('button'); cancelBtn.type='button'; cancelBtn.className='ghost'; cancelBtn.textContent=t('ยกเลิก'); cancelBtn.onclick=dismiss;
   const saveBtn=document.createElement('button'); saveBtn.type='button'; saveBtn.id='aiSettingsSave'; saveBtn.className='solid'; saveBtn.textContent=t('บันทึก');
   saveBtn.onclick=async ()=>{
@@ -2554,7 +2564,7 @@ async function openAiSettings(){
     if (kv && kv.length) await window.api.aiSetKey(pSel.value, kv);
     dismiss();
   };
-  foot.appendChild(testBtn); foot.appendChild(cancelBtn); foot.appendChild(saveBtn); card.appendChild(foot);
+  foot.appendChild(testBtn); foot.appendChild(testRes); foot.appendChild(cancelBtn); foot.appendChild(saveBtn); card.appendChild(foot);
 
   ov.appendChild(card); ov.hidden=false;
 }
