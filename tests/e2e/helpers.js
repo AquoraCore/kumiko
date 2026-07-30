@@ -35,6 +35,7 @@ async function launchApp(opts) {
   dirs.push(userData);
   const env = Object.assign({}, process.env);
   env.WASHI_TEST = '1';
+  if (opts.stubEngine) env.WASHI_TEST_ENGINE = '1';   // chat spec: route engine:run to the canned stub
   let notesDir;
 
   if (Array.isArray(opts.vaults) && opts.vaults.length) {

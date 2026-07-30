@@ -160,6 +160,30 @@ ipcMain.on('pty:resize', (e, size) => {
 ipcMain.handle('engine:run', (e, { engine, model, prompt, runId }) => {
   const rid = runId || 'default';
   const emit = (data) => win.webContents.send('engine:output', { runId: rid, data });
+  // ponytail: TEST-ONLY stub engine. Streams a canned reply over ~600ms and is
+  // abortable via the existing engine:stop path (which calls .kill()). Only
+  // triggers when WASHI_TEST_ENGINE is set (Playwright chat spec); normal runs
+  // are 100% unchanged. Delete when provider refactor lands deterministic unit tests.
+  if (process.env.WASHI_TEST_ENGINE) {
+    if (engineProcs.has(rid)) return;
+    let done = false;
+    const timers = [];
+    const fake = { kill() {
+      if (done) return; done = true;
+      timers.forEach(clearTimeout);
+      engineProcs.delete(rid);
+      win.webContents.send('engine:done', { runId: rid, code: 130 });   // aborted
+    }};
+    engineProcs.set(rid, fake);
+    const chunks = ['Stubbed ', 'AI ', 'reply.'];
+    chunks.forEach((c, i) => timers.push(setTimeout(() => { if (!done) emit(c); }, 150 * (i + 1))));
+    timers.push(setTimeout(() => {
+      if (done) return; done = true;
+      engineProcs.delete(rid);
+      win.webContents.send('engine:done', { runId: rid, code: 0 });     // finished
+    }, 150 * (chunks.length + 1)));
+    return;
+  }
   if (engineProcs.has(rid)) { return; }                        // this session is already running
   if (engineProcs.size >= MAX_ENGINES) {
     emit('\r\n[คิว engine เต็ม (สูงสุด ' + MAX_ENGINES + ' พร้อมกัน) — รอสักครู่แล้วลองใหม่]\r\n');
