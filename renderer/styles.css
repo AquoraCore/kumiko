@@ -1569,3 +1569,26 @@ table.db tr:hover .db-delrow { opacity: 1; }
 .set-seg-btn.on { background: var(--sheet); color: var(--accent); box-shadow: var(--cut); }
 .set-sep { height: 1px; background: var(--cut-seam); margin: 5px 4px; }
 :root[data-theme="dark"] .set-seg { background: var(--side); border-color: var(--cut-seam); }
+
+/* ===== AI provider settings panel (step 3a-2) ===== */
+#aiSettingsModal { width: 480px; }
+.ai-mode-seg { display: flex; gap: 8px; margin: 4px 0 14px; }
+.ai-mode-btn { flex: 1; display: flex; flex-direction: column; gap: 2px; align-items: flex-start; font: inherit; cursor: pointer; border: 1px solid var(--line-strong); background: var(--surface); border-radius: 10px; padding: 9px 11px; text-align: left; transition: border-color .12s, background .12s; }
+.ai-mode-btn:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-bg); }
+.ai-mode-btn.on { border-color: var(--accent); background: var(--accent-bg); box-shadow: var(--cut); }
+.ai-mode-btn:disabled { cursor: not-allowed; opacity: .5; }
+.ai-mode-lab { font: 600 13px var(--font); color: var(--text); }
+.ai-mode-btn.on .ai-mode-lab { color: var(--accent); }
+.ai-mode-sub { font: 500 10.5px var(--font); color: var(--muted); }
+.ai-api-section { display: flex; flex-direction: column; gap: 2px; }
+.ai-api-section .settings-field { margin-bottom: 11px; }
+.ai-sel { width: 100%; font: inherit; font-size: 13px; border: 1px solid var(--line-strong); border-radius: 7px; padding: 6px 9px; box-sizing: border-box; background: var(--surface); color: var(--text); }
+.ai-sel:focus { border-color: var(--accent); outline: none; }
+.ai-key-wrap { display: flex; gap: 6px; align-items: stretch; }
+.ai-key-wrap #aiKeyInput { flex: 1; font: inherit; font-size: 13px; padding: 6px 9px; border: 1px solid var(--line-strong); border-radius: 7px; box-sizing: border-box; background: var(--surface); color: var(--text); }
+.ai-key-wrap #aiKeyInput:focus { border-color: var(--accent); outline: none; }
+.ai-key-toggle { font: inherit; font-size: 12px; cursor: pointer; border: 1px solid var(--line-strong); background: var(--surface); color: var(--text); border-radius: 7px; padding: 0 12px; }
+.ai-key-toggle:hover { background: var(--hover); }
+.ai-note { margin: 2px 0 4px; padding: 8px 11px; font-size: 11.5px; line-height: 1.45; color: var(--muted); background: var(--accent-bg); border: 1px solid var(--cut-seam); border-radius: 8px; }
+.ai-settings-foot { gap: 8px; margin-top: 14px; }
+.ai-settings-foot #aiTestBtn:disabled { opacity: .5; cursor: not-allowed; }

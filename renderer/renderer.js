@@ -388,6 +388,22 @@ const I18N_EN = {
   'Vault': 'Vault',
   'เปิดโฟลเดอร์เป็น vault…': 'Open folder as vault…',
   'สร้าง vault ใหม่…': 'New vault…',
+  // ---- AI provider settings panel (step 3a-2) ----
+  'ตั้งค่า AI provider…': 'AI provider settings…',
+  'ตั้งค่า AI / AI Settings': 'AI Settings',
+  'CLI (บนเครื่อง)': 'CLI (local)',
+  'API key': 'API key',
+  'ใส่คีย์เอง': 'use your own key',
+  'Managed': 'Managed',
+  'เร็ว ๆ นี้': 'coming soon',
+  'ผู้ให้บริการ': 'Provider',
+  'โมเดล': 'Model',
+  'แสดง': 'Show',
+  'ซ่อน': 'Hide',
+  'วางคีย์ที่นี่': 'Paste your key here',
+  '••• ตั้งค่าไว้แล้ว (ใส่ใหม่เพื่อเปลี่ยน)': '••• set (enter a new one to change)',
+  '🔒 กุญแจถูกเข้ารหัสเก็บในเครื่อง — ไม่ถูกส่งไปที่ไหนนอกจากผู้ให้บริการที่เลือก': '🔒 Key is encrypted on your device — never sent anywhere except the provider you choose',
+  'ทดสอบการเชื่อมต่อ': 'Test connection',
 };
 
 let termFontSize = parseInt(localStorage.getItem('termFontSize') || '13', 10);
@@ -2400,6 +2416,11 @@ function openSettingsMenu(anchor){
   ai.onclick = () => { closeSettingsMenu(); openSettings(); };
   menu.appendChild(ai);
 
+  const aip = document.createElement('div'); aip.className = 'db-mi'; aip.id = 'aiSettingsMenuItem';
+  aip.innerHTML = icoSvg('sparkle','sm'); aip.appendChild(document.createTextNode(' ' + t('ตั้งค่า AI provider…')));
+  aip.onclick = () => { closeSettingsMenu(); openAiSettings(); };
+  menu.appendChild(aip);
+
   document.body.appendChild(menu);
   const rc = anchor.getBoundingClientRect();
   menu.style.left = Math.min(rc.left, window.innerWidth - 230) + 'px';
@@ -2439,6 +2460,104 @@ function openSettings(){
   ov.appendChild(card); ov.hidden=false;
 }
 document.getElementById('settingsBtn').onclick = openSettings;
+
+// ---------- AI provider settings (step 3a-2) ----------
+// Modal into #settingsOverlay, same pattern as openSettings(). Loads the safe
+// view (aiGetConfig) — never the raw key. Default mode stays 'cli' so nothing
+// changes for current users until they opt in. Writes only via 3a-1 IPC.
+const AI_MODELS = {
+  anthropic: ['claude-opus-4-8','claude-sonnet-5','claude-haiku-4-5-20251001'],
+  zai: ['glm-5.2','glm-5.1','glm-4.7'],
+};
+async function openAiSettings(){
+  const ov=document.getElementById('settingsOverlay'); ov.innerHTML='';
+  const cfg = await window.api.aiGetConfig();
+
+  const card=document.createElement('div'); card.className='settings-card'; card.id='aiSettingsModal';
+  const head=document.createElement('div'); head.className='tbl-head';
+  const title=document.createElement('span'); title.textContent=t('ตั้งค่า AI / AI Settings');
+  const xBtn=document.createElement('button'); xBtn.className='rv-close'; xBtn.id='aiSettingsCancel'; xBtn.innerHTML=icoSvg('x','sm');
+  const dismiss=()=>{ ov.hidden=true; ov.innerHTML=''; };
+  xBtn.onclick=dismiss;
+  head.appendChild(title); head.appendChild(xBtn); card.appendChild(head);
+
+  let selectedMode = cfg.mode;
+
+  // MODE segmented control — cli / api / managed(disabled)
+  const modeSeg=document.createElement('div'); modeSeg.className='ai-mode-seg';
+  const MODES=[
+    ['cli', t('CLI (บนเครื่อง)'), 'opencode / claude'],
+    ['api', t('API key'), t('ใส่คีย์เอง')],
+    ['managed', t('Managed'), t('เร็ว ๆ นี้')],
+  ];
+  MODES.forEach(([m, label, sub])=>{
+    const b=document.createElement('button'); b.type='button'; b.className='ai-mode-btn'+(cfg.mode===m?' on':''); b.dataset.mode=m;
+    const l=document.createElement('span'); l.className='ai-mode-lab'; l.textContent=label;
+    const s=document.createElement('span'); s.className='ai-mode-sub'; s.textContent=sub;
+    b.appendChild(l); b.appendChild(s);
+    if (m==='managed') b.disabled=true;
+    b.onclick=()=>{ if (b.disabled) return; selectedMode=m; modeSeg.querySelectorAll('.ai-mode-btn').forEach((x)=>x.classList.remove('on')); b.classList.add('on'); syncApiSection(); };
+    modeSeg.appendChild(b);
+  });
+  card.appendChild(modeSeg);
+
+  // API SECTION — visible only when selected mode === 'api'
+  const apiSection=document.createElement('div'); apiSection.id='aiApiSection'; apiSection.className='ai-api-section';
+
+  const pRow=document.createElement('div'); pRow.className='settings-field';
+  const pLab=document.createElement('label'); pLab.textContent=t('ผู้ให้บริการ');
+  const pSel=document.createElement('select'); pSel.id='aiProviderSel'; pSel.className='ai-sel';
+  [['anthropic','Anthropic (Claude)'],['zai','Z.ai (GLM)']].forEach(([v, l])=>{ const o=document.createElement('option'); o.value=v; o.textContent=l; pSel.appendChild(o); });
+  pSel.value = (cfg.provider==='zai') ? 'zai' : 'anthropic';
+  pRow.appendChild(pLab); pRow.appendChild(pSel); apiSection.appendChild(pRow);
+
+  const kRow=document.createElement('div'); kRow.className='settings-field';
+  const kLab=document.createElement('label'); kLab.textContent=t('API key');
+  const kWrap=document.createElement('div'); kWrap.className='ai-key-wrap';
+  const kInput=document.createElement('input'); kInput.id='aiKeyInput'; kInput.type='password'; kInput.autocomplete='off'; kInput.spellcheck=false;
+  const kToggle=document.createElement('button'); kToggle.type='button'; kToggle.id='aiKeyToggle'; kToggle.className='ai-key-toggle'; kToggle.textContent=t('แสดง');
+  kToggle.onclick=()=>{ const shown=kInput.type==='text'; kInput.type=shown?'password':'text'; kToggle.textContent=shown?t('แสดง'):t('ซ่อน'); };
+  kWrap.appendChild(kInput); kWrap.appendChild(kToggle); kRow.appendChild(kLab); kRow.appendChild(kWrap); apiSection.appendChild(kRow);
+
+  const mRow=document.createElement('div'); mRow.className='settings-field';
+  const mLab=document.createElement('label'); mLab.textContent=t('โมเดล');
+  const mSel=document.createElement('select'); mSel.id='aiModelSel'; mSel.className='ai-sel';
+  mRow.appendChild(mLab); mRow.appendChild(mSel); apiSection.appendChild(mRow);
+
+  const note=document.createElement('p'); note.className='ai-note'; note.textContent=t('🔒 กุญแจถูกเข้ารหัสเก็บในเครื่อง — ไม่ถูกส่งไปที่ไหนนอกจากผู้ให้บริการที่เลือก');
+  apiSection.appendChild(note);
+  card.appendChild(apiSection);
+
+  function rebuildModels(){
+    const list=AI_MODELS[pSel.value]||[];
+    mSel.innerHTML='';
+    list.forEach((id)=>{ const o=document.createElement('option'); o.value=id; o.textContent=id; mSel.appendChild(o); });
+    const want=(pSel.value===cfg.provider && list.includes(cfg.model)) ? cfg.model : (list[0]||'');
+    if (want) mSel.value=want;
+  }
+  function syncKeyPlaceholder(){
+    const set=!!(cfg.hasKey && cfg.hasKey[pSel.value]);
+    kInput.placeholder = set ? t('••• ตั้งค่าไว้แล้ว (ใส่ใหม่เพื่อเปลี่ยน)') : t('วางคีย์ที่นี่');
+  }
+  function syncApiSection(){ apiSection.style.display=(selectedMode==='api') ? '' : 'none'; }
+  rebuildModels(); syncKeyPlaceholder(); syncApiSection();
+  pSel.onchange=()=>{ rebuildModels(); syncKeyPlaceholder(); };
+
+  // FOOTER
+  const foot=document.createElement('div'); foot.className='settings-actions ai-settings-foot';
+  const testBtn=document.createElement('button'); testBtn.type='button'; testBtn.id='aiTestBtn'; testBtn.className='ghost'; testBtn.disabled=true; testBtn.title=t('เร็ว ๆ นี้'); testBtn.textContent=t('ทดสอบการเชื่อมต่อ');
+  const cancelBtn=document.createElement('button'); cancelBtn.type='button'; cancelBtn.className='ghost'; cancelBtn.textContent=t('ยกเลิก'); cancelBtn.onclick=dismiss;
+  const saveBtn=document.createElement('button'); saveBtn.type='button'; saveBtn.id='aiSettingsSave'; saveBtn.className='solid'; saveBtn.textContent=t('บันทึก');
+  saveBtn.onclick=async ()=>{
+    await window.api.aiSetConfig({ mode:selectedMode, provider:pSel.value, model:mSel.value });
+    const kv=kInput.value;
+    if (kv && kv.length) await window.api.aiSetKey(pSel.value, kv);
+    dismiss();
+  };
+  foot.appendChild(testBtn); foot.appendChild(cancelBtn); foot.appendChild(saveBtn); card.appendChild(foot);
+
+  ov.appendChild(card); ov.hidden=false;
+}
 
 // ---------- Boot ----------
 const app = document.getElementById('app');
