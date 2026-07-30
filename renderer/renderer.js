@@ -2,6 +2,7 @@
 const { mdToHtml, _mdInline, _mdEsc } = window.CoreMarkdown;
 const { parseFrontmatter, serializeFrontmatter } = window.CoreFrontmatter;
 const { _lcsOps, diffSegments, addLinesFromText, mergeSegments } = window.CoreTextDiff;
+const { _lev, _sim } = window.CoreTextSim;
 // ---------- Terminal ----------
 const term = new Terminal({
   fontFamily: '"SF Mono", "JetBrains Mono", Menlo, monospace',
@@ -2695,19 +2696,6 @@ async function insertLinks(sugs){
 document.getElementById('autolinkBtn').onclick = runAutoLink;
 
 // ---------- Link picker — suggest existing similar notes before creating a link (กันโน้ตซ้ำ) ----------
-function _lev(a, b){
-  const m = a.length, n = b.length; if (!m) return n; if (!n) return m;
-  const dp = Array.from({ length: m + 1 }, (_, i) => i);
-  for (let j = 1; j <= n; j++){ let prev = dp[0]; dp[0] = j;
-    for (let i = 1; i <= m; i++){ const tmp = dp[i]; dp[i] = Math.min(dp[i] + 1, dp[i - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = tmp; } }
-  return dp[m];
-}
-function _sim(a, b){
-  a = a.toLowerCase().trim(); b = b.toLowerCase().trim(); if (!a || !b) return 0; if (a === b) return 1;
-  const d = _lev(a, b); const mx = Math.max(a.length, b.length) || 1; let s = 1 - d / mx;
-  if (a.includes(b) || b.includes(a)) s = Math.max(s, 0.72);
-  return s;
-}
 function closeLinkPicker(){ const m = document.getElementById('linkPicker'); if (m) m.remove(); document.removeEventListener('mousedown', _lpOutside, true); }
 function _lpOutside(e){ const m = document.getElementById('linkPicker'); if (m && !m.contains(e.target)) closeLinkPicker(); }
 
