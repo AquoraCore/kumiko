@@ -7,7 +7,11 @@
     "start": "electron .",
     "rebuild": "electron-rebuild -f -w node-pty",
     "dist": "electron-builder --mac dir",
-    "dmg": "electron-builder --mac dmg"
+    "dmg": "electron-builder --mac dmg",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:all": "vitest run && playwright test"
   },
   "author": "",
   "license": "MIT",
@@ -38,9 +42,11 @@
   },
   "devDependencies": {
     "@electron/rebuild": "^3.6.0",
+    "@playwright/test": "^1.48.0",
     "electron": "^33.2.0",
     "electron-builder": "^24.13.3",
-    "esbuild": "^0.28.1"
+    "esbuild": "^0.28.1",
+    "vitest": "^2.1.4"
   },
   "dependencies": {
     "@milkdown/crepe": "^7.21.3",

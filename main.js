@@ -35,6 +35,14 @@ function registerVault(p){
 }
 
 function resolveNotesDir() {
+  // ponytail: TEST-ONLY hook — when this env var is set the app uses a throwaway
+  // temp vault and skips the registry + default seeding entirely. Only ever set
+  // by the Playwright helper, so normal launches are completely unaffected.
+  if (process.env.WASHI_TEST_NOTES_DIR) {
+    const d = process.env.WASHI_TEST_NOTES_DIR;
+    fs.mkdirSync(d, { recursive: true });
+    return d;
+  }
   const reg = readVaults();
   if (reg.current && fs.existsSync(reg.current)) return reg.current;
   let dir;

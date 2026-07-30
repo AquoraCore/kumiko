@@ -1,0 +1,10 @@
+// TODO (later phase): AI / engine flows (runEngine: GLM via `opencode`, Claude).
+//
+// Intentionally NOT covered by these characterization tests because the real AI
+// calls are nondeterministic, depend on the `opencode` / `claude` CLI being
+// installed, and cost money / require a login. They will be added once a stubbed
+// engine (a fake engine:run handler in main.js, gated behind a test env var) is
+// available, so the action-bar / TL;DR / quiz / autolink / chat flows can be
+// asserted deterministically without touching a real provider.
+//
+// Rename this file to `ai.spec.js` when the stubbed engine lands.
