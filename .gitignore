@@ -1,0 +1,19 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+
+# logs
+*.log
+
+# macOS cruft
+.DS_Store
+
+# runtime data the app writes INTO the bundled sample notes dir during dev
+# (keep only the seed .md files under notes/)
+notes/.trash/
+notes/databases/
+notes/.washi/
+notes/.srs.json
+notes/.seeded
