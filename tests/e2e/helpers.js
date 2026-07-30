@@ -34,6 +34,7 @@ async function launchApp(opts) {
   const userData = mkTmp('washi-ud-');
   dirs.push(userData);
   const env = Object.assign({}, process.env);
+  env.WASHI_TEST = '1';
   let notesDir;
 
   if (Array.isArray(opts.vaults) && opts.vaults.length) {

@@ -100,6 +100,7 @@ function createWindow() {
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 14, y: 18 },
     backgroundColor: '#f3ece0',
+    show: !process.env.WASHI_TEST,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
