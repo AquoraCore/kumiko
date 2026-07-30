@@ -1,5 +1,6 @@
 // markdown rendering lives in core/markdown.js (loaded before this file); pull the pure fns from the global.
 const { mdToHtml, _mdInline, _mdEsc } = window.CoreMarkdown;
+const { parseFrontmatter, serializeFrontmatter } = window.CoreFrontmatter;
 // ---------- Terminal ----------
 const term = new Terminal({
   fontFamily: '"SF Mono", "JetBrains Mono", Menlo, monospace',
@@ -682,31 +683,6 @@ let currentNote = null;
 let dirty = false;
 let pendingClaudeContent = null;
 let suppressWatcher = false;   // guard so applying a review's result doesn't re-trigger a review
-
-// ---------- Frontmatter (flat YAML: status + comma-list tags) ----------
-function parseFrontmatter(text){
-  if(!text.startsWith('---')) return { attrs:{}, body:text };
-  const lines=text.split(/\r?\n/);
-  if(lines[0].trim()!=='---') return { attrs:{}, body:text };
-  let end=-1;
-  for(let i=1;i<lines.length;i++){ if(lines[i].trim()==='---'){ end=i; break; } }
-  if(end===-1) return { attrs:{}, body:text };
-  const attrs={};
-  for(let i=1;i<end;i++){
-    const m=lines[i].match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-    if(m){ let v=m[2].trim(); attrs[m[1]]=v; }
-  }
-  const body=lines.slice(end+1).join('\n').replace(/^\n+/,'');
-  return { attrs, body };
-}
-function serializeFrontmatter(attrs, body){
-  const keys=Object.keys(attrs).filter(k=>attrs[k]!==''&&attrs[k]!=null);
-  if(!keys.length) return body;
-  let fm='---\n';
-  for(const k of keys) fm+=k+': '+attrs[k]+'\n';
-  fm+='---\n\n';
-  return fm+body;
-}
 
 function setDirty(v) {
   dirty = v;
