@@ -3,6 +3,7 @@ const { mdToHtml, _mdInline, _mdEsc } = window.CoreMarkdown;
 const { parseFrontmatter, serializeFrontmatter } = window.CoreFrontmatter;
 const { _lcsOps, diffSegments, addLinesFromText, mergeSegments } = window.CoreTextDiff;
 const { _lev, _sim } = window.CoreTextSim;
+const { composeRagPrompt } = window.CoreRag;
 // ---------- Terminal ----------
 const term = new Terminal({
   fontFamily: '"SF Mono", "JetBrains Mono", Menlo, monospace',
@@ -406,6 +407,7 @@ const I18N_EN = {
   'ทดสอบการเชื่อมต่อ': 'Test connection',
   'เชื่อมต่อได้ ✓': 'Connected ✓',
   'เชื่อมต่อไม่ได้': 'Connection failed',
+  'อ้างอิง': 'referenced',
 };
 
 let termFontSize = parseInt(localStorage.getItem('termFontSize') || '13', 10);
@@ -553,6 +555,15 @@ function renderChat(){
   s.messages.forEach((m, i) => {
     const wrap = document.createElement('div'); wrap.className = 'm-wrap ' + m.role;
     if (m.role === 'ai') { const who = document.createElement('div'); who.className = 'who'; who.textContent = s.engine === 'glm' ? 'GLM' : 'Claude'; wrap.appendChild(who); }
+    if (m.role === 'ai' && Array.isArray(m.sources) && m.sources.length > 0) {
+      const row = document.createElement('div');
+      row.className = 'rag-sources';
+      const label = document.createElement('span'); label.className = 'rag-sources-label';
+      label.textContent = '📎 ' + t('อ้างอิง') + ' ' + m.sources.length + ' ' + t('โน้ต');
+      row.appendChild(label);
+      m.sources.forEach((src) => { const pill = document.createElement('span'); pill.className = 'rag-src'; pill.textContent = src; row.appendChild(pill); });
+      wrap.appendChild(row);
+    }
     const b = document.createElement('div'); b.className = 'm ' + m.role;
     const running = s.running && i === s.messages.length - 1 && m.role === 'ai';
     if (running && !m.text) { b.innerHTML = '<span class="chat-typing"><i></i><i></i><i></i></span>'; liveBubble = b; }
@@ -602,10 +613,10 @@ function openSessionMenu(anchor, s){
 }
 
 // pushes a user turn + empty ai turn into the ACTIVE session, marks it running; returns its id (= runId)
-function beginAiTurn(userText){
+function beginAiTurn(userText, sources){
   const s = activeSession();
   s.messages.push({ role: 'user', text: userText });
-  s.messages.push({ role: 'ai', text: '', _acc: '' });
+  s.messages.push({ role: 'ai', text: '', _acc: '', sources: Array.isArray(sources) ? sources : [] });
   s.running = true;
   persistSessions(); renderSessions();
   return s.id;
@@ -2608,15 +2619,20 @@ document.getElementById('termHideBtn').onclick = () => setTermHidden(true);
 // ---------- Chat send + mode toggle ----------
 const chatInput = document.getElementById('chatInput');
 const chatSend = document.getElementById('chatSend');
-function sendChat(){
+async function sendChat(){
   const msg = chatInput.value.trim(); if (!msg) return;
   const s = activeSession();
   if (isRunning(s.id)) return;
   chatInput.value = ''; chatInput.style.height = 'auto';
   const fullPrompt = buildSessionPrompt(s, msg);
-  beginAiTurn(msg);
+  // AMBIENT RAG: always try to retrieve relevant notes; empty context => composeRagPrompt
+  // returns fullPrompt unchanged (normal chat). Never let a retrieval error block the send.
+  let context = '', sources = [];
+  try { const r = await window.api.ragContext(msg); if (r) { context = r.context || ''; sources = r.sources || []; } } catch (_) {}
+  const finalPrompt = composeRagPrompt(fullPrompt, context);
+  beginAiTurn(msg, sources);
   const model = 'zai-coding-plan/' + s.model;
-  window.api.runEngine({ engine: s.engine, model: (s.engine === 'glm' ? model : ''), prompt: fullPrompt, runId: s.id });
+  window.api.runEngine({ engine: s.engine, model: (s.engine === 'glm' ? model : ''), prompt: finalPrompt, runId: s.id });
 }
 // the single #chatSend button reflects the ACTIVE session: SEND when idle, STOP when running.
 function updateSendButton(){

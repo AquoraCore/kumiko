@@ -366,6 +366,11 @@ table.tbl td { padding:7px 10px; border-bottom:1px solid var(--line); color:var(
 .chat-input textarea:focus { border-color: var(--accent); }
 .chat-input #chatSend { width: 36px; height: 36px; border-radius: 50%; background: var(--accent); color: #fff; border: none; font-size: 15px; cursor: pointer; flex: none; }
 
+/* ---- RAG sources chip (referenced-notes metadata above an AI bubble) ---- */
+.rag-sources { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 5px; margin: 0 4px 3px; font-size: 11px; color: var(--muted); }
+.rag-sources-label { white-space: nowrap; }
+.rag-src { display: inline-flex; align-items: center; padding: 1px 7px; border: 0.5px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 10.5px; line-height: 1.5; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ============================================================
    FLAT CUT-PAPER THEME  (replaces all prior glass experiments)
    Sheets of cut paper laid flat: regions divided by colour + a
