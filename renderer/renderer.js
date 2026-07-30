@@ -408,6 +408,8 @@ const I18N_EN = {
   'เชื่อมต่อได้ ✓': 'Connected ✓',
   'เชื่อมต่อไม่ได้': 'Connection failed',
   'อ้างอิง': 'referenced',
+  'ให้ AI อ้างอิงโน้ตของฉันอัตโนมัติ': 'Let AI reference my notes automatically',
+  'ใช้เนื้อหาโน้ตที่เกี่ยวข้องเป็นบริบทให้ AI โดยอัตโนมัติ (เฉพาะ vault นี้)': 'Automatically use relevant note content as context for the AI (this vault only)',
 };
 
 let termFontSize = parseInt(localStorage.getItem('termFontSize') || '13', 10);
@@ -2541,6 +2543,14 @@ async function openAiSettings(){
   apiSection.appendChild(note);
   card.appendChild(apiSection);
 
+  // AMBIENT RAG toggle — per-vault on/off (default ON). Applies to CLI + API chat alike.
+  const ragRow=document.createElement('div'); ragRow.className='ai-rag-row';
+  const ragCk=document.createElement('input'); ragCk.type='checkbox'; ragCk.id='aiRagToggle'; ragCk.checked=vsGet('ragAmbient', true);
+  const ragLab=document.createElement('label'); ragLab.setAttribute('for','aiRagToggle'); ragLab.className='ai-rag-lab'; ragLab.textContent=t('ให้ AI อ้างอิงโน้ตของฉันอัตโนมัติ');
+  ragRow.appendChild(ragCk); ragRow.appendChild(ragLab); card.appendChild(ragRow);
+  const ragHint=document.createElement('p'); ragHint.className='ai-rag-hint'; ragHint.textContent=t('ใช้เนื้อหาโน้ตที่เกี่ยวข้องเป็นบริบทให้ AI โดยอัตโนมัติ (เฉพาะ vault นี้)');
+  card.appendChild(ragHint);
+
   function rebuildModels(){
     const list=AI_MODELS[pSel.value]||[];
     mSel.innerHTML='';
@@ -2573,6 +2583,7 @@ async function openAiSettings(){
     await window.api.aiSetConfig({ mode:selectedMode, provider:pSel.value, model:mSel.value });
     const kv=kInput.value;
     if (kv && kv.length) await window.api.aiSetKey(pSel.value, kv);
+    vsSet('ragAmbient', document.getElementById('aiRagToggle').checked);
     dismiss();
   };
   foot.appendChild(testBtn); foot.appendChild(testRes); foot.appendChild(cancelBtn); foot.appendChild(saveBtn); card.appendChild(foot);
@@ -2625,10 +2636,13 @@ async function sendChat(){
   if (isRunning(s.id)) return;
   chatInput.value = ''; chatInput.style.height = 'auto';
   const fullPrompt = buildSessionPrompt(s, msg);
-  // AMBIENT RAG: always try to retrieve relevant notes; empty context => composeRagPrompt
-  // returns fullPrompt unchanged (normal chat). Never let a retrieval error block the send.
+  // AMBIENT RAG: opt-in per vault (default ON). When off, context '' + sources []
+  // => composeRagPrompt returns fullPrompt unchanged and no chip renders, i.e. the
+  // pre-Phase-5 plain chat. Never let a retrieval error block the send.
   let context = '', sources = [];
-  try { const r = await window.api.ragContext(msg); if (r) { context = r.context || ''; sources = r.sources || []; } } catch (_) {}
+  if (vsGet('ragAmbient', true)) {
+    try { const r = await window.api.ragContext(msg); if (r) { context = r.context || ''; sources = r.sources || []; } } catch (_) {}
+  }
   const finalPrompt = composeRagPrompt(fullPrompt, context);
   beginAiTurn(msg, sources);
   const model = 'zai-coding-plan/' + s.model;
