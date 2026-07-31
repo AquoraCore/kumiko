@@ -4,7 +4,7 @@ const path = require('path');
 const { WebSocketServer } = require('ws');
 const auth = require('./auth');
 const { createStore } = require('./store');
-const { setupConn } = require('./relay');
+const { setupConn, setPersistDir } = require('./relay');
 
 async function startServer(opts = {}) {
   const port = opts.port != null ? opts.port : (Number(process.env.PORT) || 4321);
@@ -13,6 +13,7 @@ async function startServer(opts = {}) {
     console.warn('[server] WARNING: using insecure default AUTH_SECRET — set AUTH_SECRET for anything but local dev.');
   }
   const dataDir = opts.dataDir || path.join(__dirname, '..', '.server-data');
+  setPersistDir(path.join(dataDir, 'rooms'));
   const store = createStore(path.join(dataDir, 'users.json'));
 
   const app = express();

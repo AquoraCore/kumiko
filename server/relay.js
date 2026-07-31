@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const { WebSocketServer } = require('ws');
 const Y = require('yjs');
 const syncProtocol = require('y-protocols/sync');
@@ -9,20 +11,41 @@ const messageSync = 0;
 const messageAwareness = 1;
 const rooms = new Map();   // roomName -> Room
 
+let persistDir = process.env.ROOMS_DIR || null;   // null => in-memory only (7a default)
+function setPersistDir(dir) { persistDir = dir || null; }
+function roomFile(name) { return path.join(persistDir, encodeURIComponent(name) + '.ydoc'); }  // safe filename for arbitrary room names
+
 function sendRaw(conn, msg) { try { if (conn.readyState === 1) conn.send(msg); } catch (_) {} }
 
 class Room {
-  constructor() {
+  constructor(name) {
+    this.name = name;
     this.doc = new Y.Doc();
     this.conns = new Map();   // ws -> Set<awarenessClientID>
     this.awareness = new awarenessProtocol.Awareness(this.doc);
     this.awareness.setLocalState(null);
+    if (persistDir) {
+      try {
+        const f = roomFile(name);
+        if (fs.existsSync(f)) Y.applyUpdate(this.doc, new Uint8Array(fs.readFileSync(f)), 'persist');
+      } catch (_) {}
+    }
+    this._saveT = null;
     this.doc.on('update', (update, origin) => {
       const enc = encoding.createEncoder();
       encoding.writeVarUint(enc, messageSync);
       syncProtocol.writeUpdate(enc, update);
       const msg = encoding.toUint8Array(enc);
       this.conns.forEach((_ids, conn) => { if (conn !== origin) sendRaw(conn, msg); });
+      if (persistDir) {
+        clearTimeout(this._saveT);
+        this._saveT = setTimeout(() => {
+          try {
+            fs.mkdirSync(persistDir, { recursive: true });
+            fs.writeFileSync(roomFile(this.name), Buffer.from(Y.encodeStateAsUpdate(this.doc)));
+          } catch (_) {}
+        }, 400);
+      }
     });
     this.awareness.on('update', ({ added, updated, removed }, origin) => {
       const changed = added.concat(updated, removed);
@@ -40,7 +63,7 @@ class Room {
   }
 }
 
-function getRoom(name) { let r = rooms.get(name); if (!r) { r = new Room(); rooms.set(name, r); } return r; }
+function getRoom(name) { let r = rooms.get(name); if (!r) { r = new Room(name); rooms.set(name, r); } return r; }
 
 function onMessage(conn, room, data) {
   try {
@@ -95,7 +118,7 @@ async function startRelay(opts = {}) {
   return { wss, port: realPort, host, close };
 }
 
-module.exports = { startRelay, setupConn };
+module.exports = { startRelay, setupConn, setPersistDir };
 
 if (require.main === module) {
   startRelay().then(({ host, port }) => console.log('[relay] listening on ws://' + host + ':' + port))
