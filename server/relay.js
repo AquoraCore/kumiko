@@ -95,7 +95,7 @@ async function startRelay(opts = {}) {
   return { wss, port: realPort, host, close };
 }
 
-module.exports = { startRelay };
+module.exports = { startRelay, setupConn };
 
 if (require.main === module) {
   startRelay().then(({ host, port }) => console.log('[relay] listening on ws://' + host + ':' + port))
