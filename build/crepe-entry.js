@@ -7,6 +7,9 @@ import '@milkdown/crepe/theme/frame.css';
 import { $prose } from '@milkdown/utils';
 import { Plugin, PluginKey } from '@milkdown/prose/state';
 import { Decoration, DecorationSet } from '@milkdown/prose/view';
+import { collab, collabServiceCtx } from '@milkdown/plugin-collab';
+import * as Y from 'yjs';
+import { WebsocketProvider } from 'y-websocket';
 
 const foldKey = new PluginKey('md-heading-fold');
 
@@ -83,3 +86,6 @@ const headingFold = $prose(() => new Plugin({
 
 window.Crepe = Crepe;
 window.MDHeadingFold = headingFold;
+window.Y = Y;                                   // the ONE yjs instance for the whole app
+window.WebsocketProvider = WebsocketProvider;   // client provider (connects to the relay)
+window.MilkdownCollab = { collab, collabServiceCtx };   // the Milkdown collab plugin + its service ctx
