@@ -1169,6 +1169,23 @@ async function openAiSettings(){
   semCk.onchange=refreshSemWarn;
   refreshSemWarn();
 
+  // COLLAB toggle — per-vault opt-in (default OFF). Real-time co-editing via a
+  // relay; experimental. Reads the same vsGet('collab') the editor gates on.
+  const collabHeadRow=document.createElement('div'); collabHeadRow.className='ai-rag-row';
+  const collabHead=document.createElement('span'); collabHead.className='ai-rag-lab'; collabHead.textContent=t('การทำงานร่วมกัน (ทดลอง)');
+  collabHeadRow.appendChild(collabHead); card.appendChild(collabHeadRow);
+  const collabRow=document.createElement('div'); collabRow.className='ai-rag-row';
+  const collabCk=document.createElement('input'); collabCk.type='checkbox'; collabCk.id='aiCollabToggle'; collabCk.checked=vsGet('collab', false);
+  const collabLab=document.createElement('label'); collabLab.setAttribute('for','aiCollabToggle'); collabLab.className='ai-rag-lab'; collabLab.textContent=t('เปิดการแก้ไขร่วมกันแบบเรียลไทม์ (collab)');
+  collabRow.appendChild(collabCk); collabRow.appendChild(collabLab); card.appendChild(collabRow);
+  const collabHint=document.createElement('p'); collabHint.className='ai-rag-hint'; collabHint.textContent=t('แก้โน้ตพร้อมกันหลายเครื่องผ่านเซิร์ฟเวอร์ relay — ทดลอง, เฉพาะ vault นี้ (ต้องรีโหลดหลังเปลี่ยน)');
+  card.appendChild(collabHint);
+  // relay URL — app-wide (localStorage). Default matches collabRelayUrl()'s fallback.
+  const relayRow=document.createElement('div'); relayRow.className='ai-rag-row';
+  const relayLab=document.createElement('label'); relayLab.setAttribute('for','aiCollabRelay'); relayLab.className='ai-rag-lab'; relayLab.textContent=t('ที่อยู่ relay');
+  const relayInput=document.createElement('input'); relayInput.type='text'; relayInput.id='aiCollabRelay'; relayInput.className='ai-collab-relay'; relayInput.placeholder='ws://127.0.0.1:1234'; relayInput.value=localStorage.getItem('collabRelay') || 'ws://127.0.0.1:1234';
+  relayRow.appendChild(relayLab); relayRow.appendChild(relayInput); card.appendChild(relayRow);
+
   function rebuildModels(){
     const list=AI_MODELS[pSel.value]||[];
     mSel.innerHTML='';
@@ -1203,6 +1220,10 @@ async function openAiSettings(){
     if (kv && kv.length) await window.api.aiSetKey(pSel.value, kv);
     vsSet('ragAmbient', document.getElementById('aiRagToggle').checked);
     vsSet('ragSemantic', document.getElementById('aiSemanticToggle').checked);
+    const collabOn = document.getElementById('aiCollabToggle').checked;
+    vsSet('collab', collabOn);
+    const relay = (document.getElementById('aiCollabRelay').value || '').trim();
+    if (relay) localStorage.setItem('collabRelay', relay); else localStorage.removeItem('collabRelay');
     dismiss();
   };
   foot.appendChild(testBtn); foot.appendChild(testRes); foot.appendChild(cancelBtn); foot.appendChild(saveBtn); card.appendChild(foot);
