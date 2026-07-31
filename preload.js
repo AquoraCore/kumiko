@@ -1,5 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+contextBridge.exposeInMainWorld('__WASHI_TEST_COLLAB', !!process.env.WASHI_TEST_COLLAB);
+
 contextBridge.exposeInMainWorld('api', {
   startPty: (size) => ipcRenderer.send('pty:start', size),
   ptyInput: (data) => ipcRenderer.send('pty:input', data),

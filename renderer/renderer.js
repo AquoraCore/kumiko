@@ -94,6 +94,7 @@ let crepe = null;
 let applying = false;
 let currentAttrs = {};
 let loadedBody = '';   // Crepe-normalized baseline; a change only counts as dirty if it differs from this
+let collabDoc = null;  // the current note's Y.Doc when collab is active; null otherwise
 // The H0 title (#noteTitle, derived from the filename) replaces the old in-body H1, so drop a
 // leading top-level "# ..." (the first non-empty line + one trailing blank) before it enters the
 // editor. Done here, in loadEditor, so EVERY load path (open / reload / AI-accept / autolink) is
@@ -109,17 +110,33 @@ function stripLeadingH1(md){
   }
   return lines.slice(i).join('\n');
 }
+// Per-vault collab opt-in (default off). The test hook forces it on regardless of state.
+function collabEnabled(){ return !!(window.MilkdownCollab && window.Y) && (vsGet('collab', false) === true || !!(window.__WASHI_TEST_COLLAB)); }
 async function loadEditor(bodyMarkdown){
   applying = true;
   if (crepe) { try { await crepe.destroy(); } catch (_) {} crepe = null; }
+  if (collabDoc) { try { collabDoc.destroy(); } catch (_) {} collabDoc = null; }
   editorHost.innerHTML = '';
+  const collabOn = collabEnabled();
   // Disable Crepe's virtual cursor — it renders invisible inside callout boxes.
   // The real browser caret (visible everywhere) is used instead.
   const feat = (window.Crepe.Feature && window.Crepe.Feature.Cursor) || 'cursor';
-  crepe = new window.Crepe({ root: editorHost, defaultValue: stripLeadingH1(bodyMarkdown), features: { [feat]: false } });
+  crepe = new window.Crepe({ root: editorHost, defaultValue: collabOn ? '' : stripLeadingH1(bodyMarkdown), features: { [feat]: false } });
   if (window.MDHeadingFold) { try { crepe.editor.use(window.MDHeadingFold); } catch (_) {} }
   if (window.MDWikiLink) { try { crepe.editor.use(window.MDWikiLink); } catch (_) {} }
+  if (collabOn) { try { crepe.editor.use(window.MilkdownCollab.collab); } catch (_) {} }
   await crepe.create();
+  if (collabOn) {
+    try {
+      collabDoc = new window.Y.Doc();
+      crepe.editor.action((ctx) => {
+        const svc = ctx.get(window.MilkdownCollab.collabServiceCtx);
+        svc.bindDoc(collabDoc);
+        svc.applyTemplate(stripLeadingH1(bodyMarkdown) || '');
+        svc.connect();
+      });
+    } catch (e) { collabDoc = null; /* fall back: editor still usable */ }
+  }
   loadedBody = crepe.getMarkdown();   // capture AFTER create so Crepe's own normalization isn't seen as an edit
   crepe.on((l) => l.markdownUpdated(() => {
     if (applying) return;

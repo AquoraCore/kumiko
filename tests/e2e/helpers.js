@@ -35,6 +35,7 @@ async function launchApp(opts) {
   dirs.push(userData);
   const env = Object.assign({}, process.env);
   env.WASHI_TEST = '1';
+  if (opts.collab) env.WASHI_TEST_COLLAB = '1';        // phase 6c-2: force the Y.Doc-backed editor on
   if (opts.stubEngine) env.WASHI_TEST_ENGINE = '1';   // chat spec: route engine:run to the canned stub
   if (opts.stubEmbed) env.WASHI_TEST_EMBED = '1';     // semantic spec: deterministic offline embedder (no network)
   let notesDir;
