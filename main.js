@@ -805,6 +805,36 @@ ipcMain.handle('note:backlinks', (e, name) => {
   return out;
 });
 
+// ---- CRDT persistence substrate (Phase 6, step 6b) ---------------------------
+// Stores each note's Yjs update blob as a sidecar under <vault>/.washi/crdt/,
+// mirroring the note's rel path with a .ydoc suffix. Nothing in the running
+// app calls these handlers yet; they exist so the renderer can persist/restore
+// CRDT state once the editor is bound to Yjs. OFFLINE: no network.
+function crdtDir(){ return path.join(NOTES_DIR, '.washi', 'crdt'); }
+function crdtBlobPath(rel){
+  const safe = safeRel(rel);
+  if (!safe) return null;
+  return path.join(crdtDir(), safe + '.ydoc');
+}
+function crdtLoad(rel){
+  try {
+    const p = crdtBlobPath(rel);
+    if (!p || !fs.existsSync(p)) return null;
+    return fs.readFileSync(p);
+  } catch (_) { return null; }
+}
+function crdtSave(rel, data){
+  try {
+    const p = crdtBlobPath(rel);
+    if (!p) return false;
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, Buffer.from(data));
+    return true;
+  } catch (_) { return false; }
+}
+ipcMain.handle('crdt:load', (e, { name } = {}) => crdtLoad(typeof name === 'string' ? name : ''));
+ipcMain.handle('crdt:save', (e, { name, data } = {}) => crdtSave(typeof name === 'string' ? name : '', data));
+
 // ---- Notion-style table view ----
 function parseFMattrs(content){
   const attrs={};

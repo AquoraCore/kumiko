@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('api', {
   deleteNote: (name) => ipcRenderer.invoke('note:delete', name),
   searchNotes: (q) => ipcRenderer.invoke('note:search', q),
   backlinks: (name) => ipcRenderer.invoke('note:backlinks', name),
+  crdtLoad: (name) => ipcRenderer.invoke('crdt:load', { name }),
+  crdtSave: (name, data) => ipcRenderer.invoke('crdt:save', { name, data }),
   noteTable: () => ipcRenderer.invoke('note:table'),
   graphData: () => ipcRenderer.invoke('graph:data'),
 
