@@ -1,6 +1,8 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('__WASHI_TEST_COLLAB', !!process.env.WASHI_TEST_COLLAB);
+// relay URL override (test / future setting); empty string = use the renderer's default
+const collabRelay = process.env.WASHI_COLLAB_RELAY || '';
 
 contextBridge.exposeInMainWorld('api', {
   startPty: (size) => ipcRenderer.send('pty:start', size),
@@ -63,4 +65,6 @@ contextBridge.exposeInMainWorld('api', {
   aiSetKey: (provider, key) => ipcRenderer.invoke('ai:setKey', { provider, key }),
   aiTestConnection: () => ipcRenderer.invoke('ai:testConnection'),
   ragContext: (question) => ipcRenderer.invoke('rag:context', { question }),
+
+  collabRelay,   // phase 6c-3a: point the collab editor at a specific y-websocket relay
 });

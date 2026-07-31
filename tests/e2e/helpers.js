@@ -36,6 +36,7 @@ async function launchApp(opts) {
   const env = Object.assign({}, process.env);
   env.WASHI_TEST = '1';
   if (opts.collab) env.WASHI_TEST_COLLAB = '1';        // phase 6c-2: force the Y.Doc-backed editor on
+  if (typeof opts.collabRelay === 'string') env.WASHI_COLLAB_RELAY = opts.collabRelay;  // phase 6c-3a: point at a specific relay
   if (opts.stubEngine) env.WASHI_TEST_ENGINE = '1';   // chat spec: route engine:run to the canned stub
   if (opts.stubEmbed) env.WASHI_TEST_EMBED = '1';     // semantic spec: deterministic offline embedder (no network)
   let notesDir;
@@ -57,8 +58,12 @@ async function launchApp(opts) {
     // Deliberately do NOT set WASHI_TEST_NOTES_DIR: the registry must drive
     // resolveNotesDir() so a vault switch can take effect after reload.
   } else {
-    notesDir = mkTmp('washi-notes-');
-    dirs.push(notesDir);
+    if (opts.notesDir) {
+      notesDir = opts.notesDir;     // reuse a vault another instance created (share ONE vault across instances)
+    } else {
+      notesDir = mkTmp('washi-notes-');
+      dirs.push(notesDir);          // only the creator owns teardown cleanup
+    }
     if (Array.isArray(opts.notes)) opts.notes.forEach((n) => writeNote(notesDir, n.name, n.content));
     env.WASHI_TEST_NOTES_DIR = notesDir;
   }

@@ -95,6 +95,7 @@ let applying = false;
 let currentAttrs = {};
 let loadedBody = '';   // Crepe-normalized baseline; a change only counts as dirty if it differs from this
 let collabDoc = null;  // the current note's Y.Doc when collab is active; null otherwise
+let collabProvider = null;  // the current note's y-websocket provider when collab is active; null otherwise
 // The H0 title (#noteTitle, derived from the filename) replaces the old in-body H1, so drop a
 // leading top-level "# ..." (the first non-empty line + one trailing blank) before it enters the
 // editor. Done here, in loadEditor, so EVERY load path (open / reload / AI-accept / autolink) is
@@ -112,10 +113,25 @@ function stripLeadingH1(md){
 }
 // Per-vault collab opt-in (default off). The test hook forces it on regardless of state.
 function collabEnabled(){ return !!(window.MilkdownCollab && window.Y) && (vsGet('collab', false) === true || !!(window.__WASHI_TEST_COLLAB)); }
+// Relay URL: env override (test / future setting) → localStorage → default local relay.
+function collabRelayUrl(){ return (window.api && window.api.collabRelay) || localStorage.getItem('collabRelay') || 'ws://127.0.0.1:1234'; }
+// Stable-ish local identity (ephemeral, no auth yet). Color picked deterministically per install
+// (NOT Math.random) so it stays the same across reloads; name defaults to the UI name.
+function collabIdentity(){
+  let id = localStorage.getItem('collabIdentity');
+  if (id) { try { return JSON.parse(id); } catch (_) {} }
+  const palette = ['#E2542A','#3B82C4','#8B5CB8','#2E9E6B','#D98A1E','#C0433F'];
+  const pick = palette[(localStorage.length + 3) % palette.length];
+  const who = { name: (localStorage.getItem('uiName') || 'ฉัน'), color: pick };
+  localStorage.setItem('collabIdentity', JSON.stringify(who));
+  return who;
+}
 async function loadEditor(bodyMarkdown){
   applying = true;
   if (crepe) { try { await crepe.destroy(); } catch (_) {} crepe = null; }
+  if (collabProvider) { try { collabProvider.destroy(); } catch (_) {} collabProvider = null; }  // provider BEFORE doc
   if (collabDoc) { try { collabDoc.destroy(); } catch (_) {} collabDoc = null; }
+  document.body.removeAttribute('data-collab');   // clear the connection status hook (6c-3b will style it)
   editorHost.innerHTML = '';
   const collabOn = collabEnabled();
   // Disable Crepe's virtual cursor — it renders invisible inside callout boxes.
@@ -127,15 +143,47 @@ async function loadEditor(bodyMarkdown){
   if (collabOn) { try { crepe.editor.use(window.MilkdownCollab.collab); } catch (_) {} }
   await crepe.create();
   if (collabOn) {
+    const tpl = stripLeadingH1(bodyMarkdown) || '';
     try {
       collabDoc = new window.Y.Doc();
+      const room = currentNote || 'untitled';
+      try {
+        // WebSocket is native in the renderer — no polyfill needed. A ctor failure
+        // (or an unreachable relay) leaves collabProvider null; the editor keeps working
+        // offline and the provider retries in the background once it exists.
+        collabProvider = new window.WebsocketProvider(collabRelayUrl(), room, collabDoc);
+        const me = collabIdentity();
+        collabProvider.awareness.setLocalStateField('user', { name: me.name, color: me.color });
+        collabProvider.on('status', (e) => { document.body.setAttribute('data-collab', String((e && e.status) || 'unknown')); });
+      } catch (_) { collabProvider = null; }
       crepe.editor.action((ctx) => {
         const svc = ctx.get(window.MilkdownCollab.collabServiceCtx);
         svc.bindDoc(collabDoc);
-        svc.applyTemplate(stripLeadingH1(bodyMarkdown) || '');
+        if (collabProvider) svc.setAwareness(collabProvider.awareness);
         svc.connect();
       });
-    } catch (e) { collabDoc = null; /* fall back: editor still usable */ }
+      // Seed the note's disk content ONLY when the room is empty, so a second client
+      // joining a populated room does NOT re-seed and duplicate the shared text.
+      // applyTemplate's own empty-doc guard makes it a no-op once remote content has
+      // arrived. We defer the seed until the first 'synced' (or a short offline
+      // timeout) so the room state is known before we decide. ponytail: a provider
+      // ctor failure (collabProvider null) seeds now so the editor still shows the note.
+      if (tpl) {
+        const seed = () => { try { crepe.editor.action((ctx) => { ctx.get(window.MilkdownCollab.collabServiceCtx).applyTemplate(tpl); }); } catch (_) {} };
+        if (collabProvider) {
+          let done = false;
+          const run = () => { if (done) return; done = true; seed(); };
+          collabProvider.once('synced', run);            // room state known → seed only if still empty
+          setTimeout(run, 1200);                          // relay unreachable / no sync in 1.2s → seed offline
+        } else {
+          seed();
+        }
+      }
+    } catch (e) {
+      if (collabProvider) { try { collabProvider.destroy(); } catch (_) {} } collabProvider = null;
+      if (collabDoc) { try { collabDoc.destroy(); } catch (_) {} } collabDoc = null;
+      /* fall back: editor still usable */
+    }
   }
   loadedBody = crepe.getMarkdown();   // capture AFTER create so Crepe's own normalization isn't seen as an edit
   crepe.on((l) => l.markdownUpdated(() => {
