@@ -71,4 +71,37 @@ function parseSseDelta(provider, dataStr){
   return '';
 }
 
-module.exports = { buildEngineInvocation, aiConfigView, setConfigKey, buildApiRequest, parseSseDelta };
+// ---- Embedding request builders: PURE, side-effect-free ---------------------
+// Mirrors buildApiRequest/parseSseDelta for the embeddings path. Only zai
+// (OpenAI-compatible) is supported today; anthropic has no native embeddings
+// API, and unknown providers return null = "semantic unsupported". main.js
+// falls back to lexical-only when buildEmbedRequest yields null.
+function buildEmbedRequest(provider, model, inputs, key){
+  if (provider === 'zai') return {
+    url: 'https://api.z.ai/api/paas/v4/embeddings',
+    headers: { 'content-type': 'application/json', 'authorization': 'Bearer ' + key },
+    body: { model, input: inputs },
+  };
+  return null;
+}
+
+// Parse the already-parsed embeddings JSON body into an array of vectors
+// (one per input, in order). Never throws: malformed input -> [].
+// zai/openai-compatible: obj.data is [{ embedding: number[] }] (optionally
+// with an `index` field; sort by it so order matches the batched inputs).
+function parseEmbedResponse(provider, obj){
+  if (provider !== 'zai') return [];
+  if (!obj || typeof obj !== 'object') return [];
+  if (!Array.isArray(obj.data)) return [];
+  const withIndex = obj.data.filter((e) => e && Array.isArray(e.embedding));
+  if (withIndex.some((e) => typeof e.index === 'number')) {
+    withIndex.sort((a, b) => a.index - b.index);
+  }
+  return withIndex.map((e) => e.embedding);
+}
+
+module.exports = {
+  buildEngineInvocation, aiConfigView, setConfigKey,
+  buildApiRequest, parseSseDelta,
+  buildEmbedRequest, parseEmbedResponse,
+};

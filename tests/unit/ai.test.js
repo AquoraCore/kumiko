@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { buildEngineInvocation, aiConfigView, setConfigKey, buildApiRequest, parseSseDelta } from '../../core/ai.js';
+import {
+  buildEngineInvocation, aiConfigView, setConfigKey,
+  buildApiRequest, parseSseDelta,
+  buildEmbedRequest, parseEmbedResponse,
+} from '../../core/ai.js';
 
 describe('buildEngineInvocation', () => {
   it('builds the glm invocation (opencode run -m <model>, prompt on stdin) (happy)', () => {
@@ -148,5 +152,53 @@ describe('parseSseDelta', () => {
   it('returns "" for a zai chunk with no delta.content (edge)', () => {
     const data = JSON.stringify({ choices: [{ delta: {} }] });
     expect(parseSseDelta('zai', data)).toBe('');
+  });
+});
+
+describe('buildEmbedRequest', () => {
+  it('builds the zai (openai-compatible) embeddings request (happy)', () => {
+    const r = buildEmbedRequest('zai', 'embedding-3', ['a', 'b'], 'KEY');
+    expect(r.url.endsWith('/embeddings')).toBe(true);
+    expect(r.headers.authorization).toBe('Bearer KEY');
+    expect(r.headers['content-type']).toBe('application/json');
+    expect(r.body.model).toBe('embedding-3');
+    expect(r.body.input).toEqual(['a', 'b']);
+  });
+
+  it('returns null for anthropic (no native embeddings) (edge)', () => {
+    expect(buildEmbedRequest('anthropic', 'm', ['a'], 'k')).toBeNull();
+  });
+
+  it('returns null for an unknown provider (edge)', () => {
+    expect(buildEmbedRequest('nope', 'm', ['a'], 'k')).toBeNull();
+  });
+});
+
+describe('parseEmbedResponse', () => {
+  it('extracts vectors from a zai/openai body in order (happy)', () => {
+    const obj = { data: [{ index: 0, embedding: [1, 2] }, { index: 1, embedding: [3, 4] }] };
+    expect(parseEmbedResponse('zai', obj)).toEqual([[1, 2], [3, 4]]);
+  });
+
+  it('sorts by index when entries are out of order (happy)', () => {
+    const obj = { data: [{ index: 1, embedding: [3, 4] }, { index: 0, embedding: [1, 2] }] };
+    expect(parseEmbedResponse('zai', obj)).toEqual([[1, 2], [3, 4]]);
+  });
+
+  it('returns [] for a body with no data array (edge)', () => {
+    expect(parseEmbedResponse('zai', {})).toEqual([]);
+  });
+
+  it('returns [] for null (edge)', () => {
+    expect(parseEmbedResponse('zai', null)).toEqual([]);
+  });
+
+  it('skips entries whose embedding is not an array (edge)', () => {
+    const obj = { data: [{ embedding: 'nope' }, { embedding: [9] }] };
+    expect(parseEmbedResponse('zai', obj)).toEqual([[9]]);
+  });
+
+  it('returns [] for anthropic (defensive) (edge)', () => {
+    expect(parseEmbedResponse('anthropic', { data: [{ embedding: [1] }] })).toEqual([]);
   });
 });
