@@ -6,7 +6,7 @@ const pty = require('node-pty');
 const chokidar = require('chokidar');
 const { wikiTargets, linksTo, rewriteLinkTargets } = require('./core/wikilinks');
 const { safeRel, baseName, vaultName } = require('./core/pathutil');
-const { buildEngineInvocation, aiConfigView, setConfigKey, buildApiRequest, parseSseDelta } = require('./core/ai');
+const { buildEngineInvocation, aiConfigView, setConfigKey, buildApiRequest, parseSseDelta, buildEmbedRequest, parseEmbedResponse } = require('./core/ai');
 const CoreRag = require('./core/rag');
 
 // In dev, notes live beside the source. When packaged, __dirname is inside the
@@ -91,11 +91,82 @@ ipcMain.handle('ai:testConnection', async () => {
   }
 });
 
+// ---- Semantic embedding layer (opt-in; degrades to lexical-only when off) ----
+// ponytail: stub embedder is a deterministic 64-dim token-frequency hash; it
+// exercises the cache + fusion PLUMBING offline, NOT real semantic quality
+// (which only a live model provides). Real path batches through Z.ai's
+// OpenAI-compatible embeddings endpoint.
+const EMBED_PROVIDER = 'zai', EMBED_MODEL = 'embedding-3';
+function embHash(s){
+  // FNV-1a 32-bit (unsigned). Cheap, deterministic; detects note content change.
+  var h = 0x811c9dc5;
+  var str = String(s == null ? '' : s);
+  for (var i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return h >>> 0;
+}
+function stubEmbed(text){
+  // Deterministic 64-dim bag-of-tokens vector. Cosine ≈ shared-token similarity.
+  var v = new Array(64).fill(0);
+  var toks = CoreRag.tokenize(String(text == null ? '' : text));
+  for (var i = 0; i < toks.length; i++) v[embHash(toks[i]) % 64] += 1;
+  return v;
+}
+// Returns an array of vectors (one per input, same order), or null on
+// unavailable/error. Never throws. [] for empty input.
+async function embedTexts(texts){
+  if (!Array.isArray(texts) || texts.length === 0) return [];
+  try {
+    if (process.env.WASHI_TEST_EMBED) return texts.map(stubEmbed);
+    const key = getDecryptedKey(EMBED_PROVIDER);
+    if (!key) return null;
+    const out = [];
+    for (let i = 0; i < texts.length; i += 64) {
+      const chunk = texts.slice(i, i + 64);
+      const req = buildEmbedRequest(EMBED_PROVIDER, EMBED_MODEL, chunk, key);
+      if (!req) return null;
+      const res = await fetch(req.url, { method: 'POST', headers: req.headers, body: JSON.stringify(req.body) });
+      if (!res.ok) return null;
+      const vecs = parseEmbedResponse(EMBED_PROVIDER, await res.json());
+      if (vecs.length !== chunk.length) return null;
+      for (let j = 0; j < vecs.length; j++) out.push(vecs[j]);
+    }
+    return out;
+  } catch (_) {
+    return null;
+  }
+}
+// Incremental per-note embedding cache. Shape: { model, notes: { <rel>: { hash, vec } } }.
+// .washi is in IGNORE_DIRS so walkNotes skips it (no scan/watcher loop).
+function embCacheFile(){ return path.join(NOTES_DIR, '.washi', 'embeddings.json'); }
+function readEmbCache(){
+  try {
+    const parsed = JSON.parse(fs.readFileSync(embCacheFile(), 'utf8'));
+    if (!parsed || parsed.model !== EMBED_MODEL) return { model: EMBED_MODEL, notes: {} }; // model change invalidates all
+    const notes = (parsed.notes && typeof parsed.notes === 'object' && !Array.isArray(parsed.notes)) ? parsed.notes : {};
+    return { model: parsed.model, notes };
+  } catch (_) { return { model: EMBED_MODEL, notes: {} }; }
+}
+function writeEmbCache(cache){
+  try {
+    fs.mkdirSync(path.join(NOTES_DIR, '.washi'), { recursive: true });
+    fs.writeFileSync(embCacheFile(), JSON.stringify(cache, null, 2), 'utf8');
+  } catch (_) {}
+}
+// Reads the renderer's per-vault state for the semantic toggle (5d-3 writes it).
+function readVaultStateRagSemantic(){
+  try {
+    const s = JSON.parse(fs.readFileSync(path.join(NOTES_DIR, '.washi', 'state.json'), 'utf8'));
+    return !!(s && s.ragSemantic === true);
+  } catch (_) { return false; }
+}
+
 // ---- RAG: build vault context for a question (reads notes live, pure core ranks them) ----
 // ponytail: SCAN_CAP=300 / FILE_CAP=40000 are known ceilings; very large vaults
 // miss tail notes and very large notes get head-truncated. Upgrade only if a real
-// vault exceeds either. Never throws — the renderer treats '' as "no notes, normal chat".
-function buildVaultContext(question){
+// vault exceeds either. Semantic is OPT-IN (WASHI_TEST_EMBED || state.ragSemantic)
+// and degrades gracefully: off / no key / any error -> byte-for-byte the 5b
+// lexical path. Never throws.
+async function buildVaultContext(question){
   try {
     const SCAN_CAP = 300, FILE_CAP = 40000;
     const rels = walkNotes(NOTES_DIR, '');
@@ -119,9 +190,44 @@ function buildVaultContext(question){
       }
       linkGraph[d.id] = nb;
     }
-    const ranked = CoreRag.rank(question, CoreRag.buildIndex(docs), 6);
-    if (ranked.length === 0) return { context: '', sources: [] };
-    let orderedIds = CoreRag.expandByLinks(ranked.map((r) => r.id), linkGraph, 1);
+    const index = CoreRag.buildIndex(docs);
+    const lex = CoreRag.rank(question, index, 6);
+    const lexIds = lex.map((r) => r.id);
+
+    // ---- Semantic fusion (only when opted in) ----
+    const semOn = !!process.env.WASHI_TEST_EMBED || readVaultStateRagSemantic();
+    let seedIds = lexIds;
+    if (semOn && docs.length) {
+      const cache = readEmbCache();
+      const toEmbed = [];                            // { id, sig, hash } for stale/missing entries
+      for (const d of docs) {
+        const sig = d.name + '\n' + String(d.text).slice(0, 2000);
+        const hash = embHash(sig);
+        const e = cache.notes[d.id];
+        if (!e || e.hash !== hash) toEmbed.push({ id: d.id, sig, hash });
+      }
+      if (toEmbed.length) {
+        const fresh = await embedTexts(toEmbed.map((t) => t.sig));
+        if (fresh) {                                 // null -> semantic unavailable; skip gracefully
+          for (let i = 0; i < toEmbed.length; i++) cache.notes[toEmbed[i].id] = { hash: toEmbed[i].hash, vec: fresh[i] };
+          writeEmbCache(cache);
+        }
+      }
+      const qv = await embedTexts([question]);
+      if (qv && qv[0]) {
+        const docVecs = [];
+        for (const d of docs) {
+          const e = cache.notes[d.id];
+          if (e && Array.isArray(e.vec)) docVecs.push({ id: d.id, vec: e.vec });
+        }
+        const semIds = CoreRag.rankByVector(qv[0], docVecs, 6).map((s) => s.id);
+        seedIds = CoreRag.fuseRRF([lexIds, semIds], { limit: 8 }).map((x) => x.id);
+      }
+      // qv null -> skip semantic; seedIds stays lexIds (graceful fallback).
+    }
+
+    if (seedIds.length === 0) return { context: '', sources: [] };  // checked AFTER fusion
+    let orderedIds = CoreRag.expandByLinks(seedIds, linkGraph, 1);
     if (orderedIds.length > 10) orderedIds = orderedIds.slice(0, 10);
     const byId = {}; for (const d of docs) byId[d.id] = d;
     const entries = [];
@@ -137,7 +243,7 @@ function buildVaultContext(question){
   }
 }
 
-ipcMain.handle('rag:context', (e, { question } = {}) => buildVaultContext(typeof question === 'string' ? question : ''));
+ipcMain.handle('rag:context', async (e, { question } = {}) => await buildVaultContext(typeof question === 'string' ? question : ''));
 
 // ---- Vault registry (per-user JSON: which folder is the active vault) ----
 function vaultsFile(){ return path.join(app.getPath('userData'), 'vaults.json'); }

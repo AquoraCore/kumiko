@@ -36,6 +36,7 @@ async function launchApp(opts) {
   const env = Object.assign({}, process.env);
   env.WASHI_TEST = '1';
   if (opts.stubEngine) env.WASHI_TEST_ENGINE = '1';   // chat spec: route engine:run to the canned stub
+  if (opts.stubEmbed) env.WASHI_TEST_EMBED = '1';     // semantic spec: deterministic offline embedder (no network)
   let notesDir;
 
   if (Array.isArray(opts.vaults) && opts.vaults.length) {
