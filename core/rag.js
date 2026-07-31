@@ -106,6 +106,74 @@
     return results;
   }
 
+  // -------------------------------------------------------------- cosineSim
+  // Cosine similarity of two numeric vectors -> [-1,1]. 0 on any invalid input,
+  // length mismatch, or zero magnitude (divide-by-zero guard). Non-finite -> 0.
+  function cosineSim(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length === 0 || a.length !== b.length) return 0;
+    var dot = 0, na = 0, nb = 0;
+    for (var i = 0; i < a.length; i++) {
+      dot += a[i] * b[i];
+      na += a[i] * a[i];
+      nb += b[i] * b[i];
+    }
+    if (na === 0 || nb === 0) return 0;
+    var sim = dot / (Math.sqrt(na) * Math.sqrt(nb));
+    return isFinite(sim) ? sim : 0;
+  }
+
+  // -------------------------------------------------------------- rankByVector
+  // Rank docs by cosine(queryVec, docVec). Returns [{ id, score }] desc, id asc.
+  // No score>0 filter (cosine has no natural zero); docs with wrong-length vec are omitted.
+  function rankByVector(queryVec, docVecs, k) {
+    if (!Array.isArray(queryVec) || queryVec.length === 0 || !Array.isArray(docVecs) || docVecs.length === 0) return [];
+    if (typeof k !== 'number' || !isFinite(k) || k <= 0) k = 6;
+    var results = [];
+    for (var i = 0; i < docVecs.length; i++) {
+      var dv = docVecs[i];
+      if (!dv || !Array.isArray(dv.vec) || dv.vec.length !== queryVec.length) continue;
+      results.push({ id: String(dv.id), score: cosineSim(queryVec, dv.vec) });
+    }
+    results.sort(function (a, b) {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.id < b.id ? -1 : (a.id > b.id ? 1 : 0);
+    });
+    if (results.length > k) results.length = k;
+    return results;
+  }
+
+  // -------------------------------------------------------------- fuseRRF
+  // Reciprocal Rank Fusion across ranked lists. score(id) = sum over lists of 1/(k+rank).
+  // Items are bare id strings or {id}. null/empty lists and null ids ignored. limit caps output.
+  function fuseRRF(lists, opts) {
+    if (!Array.isArray(lists)) return [];
+    opts = (opts && typeof opts === 'object' && !Array.isArray(opts)) ? opts : {};
+    var k = (typeof opts.k === 'number' && isFinite(opts.k) && opts.k > 0) ? opts.k : 60;
+    var limit = (typeof opts.limit === 'number' && isFinite(opts.limit) && opts.limit > 0) ? opts.limit : 8;
+    var scores = {};
+    for (var li = 0; li < lists.length; li++) {
+      var list = lists[li];
+      if (!Array.isArray(list)) continue;
+      for (var ri = 0; ri < list.length; ri++) {
+        var item = list[ri];
+        var id = (item != null && typeof item === 'object') ? item.id : item;
+        if (id == null) continue;
+        id = String(id);
+        scores[id] = (scores[id] || 0) + 1 / (k + ri);
+      }
+    }
+    var results = [];
+    for (var key in scores) {
+      if (Object.prototype.hasOwnProperty.call(scores, key)) results.push({ id: key, score: scores[key] });
+    }
+    results.sort(function (a, b) {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.id < b.id ? -1 : (a.id > b.id ? 1 : 0);
+    });
+    if (results.length > limit) results.length = limit;
+    return results;
+  }
+
   // -------------------------------------------------------------- expandByLinks
   // seedIds first (deduped, in order), then BFS neighbours within `hops` hops.
   function expandByLinks(seedIds, linkGraph, hops) {
@@ -190,6 +258,9 @@
     tokenize: tokenize,
     buildIndex: buildIndex,
     rank: rank,
+    cosineSim: cosineSim,
+    rankByVector: rankByVector,
+    fuseRRF: fuseRRF,
     expandByLinks: expandByLinks,
     buildContextBlock: buildContextBlock,
     composeRagPrompt: composeRagPrompt
