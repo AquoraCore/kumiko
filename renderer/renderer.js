@@ -410,6 +410,9 @@ const I18N_EN = {
   'อ้างอิง': 'referenced',
   'ให้ AI อ้างอิงโน้ตของฉันอัตโนมัติ': 'Let AI reference my notes automatically',
   'ใช้เนื้อหาโน้ตที่เกี่ยวข้องเป็นบริบทให้ AI โดยอัตโนมัติ (เฉพาะ vault นี้)': 'Automatically use relevant note content as context for the AI (this vault only)',
+  'ใช้การค้นหาเชิงความหมาย (semantic)': 'Use semantic search (embeddings)',
+  'ค้นเจอโน้ตที่เกี่ยวข้องแม้ใช้คำไม่ตรง — ต้องมี API key ของ Z.ai และมีการเรียกเครือข่าย (เฉพาะ vault นี้)': 'Finds related notes even when the words differ — requires a Z.ai API key and makes network calls (this vault only)',
+  'เปิด semantic ไว้แต่ยังไม่มี API key ของ Z.ai — จะยังไม่ทำงานจนกว่าจะใส่คีย์ที่โหมด API key ด้านบน': 'Semantic is on but no Z.ai API key is set — it won\'t work until you add a key under API key mode above',
 };
 
 let termFontSize = parseInt(localStorage.getItem('termFontSize') || '13', 10);
@@ -2551,6 +2554,20 @@ async function openAiSettings(){
   const ragHint=document.createElement('p'); ragHint.className='ai-rag-hint'; ragHint.textContent=t('ใช้เนื้อหาโน้ตที่เกี่ยวข้องเป็นบริบทให้ AI โดยอัตโนมัติ (เฉพาะ vault นี้)');
   card.appendChild(ragHint);
 
+  // SEMANTIC search toggle — per-vault on/off (default OFF). Requires a Z.ai key +
+  // network calls; the main-side pipeline gates on this flag and degrades with no key.
+  const semRow=document.createElement('div'); semRow.className='ai-rag-row';
+  const semCk=document.createElement('input'); semCk.type='checkbox'; semCk.id='aiSemanticToggle'; semCk.checked=vsGet('ragSemantic', false);
+  const semLab=document.createElement('label'); semLab.setAttribute('for','aiSemanticToggle'); semLab.className='ai-rag-lab'; semLab.textContent=t('ใช้การค้นหาเชิงความหมาย (semantic)');
+  semRow.appendChild(semCk); semRow.appendChild(semLab); card.appendChild(semRow);
+  const semHint=document.createElement('p'); semHint.className='ai-rag-hint'; semHint.textContent=t('ค้นเจอโน้ตที่เกี่ยวข้องแม้ใช้คำไม่ตรง — ต้องมี API key ของ Z.ai และมีการเรียกเครือข่าย (เฉพาะ vault นี้)');
+  card.appendChild(semHint);
+  const semWarn=document.createElement('p'); semWarn.id='aiSemanticWarn'; semWarn.className='ai-sem-warn'; semWarn.textContent=t('เปิด semantic ไว้แต่ยังไม่มี API key ของ Z.ai — จะยังไม่ทำงานจนกว่าจะใส่คีย์ที่โหมด API key ด้านบน');
+  card.appendChild(semWarn);
+  function refreshSemWarn(){ semWarn.hidden = !(semCk.checked && cfg.hasKey && !cfg.hasKey.zai); }
+  semCk.onchange=refreshSemWarn;
+  refreshSemWarn();
+
   function rebuildModels(){
     const list=AI_MODELS[pSel.value]||[];
     mSel.innerHTML='';
@@ -2584,6 +2601,7 @@ async function openAiSettings(){
     const kv=kInput.value;
     if (kv && kv.length) await window.api.aiSetKey(pSel.value, kv);
     vsSet('ragAmbient', document.getElementById('aiRagToggle').checked);
+    vsSet('ragSemantic', document.getElementById('aiSemanticToggle').checked);
     dismiss();
   };
   foot.appendChild(testBtn); foot.appendChild(testRes); foot.appendChild(cancelBtn); foot.appendChild(saveBtn); card.appendChild(foot);

@@ -1599,5 +1599,7 @@ table.db tr:hover .db-delrow { opacity: 1; }
 .ai-rag-row #aiRagToggle { width: 15px; height: 15px; cursor: pointer; accent-color: var(--accent); }
 .ai-rag-lab { font: 500 13px var(--font); color: var(--text); cursor: pointer; }
 .ai-rag-hint { margin: 0 0 4px; font-size: 11.5px; line-height: 1.45; color: var(--muted); }
+.ai-rag-row #aiSemanticToggle { width: 15px; height: 15px; cursor: pointer; accent-color: var(--accent); }
+.ai-sem-warn { margin: 6px 0 2px; padding: 7px 11px; font-size: 11.5px; line-height: 1.45; color: var(--wa-gold); background: rgba(189,154,78,.12); border: 1px solid rgba(189,154,78,.35); border-radius: 8px; }
 .ai-settings-foot { gap: 8px; margin-top: 14px; }
 .ai-settings-foot #aiTestBtn:disabled { opacity: .5; cursor: not-allowed; }
