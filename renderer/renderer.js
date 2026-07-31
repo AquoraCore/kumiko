@@ -115,16 +115,14 @@ function stripLeadingH1(md){
 function collabEnabled(){ return !!(window.MilkdownCollab && window.Y) && (vsGet('collab', false) === true || !!(window.__WASHI_TEST_COLLAB)); }
 // Relay URL: env override (test / future setting) → localStorage → default local relay.
 function collabRelayUrl(){ return (window.api && window.api.collabRelay) || localStorage.getItem('collabRelay') || 'ws://127.0.0.1:1234'; }
-// Stable-ish local identity (ephemeral, no auth yet). Color picked deterministically per install
-// (NOT Math.random) so it stays the same across reloads; name defaults to the UI name.
+// Local collab identity (offline first, phase 7b-1). Name + color the user
+// chose in AI Settings; read fresh each call so a Save is picked up with no
+// stale cache. No random pick — the palette default is stable until set.
 function collabIdentity(){
-  let id = localStorage.getItem('collabIdentity');
-  if (id) { try { return JSON.parse(id); } catch (_) {} }
   const palette = ['#E2542A','#3B82C4','#8B5CB8','#2E9E6B','#D98A1E','#C0433F'];
-  const pick = palette[(localStorage.length + 3) % palette.length];
-  const who = { name: (localStorage.getItem('uiName') || 'ฉัน'), color: pick };
-  localStorage.setItem('collabIdentity', JSON.stringify(who));
-  return who;
+  const name = (localStorage.getItem('collabName') || '').trim() || 'ฉัน';
+  const color = localStorage.getItem('collabColor') || palette[0];
+  return { name, color };
 }
 // Render the collab presence bar (status pill + peer avatars). No-op when collab is
 // OFF or the provider is gone — the bar stays hidden so the default editor is unchanged.
@@ -1169,6 +1167,29 @@ async function openAiSettings(){
   semCk.onchange=refreshSemWarn;
   refreshSemWarn();
 
+  // PROFILE section (phase 7b-1) — local name + color for collab identity.
+  // Sits above the collab toggle. Selection is held in selectedColor and only
+  // persisted on Save (Cancel/close changes nothing). Reuses ai-rag-row so it
+  // lines up with the RAG/semantic/collab rows.
+  const COLLAB_PALETTE = ['#E2542A','#3B82C4','#8B5CB8','#2E9E6B','#D98A1E','#C0433F'];
+  let selectedColor = localStorage.getItem('collabColor') || COLLAB_PALETTE[0];
+  const profHeadRow=document.createElement('div'); profHeadRow.className='ai-rag-row';
+  const profHead=document.createElement('span'); profHead.className='ai-rag-lab'; profHead.textContent=t('โปรไฟล์ของฉัน (สำหรับ collab)');
+  profHeadRow.appendChild(profHead); card.appendChild(profHeadRow);
+  const profNameRow=document.createElement('div'); profNameRow.className='ai-rag-row';
+  const profNameLab=document.createElement('label'); profNameLab.setAttribute('for','aiProfileName'); profNameLab.className='ai-rag-lab'; profNameLab.textContent=t('ชื่อที่แสดง');
+  const profNameInput=document.createElement('input'); profNameInput.type='text'; profNameInput.id='aiProfileName'; profNameInput.className='ai-collab-relay'; profNameInput.value=localStorage.getItem('collabName') || ''; profNameInput.placeholder=t('ชื่อที่จะแสดงตอนแก้ร่วมกัน');
+  profNameRow.appendChild(profNameLab); profNameRow.appendChild(profNameInput); card.appendChild(profNameRow);
+  const profColorRow=document.createElement('div'); profColorRow.id='aiProfileColors'; profColorRow.className='profile-sw-row';
+  COLLAB_PALETTE.forEach((c)=>{
+    const sw=document.createElement('span'); sw.className='profile-sw'+(c===selectedColor?' sel':''); sw.style.background=c; sw.dataset.color=c;
+    sw.onclick=()=>{ selectedColor=c; profColorRow.querySelectorAll('.profile-sw').forEach((x)=>x.classList.toggle('sel', x.dataset.color===c)); };
+    profColorRow.appendChild(sw);
+  });
+  card.appendChild(profColorRow);
+  const profHint=document.createElement('p'); profHint.className='ai-rag-hint'; profHint.textContent=t('ใช้แสดงชื่อ/สีของคุณให้คนอื่นเห็นตอนแก้โน้ตร่วมกัน (เก็บในเครื่องนี้)');
+  card.appendChild(profHint);
+
   // COLLAB toggle — per-vault opt-in (default OFF). Real-time co-editing via a
   // relay; experimental. Reads the same vsGet('collab') the editor gates on.
   const collabHeadRow=document.createElement('div'); collabHeadRow.className='ai-rag-row';
@@ -1224,6 +1245,11 @@ async function openAiSettings(){
     vsSet('collab', collabOn);
     const relay = (document.getElementById('aiCollabRelay').value || '').trim();
     if (relay) localStorage.setItem('collabRelay', relay); else localStorage.removeItem('collabRelay');
+    // PROFILE (phase 7b-1) — local collab name + color. Empty name clears the
+    // stored value (collabIdentity falls back to 'ฉัน'); color is always set.
+    const pname = (document.getElementById('aiProfileName').value || '').trim();
+    if (pname) localStorage.setItem('collabName', pname); else localStorage.removeItem('collabName');
+    localStorage.setItem('collabColor', selectedColor);
     dismiss();
   };
   foot.appendChild(testBtn); foot.appendChild(testRes); foot.appendChild(cancelBtn); foot.appendChild(saveBtn); card.appendChild(foot);

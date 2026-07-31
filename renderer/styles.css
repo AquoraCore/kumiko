@@ -1634,6 +1634,14 @@ table.db tr:hover .db-delrow { opacity: 1; }
 .collab-av:first-child { margin-left: 0; }
 .collab-av.more { background: var(--line-strong); color: var(--text); }
 
+/* ============================================================
+   COLLAB PROFILE swatches (phase 7b-1) — name + color picker
+   ============================================================ */
+.profile-sw-row { display: flex; align-items: center; gap: 8px; margin: 8px 0 2px; }
+.profile-sw { width: 20px; height: 20px; border-radius: 50%; display: inline-block;
+  cursor: pointer; box-shadow: 0 0 0 1px var(--line-strong); }
+.profile-sw.sel { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--text); }
+
 /* remote cursors (y-prosemirror injects border-color / background-color inline from awareness user.color) */
 .ProseMirror-yjs-cursor { position: relative; margin-left: -1px; margin-right: -1px;
   border-left: 1px solid; border-right: 1px solid; border-color: inherit;
