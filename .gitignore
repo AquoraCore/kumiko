@@ -17,3 +17,6 @@ notes/databases/
 notes/.washi/
 notes/.srs.json
 notes/.seeded
+
+# local self-hosted backend data (users, persisted rooms)
+.server-data/
