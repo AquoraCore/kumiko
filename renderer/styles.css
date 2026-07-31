@@ -1603,3 +1603,38 @@ table.db tr:hover .db-delrow { opacity: 1; }
 .ai-sem-warn { margin: 6px 0 2px; padding: 7px 11px; font-size: 11.5px; line-height: 1.45; color: var(--wa-gold); background: rgba(189,154,78,.12); border: 1px solid rgba(189,154,78,.35); border-radius: 8px; }
 .ai-settings-foot { gap: 8px; margin-top: 14px; }
 .ai-settings-foot #aiTestBtn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ============================================================
+   COLLAB PRESENCE BAR (phase 6c-3b) — only visible while collab active
+   ============================================================ */
+#collabBar { display: inline-flex; align-items: center; gap: 8px; margin-right: 4px; }
+#collabBar[hidden] { display: none; }
+.collab-status { display: inline-flex; align-items: center; gap: 5px; font: 11px var(--font);
+  color: var(--muted); padding: 2px 9px 2px 8px; border-radius: 20px; background: var(--hover);
+  white-space: nowrap; line-height: 1.4; }
+.collab-status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto; }
+.collab-status.ok { color: #2e7d52; background: rgba(46,158,107,.14); }
+.collab-status.ok::before { background: #34a06b; }
+.collab-status.sync { color: #946312; background: rgba(217,138,30,.16); }
+.collab-status.sync::before { background: #d98a1e; }
+.collab-status.off { color: var(--muted); background: var(--hover); }
+.collab-status.off::before { background: var(--muted); opacity: .55; }
+:root[data-theme="dark"] .collab-status.ok { color: #7fc99a; background: rgba(52,160,107,.2); }
+:root[data-theme="dark"] .collab-status.ok::before { background: #4eb87e; }
+:root[data-theme="dark"] .collab-status.sync { color: #e3b566; background: rgba(217,138,30,.22); }
+:root[data-theme="dark"] .collab-status.sync::before { background: #e0a94a; }
+:root[data-theme="dark"] .collab-status.off::before { background: #9a978e; }
+
+.collab-presence { display: inline-flex; align-items: center; padding-left: 2px; }
+.collab-av { width: 22px; height: 22px; border-radius: 50%; display: inline-grid; place-items: center;
+  font: 600 11px var(--font); color: #1f1d18; box-shadow: 0 0 0 2px var(--surface);
+  margin-left: -8px; }
+.collab-av:first-child { margin-left: 0; }
+.collab-av.more { background: var(--line-strong); color: var(--text); }
+
+/* remote cursors (y-prosemirror injects border-color / background-color inline from awareness user.color) */
+.ProseMirror-yjs-cursor { position: relative; margin-left: -1px; margin-right: -1px;
+  border-left: 1px solid; border-right: 1px solid; border-color: inherit;
+  word-break: normal; pointer-events: none; }
+.ProseMirror-yjs-cursor > div { position: absolute; top: -1.4em; left: -1px; font-size: 11px;
+  color: #fff; padding: 0 4px; border-radius: 4px 4px 4px 0; white-space: nowrap; user-select: none; }

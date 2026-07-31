@@ -126,12 +126,66 @@ function collabIdentity(){
   localStorage.setItem('collabIdentity', JSON.stringify(who));
   return who;
 }
+// Render the collab presence bar (status pill + peer avatars). No-op when collab is
+// OFF or the provider is gone — the bar stays hidden so the default editor is unchanged.
+function renderCollabBar(){
+  const bar = document.getElementById('collabBar');
+  if (!bar) return;
+  const statusEl = document.getElementById('collabStatus');
+  const presenceEl = document.getElementById('collabPresence');
+  if (!collabProvider || !collabProvider.awareness) {
+    bar.hidden = true;
+    if (statusEl) { statusEl.className = 'collab-status'; statusEl.textContent = ''; }
+    if (presenceEl) presenceEl.innerHTML = '';
+    return;
+  }
+  bar.hidden = false;
+  // STATUS PILL — derived from the provider's wsconnected / synced flags.
+  let tone = 'off', label = t('ออฟไลน์');
+  try {
+    const connected = !!collabProvider.wsconnected;
+    const connecting = !!collabProvider.wsconnecting;
+    const synced = !!collabProvider.synced;
+    if (connected && synced) { tone = 'ok'; label = t('ซิงก์แล้ว'); }
+    else if (connecting || (connected && !synced)) { tone = 'sync'; label = t('กำลังซิงก์…'); }
+  } catch (_) {}
+  if (statusEl) { statusEl.className = 'collab-status ' + tone; statusEl.textContent = label; }
+  // PRESENCE AVATARS — one circle per peer (excluding ourselves), capped at 5.
+  if (presenceEl) {
+    const me = collabProvider.awareness.clientID;
+    const peers = [];
+    try {
+      collabProvider.awareness.getStates().forEach((st, cid) => {
+        if (cid === me) return;
+        if (st && st.user && st.user.name) peers.push(st.user);
+      });
+    } catch (_) {}
+    const shown = peers.slice(0, 5);
+    const rest = peers.length - shown.length;
+    presenceEl.innerHTML = '';
+    shown.forEach((u) => {
+      const av = document.createElement('span');
+      av.className = 'collab-av';
+      av.style.background = u.color || '#888';
+      av.title = u.name;
+      av.textContent = String(u.name).charAt(0).toUpperCase();
+      presenceEl.appendChild(av);
+    });
+    if (rest > 0) {
+      const more = document.createElement('span');
+      more.className = 'collab-av more';
+      more.textContent = '+' + rest;
+      presenceEl.appendChild(more);
+    }
+  }
+}
 async function loadEditor(bodyMarkdown){
   applying = true;
   if (crepe) { try { await crepe.destroy(); } catch (_) {} crepe = null; }
   if (collabProvider) { try { collabProvider.destroy(); } catch (_) {} collabProvider = null; }  // provider BEFORE doc
   if (collabDoc) { try { collabDoc.destroy(); } catch (_) {} collabDoc = null; }
   document.body.removeAttribute('data-collab');   // clear the connection status hook (6c-3b will style it)
+  renderCollabBar();                              // hide the presence bar until a provider is wired (covers !collabOn + teardown)
   editorHost.innerHTML = '';
   const collabOn = collabEnabled();
   // Disable Crepe's virtual cursor — it renders invisible inside callout boxes.
@@ -154,7 +208,13 @@ async function loadEditor(bodyMarkdown){
         collabProvider = new window.WebsocketProvider(collabRelayUrl(), room, collabDoc);
         const me = collabIdentity();
         collabProvider.awareness.setLocalStateField('user', { name: me.name, color: me.color });
-        collabProvider.on('status', (e) => { document.body.setAttribute('data-collab', String((e && e.status) || 'unknown')); });
+        collabProvider.on('status', (e) => {
+          document.body.setAttribute('data-collab', String((e && e.status) || 'unknown'));
+          renderCollabBar();
+        });
+        collabProvider.on('sync', () => renderCollabBar());
+        collabProvider.awareness.on('change', () => renderCollabBar());
+        renderCollabBar();
       } catch (_) { collabProvider = null; }
       crepe.editor.action((ctx) => {
         const svc = ctx.get(window.MilkdownCollab.collabServiceCtx);
