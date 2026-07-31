@@ -115,6 +115,8 @@ function stripLeadingH1(md){
 function collabEnabled(){ return !!(window.MilkdownCollab && window.Y) && (vsGet('collab', false) === true || !!(window.__WASHI_TEST_COLLAB)); }
 // Relay URL: env override (test / future setting) → localStorage → default local relay.
 function collabRelayUrl(){ return (window.api && window.api.collabRelay) || localStorage.getItem('collabRelay') || 'ws://127.0.0.1:1234'; }
+// Auth HTTP base derived from the collab relay WS url (same server, http scheme).
+function collabHttpBase(){ return collabRelayUrl().replace(/^wss:/,'https:').replace(/^ws:/,'http:').replace(/\/+$/,''); }
 // Local collab identity (offline first, phase 7b-1). Name + color the user
 // chose in AI Settings; read fresh each call so a Save is picked up with no
 // stale cache. No random pick — the palette default is stable until set.
@@ -203,7 +205,12 @@ async function loadEditor(bodyMarkdown){
         // WebSocket is native in the renderer — no polyfill needed. A ctor failure
         // (or an unreachable relay) leaves collabProvider null; the editor keeps working
         // offline and the provider retries in the background once it exists.
-        collabProvider = new window.WebsocketProvider(collabRelayUrl(), room, collabDoc);
+        // Phase 7b-4: if the user logged in, pass the auth token as a WS query param so
+        // JWT-gated relays accept the connection. Standalone relays ignore the extra param.
+        let __authTok = null;
+        try { const a = await window.api.authGetToken(); if (a && a.token) __authTok = a.token; } catch (_) {}
+        collabProvider = new window.WebsocketProvider(collabRelayUrl(), room, collabDoc,
+          __authTok ? { params: { token: __authTok } } : undefined);
         const me = collabIdentity();
         collabProvider.awareness.setLocalStateField('user', { name: me.name, color: me.color });
         collabProvider.on('status', (e) => {
@@ -1206,6 +1213,58 @@ async function openAiSettings(){
   const relayLab=document.createElement('label'); relayLab.setAttribute('for','aiCollabRelay'); relayLab.className='ai-rag-lab'; relayLab.textContent=t('ที่อยู่ relay');
   const relayInput=document.createElement('input'); relayInput.type='text'; relayInput.id='aiCollabRelay'; relayInput.className='ai-collab-relay'; relayInput.placeholder='ws://127.0.0.1:1234'; relayInput.value=localStorage.getItem('collabRelay') || 'ws://127.0.0.1:1234';
   relayRow.appendChild(relayLab); relayRow.appendChild(relayInput); card.appendChild(relayRow);
+
+  // ACCOUNT area (phase 7b-4) — OPTIONAL login/signup for authed collab relays.
+  // Token stored encrypted via safeStorage; only used to build the WS url. Login is
+  // OPTIONAL — without it the app works fully offline (provider connects with no token).
+  const authHeadRow=document.createElement('div'); authHeadRow.className='ai-rag-row';
+  const authHead=document.createElement('span'); authHead.className='ai-rag-lab'; authHead.textContent=t('บัญชี (ไม่บังคับ — สำหรับ collab)');
+  authHeadRow.appendChild(authHead); card.appendChild(authHeadRow);
+  const authArea=document.createElement('div'); authArea.id='aiAuthArea'; authArea.className='ai-auth-area';
+  const authInner=document.createElement('div'); authInner.id='aiAuthInner';
+  const authMsg=document.createElement('p'); authMsg.id='aiAuthMsg'; authMsg.className='ai-auth-msg';
+  authArea.appendChild(authInner); authArea.appendChild(authMsg); card.appendChild(authArea);
+  function setAuthMsg(s){ authMsg.textContent = s || ''; }
+  async function renderAuthArea(){
+    let acc = null;
+    try { acc = await window.api.authGetToken(); } catch (_) { acc = null; }
+    authInner.innerHTML='';
+    if (acc && acc.token) {
+      const line=document.createElement('span'); line.className='ai-auth-line'; line.textContent=t('เข้าสู่ระบบเป็น') + ' ' + acc.email;
+      const lo=document.createElement('button'); lo.type='button'; lo.id='aiAuthLogout'; lo.className='ghost'; lo.textContent=t('ออกจากระบบ');
+      lo.onclick=async ()=>{ await window.api.authClear(); setAuthMsg(''); await renderAuthArea(); };
+      authInner.appendChild(line); authInner.appendChild(lo);
+    } else {
+      const wrap=document.createElement('div'); wrap.className='ai-auth-fields';
+      const em=document.createElement('input'); em.type='text'; em.id='aiAuthEmail'; em.placeholder='email'; em.autocomplete='off'; em.spellcheck=false;
+      const pw=document.createElement('input'); pw.type='password'; pw.id='aiAuthPass'; pw.placeholder='password'; pw.autocomplete='off';
+      const li=document.createElement('button'); li.type='button'; li.id='aiAuthLogin'; li.className='ghost'; li.textContent=t('เข้าสู่ระบบ');
+      const su=document.createElement('button'); su.type='button'; su.id='aiAuthSignup'; su.className='ghost'; su.textContent=t('สมัครสมาชิก');
+      const doAuth=async (kind)=>{
+        const emailVal=em.value.trim(); const passVal=pw.value;
+        setAuthMsg('');
+        try {
+          const res=await fetch(collabHttpBase()+'/auth/'+kind, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ email: emailVal, password: passVal }) });
+          if (res.ok) {
+            const data=await res.json();
+            await window.api.authSetToken(data.token, data.email);
+            await renderAuthArea();
+            setAuthMsg(t('สำเร็จ'));
+          } else {
+            let err=''; try { err=(await res.json()).error || ''; } catch (_) {}
+            setAuthMsg(err || t('ล้มเหลว'));
+          }
+        } catch (_) {
+          setAuthMsg(t('เชื่อมต่อ backend ไม่ได้'));
+        }
+      };
+      li.onclick=()=>doAuth('login');
+      su.onclick=()=>doAuth('signup');
+      wrap.appendChild(em); wrap.appendChild(pw); wrap.appendChild(li); wrap.appendChild(su);
+      authInner.appendChild(wrap);
+    }
+  }
+  renderAuthArea();
 
   function rebuildModels(){
     const list=AI_MODELS[pSel.value]||[];

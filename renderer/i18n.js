@@ -370,4 +370,27 @@ const I18N_EN = {
   'ใช้การค้นหาเชิงความหมาย (semantic)': 'Use semantic search (embeddings)',
   'ค้นเจอโน้ตที่เกี่ยวข้องแม้ใช้คำไม่ตรง — ต้องมี API key ของ Z.ai และมีการเรียกเครือข่าย (เฉพาะ vault นี้)': 'Finds related notes even when the words differ — requires a Z.ai API key and makes network calls (this vault only)',
   'เปิด semantic ไว้แต่ยังไม่มี API key ของ Z.ai — จะยังไม่ทำงานจนกว่าจะใส่คีย์ที่โหมด API key ด้านบน': 'Semantic is on but no Z.ai API key is set — it won\'t work until you add a key under API key mode above',
+  // ---- collab presence bar (phase 6c-3b) ----
+  'ซิงก์แล้ว': 'Synced',
+  'กำลังซิงก์…': 'Syncing…',
+  'ออฟไลน์': 'Offline',
+  // ---- collab settings toggle (phase 6c-4) ----
+  'การทำงานร่วมกัน (ทดลอง)': 'Collaboration (experimental)',
+  'เปิดการแก้ไขร่วมกันแบบเรียลไทม์ (collab)': 'Enable real-time collaborative editing (collab)',
+  'แก้โน้ตพร้อมกันหลายเครื่องผ่านเซิร์ฟเวอร์ relay — ทดลอง, เฉพาะ vault นี้ (ต้องรีโหลดหลังเปลี่ยน)': 'Edit a note from several devices at once via a relay server — experimental, this vault only (reload after changing)',
+  'ที่อยู่ relay': 'Relay address',
+  // ---- collab profile (phase 7b-1) ----
+  'โปรไฟล์ของฉัน (สำหรับ collab)': 'My profile (for collab)',
+  'ชื่อที่แสดง': 'Display name',
+  'ชื่อที่จะแสดงตอนแก้ร่วมกัน': 'Name shown when editing together',
+  'ใช้แสดงชื่อ/สีของคุณให้คนอื่นเห็นตอนแก้โน้ตร่วมกัน (เก็บในเครื่องนี้)': 'Shows your name and color to others when co-editing (stored on this device)',
+  // ---- collab account (phase 7b-4) — optional login for authed relays ----
+  'บัญชี (ไม่บังคับ — สำหรับ collab)': 'Account (optional — for collab)',
+  'เข้าสู่ระบบ': 'Log in',
+  'สมัครสมาชิก': 'Sign up',
+  'ออกจากระบบ': 'Log out',
+  'เข้าสู่ระบบเป็น': 'Logged in as',
+  'สำเร็จ': 'Success',
+  'ล้มเหลว': 'Failed',
+  'เชื่อมต่อ backend ไม่ได้': 'Cannot reach backend',
 };

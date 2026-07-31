@@ -67,4 +67,8 @@ contextBridge.exposeInMainWorld('api', {
   ragContext: (question) => ipcRenderer.invoke('rag:context', { question }),
 
   collabRelay,   // phase 6c-3a: point the collab editor at a specific y-websocket relay
+
+  authSetToken: (token, email) => ipcRenderer.invoke('auth:setToken', { token, email }),   // phase 7b-4: encrypted collab auth token
+  authGetToken: () => ipcRenderer.invoke('auth:getToken'),
+  authClear: () => ipcRenderer.invoke('auth:clear'),
 });

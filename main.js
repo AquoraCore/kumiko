@@ -91,6 +91,27 @@ ipcMain.handle('ai:testConnection', async () => {
   }
 });
 
+// ---- Collab auth token (phase 7b-4) -----------------------------------------
+// OPTIONAL: stored only if the user logs in for authed collab. Reuses the same
+// encKey/decKey as AI keys (safeStorage / encrypted at rest). Unlike AI keys,
+// getToken returns the PLAINTEXT token — the renderer needs it to build the WS
+// url (?token=…). It is still encrypted on disk; it just crosses the boundary.
+function authFile(){ return path.join(app.getPath('userData'), 'auth.json'); }
+ipcMain.handle('auth:setToken', (e, { token, email } = {}) => {
+  try {
+    fs.writeFileSync(authFile(), JSON.stringify({ email: email || '', enc: token ? encKey(String(token)) : '' }));
+    return true;
+  } catch (_) { return false; }
+});
+ipcMain.handle('auth:getToken', () => {
+  try {
+    const a = JSON.parse(fs.readFileSync(authFile(), 'utf8'));
+    const token = a.enc ? decKey(a.enc) : '';
+    return token ? { email: a.email || '', token } : null;
+  } catch (_) { return null; }
+});
+ipcMain.handle('auth:clear', () => { try { fs.unlinkSync(authFile()); } catch (_) {} return true; });
+
 // ---- Semantic embedding layer (opt-in; degrades to lexical-only when off) ----
 // ponytail: stub embedder is a deterministic 64-dim token-frequency hash; it
 // exercises the cache + fusion PLUMBING offline, NOT real semantic quality
