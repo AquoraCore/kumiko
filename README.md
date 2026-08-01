@@ -1,8 +1,8 @@
-# Washi (和紙)
+# Kumiko (組子)
 
 A local-first, washi-paper-themed study-notes desktop app — Obsidian × Notion with an embedded AI assistant.
 
-Washi is a desktop note-taking app for macOS that keeps everything as plain Markdown files on your own machine. It pairs a Notion-style WYSIWYG editor with Obsidian-style vaults, wikilinks, and a knowledge graph, and bolts on an optional AI assistant that runs through CLIs you already have on your PATH. The flat, cut-paper aesthetic is inspired by traditional Japanese washi paper, in both light and dark themes.
+Kumiko is a desktop note-taking app for macOS that keeps everything as plain Markdown files on your own machine. It pairs a Notion-style WYSIWYG editor with Obsidian-style vaults, wikilinks, and a knowledge graph, and bolts on an optional AI assistant that runs through CLIs you already have on your PATH. The flat, cut-paper aesthetic is inspired by traditional Japanese washi paper, in both light and dark themes.
 
 ## Screenshots
 
@@ -24,7 +24,7 @@ Washi is a desktop note-taking app for macOS that keeps everything as plain Mark
 - **Trash** — deleted items go to a Trash folder with restore support.
 - **Multiple vaults** — Obsidian-style, with fully isolated per-vault data.
 - **Thai / English UI toggle.**
-- **Washi design** — a flat, cut-paper aesthetic with light and dark themes.
+- **Kumiko design** — a flat, cut-paper aesthetic with light and dark themes.
 
 ## Requirements
 
@@ -36,11 +36,11 @@ Washi is a desktop note-taking app for macOS that keeps everything as plain Mark
 ## Install (prebuilt)
 
 1. Download the `.dmg` from the **Releases** page.
-2. Drag **Washi** into **Applications**.
+2. Drag **Kumiko** into **Applications**.
 
-> **macOS Gatekeeper note.** Washi is not yet code-signed or notarized. On first launch, macOS may say it "can't be opened." To get past it:
+> **macOS Gatekeeper note.** Kumiko is not yet code-signed or notarized. On first launch, macOS may say it "can't be opened." To get past it:
 > - Right-click the app → **Open** (once), and confirm; **or**
-> - Run `xattr -cr /Applications/Washi.app` in Terminal.
+  > - Run `xattr -cr /Applications/Kumiko.app` in Terminal.
 
 ## Build from source
 

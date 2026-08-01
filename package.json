@@ -19,7 +19,7 @@
   "license": "MIT",
   "build": {
     "appId": "com.pasawit.studynotes",
-    "productName": "Washi",
+    "productName": "Kumiko",
     "files": [
       "main.js",
       "preload.js",

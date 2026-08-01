@@ -350,7 +350,7 @@ function createWindow() {
     height: st.height || 800,
     x: st.x != null ? st.x : undefined,
     y: st.y != null ? st.y : undefined,
-    title: 'Washi',
+    title: 'Kumiko',
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 14, y: 18 },
     backgroundColor: '#f3ece0',
