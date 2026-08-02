@@ -5,6 +5,16 @@ const { WebSocketServer } = require('ws');
 const auth = require('./auth');
 const { createStore } = require('./store');
 const { setupConn, setPersistDir } = require('./relay');
+const { createNoteStore } = require('./notestore');
+
+function requireAuth(req, res, next) {
+  const h = req.headers.authorization || '';
+  const token = h.startsWith('Bearer ') ? h.slice(7) : null;
+  const p = auth.verifyToken(token, req.app.locals.secret);
+  if (!p) return res.status(401).json({ error: 'unauthorized' });
+  req.user = p;
+  next();
+}
 
 async function startServer(opts = {}) {
   const port = opts.port != null ? opts.port : (Number(process.env.PORT) || 4321);
@@ -17,6 +27,8 @@ async function startServer(opts = {}) {
   const store = createStore(path.join(dataDir, 'users.json'));
 
   const app = express();
+  app.locals.secret = secret;
+  app.locals.notes = createNoteStore(path.join(dataDir, 'vaults'));
   app.use(express.json());
 
   // POST /auth/signup {email,password}
@@ -50,6 +62,33 @@ async function startServer(opts = {}) {
     const payload = auth.verifyToken(token, secret);
     if (!payload) return res.status(401).json({ error: 'unauthorized' });
     return res.json({ email: payload.email, sub: payload.sub });
+  });
+
+  const notes = app.locals.notes;
+
+  // GET /notes -> { notes: [...] }  (authed)
+  app.get('/notes', requireAuth, (req, res) => {
+    res.json({ notes: notes.list(req.user.sub) });
+  });
+
+  // GET /notes/content?name=<n> -> { name, content }
+  app.get('/notes/content', requireAuth, (req, res) => {
+    const name = req.query.name;
+    res.json({ name, content: notes.read(req.user.sub, name) });
+  });
+
+  // PUT /notes { name, content } -> { ok }
+  app.put('/notes', requireAuth, (req, res) => {
+    const { name, content } = req.body || {};
+    const ok = notes.write(req.user.sub, name, String(content || ''));
+    return res.status(ok ? 200 : 400).json({ ok });
+  });
+
+  // DELETE /notes?name=<n> -> { ok }
+  app.delete('/notes', requireAuth, (req, res) => {
+    const name = req.query.name;
+    const ok = notes.remove(req.user.sub, name);
+    res.json({ ok });
   });
 
   const server = http.createServer(app);
