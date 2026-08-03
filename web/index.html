@@ -4,13 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Kumiko</title>
-  <link rel="stylesheet" href="/renderer/styles.css" />
-  <link rel="stylesheet" href="/renderer/vendor/crepe.bundle.css" />
+  <link rel="stylesheet" href="/renderer/styles.css?v=__ASSET_VERSION__" />
+  <link rel="stylesheet" href="/renderer/vendor/crepe.bundle.css?v=__ASSET_VERSION__" />
   <style>
     #webLogin {
       position: fixed; inset: 0; z-index: 9999; display: none;
       align-items: center; justify-content: center;
-      background: rgba(0,0,0,.5);
+      background-color: var(--side);
+      background-image: var(--wa-shippo);
       font: 14px/1.4 system-ui, sans-serif;
     }
     #webLogin .card {
@@ -24,6 +25,12 @@
     #webLogin .primary { background: #2563eb; color: #fff; }
     #webLogin .secondary { background: #e5e7eb; color: #111; }
     #webLoginMsg { min-height: 1em; color: #dc2626; font-size: 12px; }
+    #sidebar { position: relative; }
+    #webAppIcon {
+      position: absolute; top: 8px; left: 11px;
+      width: 22px; height: 22px; border-radius: 6px;
+      z-index: 10; object-fit: cover; -webkit-user-select: none; user-select: none; pointer-events: none;
+    }
   </style>
 </head>
 <body>
@@ -101,6 +108,7 @@
   <div id="app">
     <!-- SIDEBAR: note list + search -->
     <aside id="sidebar">
+      <img id="webAppIcon" src="/web/kumiko-icon.png" alt="Kumiko" />
       <div class="sb-head">
         <span class="sb-title" data-i18n="โน้ต">โน้ต</span>
         <button id="newFolderBtn" class="ghost" title="กล่องใหม่" data-i18n-title="กล่องใหม่"></button>
@@ -258,28 +266,28 @@
     <div id="settingsOverlay" hidden></div>
     <div id="diffOverlay" hidden></div>
   </div>
-  <script src="/web/api-web.js"></script>
-  <script src="/web/boot.js"></script>
-  <script src="/renderer/vendor/crepe.bundle.js"></script>
+  <script src="/web/api-web.js?v=__ASSET_VERSION__"></script>
+  <script src="/web/boot.js?v=__ASSET_VERSION__"></script>
+  <script src="/renderer/vendor/crepe.bundle.js?v=__ASSET_VERSION__"></script>
   <!-- ponytail: xterm.js + addon-fit.js live in node_modules which is NOT served
        (constraint: do not expose node_modules). Paths below expect them vendored
        into renderer/vendor/. Until then renderer.js will crash at `new Terminal()`.
        See report. -->
-  <script src="/renderer/vendor/xterm.js"></script>
-  <script src="/renderer/vendor/addon-fit.js"></script>
-  <script src="/renderer/vendor/pdfjs/pdf.min.js"></script>
-  <script src="/core/markdown.js"></script>
-  <script src="/core/frontmatter.js"></script>
-  <script src="/core/textdiff.js"></script>
-  <script src="/core/textsim.js"></script>
-  <script src="/core/rag.js"></script>
-  <script src="/renderer/i18n.js"></script>
-  <script src="/renderer/state.js"></script>
-  <script src="/renderer/db.js"></script>
-  <script src="/renderer/dashboard.js"></script>
-  <script src="/renderer/pdf.js"></script>
-  <script src="/renderer/chat.js"></script>
-  <script src="/renderer/sidebar.js"></script>
-  <script src="/renderer/renderer.js"></script>
+  <script src="/renderer/vendor/xterm.js?v=__ASSET_VERSION__"></script>
+  <script src="/renderer/vendor/addon-fit.js?v=__ASSET_VERSION__"></script>
+  <script src="/renderer/vendor/pdfjs/pdf.min.js?v=__ASSET_VERSION__"></script>
+  <script src="/core/markdown.js?v=__ASSET_VERSION__"></script>
+  <script src="/core/frontmatter.js?v=__ASSET_VERSION__"></script>
+  <script src="/core/textdiff.js?v=__ASSET_VERSION__"></script>
+  <script src="/core/textsim.js?v=__ASSET_VERSION__"></script>
+  <script src="/core/rag.js?v=__ASSET_VERSION__"></script>
+  <script src="/renderer/i18n.js?v=__ASSET_VERSION__"></script>
+  <script src="/renderer/state.js?v=__ASSET_VERSION__"></script>
+  <script src="/renderer/db.js?v=__ASSET_VERSION__"></script>
+  <script src="/renderer/dashboard.js?v=__ASSET_VERSION__"></script>
+  <script src="/renderer/pdf.js?v=__ASSET_VERSION__"></script>
+  <script src="/renderer/chat.js?v=__ASSET_VERSION__"></script>
+  <script src="/renderer/sidebar.js?v=__ASSET_VERSION__"></script>
+  <script src="/renderer/renderer.js?v=__ASSET_VERSION__"></script>
 </body>
 </html>

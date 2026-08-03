@@ -97,7 +97,20 @@ function createWebApi(opts) {
     // Derive folders from note rel-paths (web has no filesystem to walk): each
     // path prefix becomes a folder, e.g. 'a/b/c.md' -> 'a' and 'a/b'. Matches
     // Electron note:list which returns notes/folders/pdfs/companions.
-    return { notes, folders: _foldersOf(notes), pdfs, companions: {} };
+    let folders = _foldersOf(notes);
+    // Merge in EMPTY server folders (ones no note lives under). /folders walks
+    // the userDir on the server so empty dirs surface here too. Guarded so a
+    // missing/failed fetch never breaks note listing.
+    try {
+      const fr = await req('GET', '/folders');
+      if (fr && fr.ok) {
+        const fd = await fr.json();
+        const set = new Set(folders);
+        for (const f of ((fd && fd.folders) || [])) set.add(f);
+        folders = Array.from(set).sort();
+      }
+    } catch (_) {}
+    return { notes, folders, pdfs, companions: {} };
   }
 
   async function readNote(name) {
@@ -152,12 +165,16 @@ function createWebApi(opts) {
 
   async function createNote(name) {
     try {
-      const res = await req('PUT', '/notes', { name, content: '' });
-      if (!res || !res.ok) return { ok: false };
+      let final = String(name || '').trim();
+      if (!final) return { error: 'invalid' };
+      if (!final.toLowerCase().endsWith('.md')) final += '.md';
+      const res = await req('PUT', '/notes', { name: final, content: '' });
+      if (!res || !res.ok) return { error: 'failed' };
       const data = await res.json();
-      return { ok: !!(data && data.ok) };
+      if (data && data.ok) return { name: final };
+      return { error: 'failed' };
     } catch (_) {
-      return { ok: false };
+      return { error: 'failed' };
     }
   }
 
@@ -533,13 +550,80 @@ function createWebApi(opts) {
     return db;
   }
 
-  function folderCreate() { return Promise.resolve({ ok: true }); }
-  function folderDelete() { return Promise.resolve({ ok: true }); }
-  function folderRename() { return Promise.resolve({ ok: true }); }
-  function trashList() { return Promise.resolve([]); }
-  function trashRestore() { return Promise.resolve({ ok: true }); }
-  function trashDeleteForever() { return Promise.resolve({ ok: true }); }
-  function trashEmpty() { return Promise.resolve({ ok: true }); }
+  // ---- folders + trash (per-user cloud storage; mirrors Electron folder:* + trash:*) ----
+  // Never throws — network failure returns {error:'failed'}/{ok:false} so the renderer keeps working.
+  async function folderCreate(name) {
+    try {
+      const res = await req('POST', '/folders', { path: name });
+      if (!res) return { error: 'failed' };
+      const data = await res.json();
+      if (data && data.name) return data;
+      return data || { error: 'failed' };
+    } catch (_) {
+      return { error: 'failed' };
+    }
+  }
+
+  async function folderDelete(name) {
+    try {
+      const res = await req('DELETE', '/folders?path=' + encodeURIComponent(name));
+      if (!res) return { ok: false };
+      return await res.json();
+    } catch (_) {
+      return { ok: false };
+    }
+  }
+
+  async function folderRename(from, to) {
+    try {
+      const res = await req('POST', '/folders/rename', { from, to });
+      if (!res) return { error: 'failed' };
+      return await res.json();
+    } catch (_) {
+      return { error: 'failed' };
+    }
+  }
+
+  async function trashList() {
+    try {
+      const res = await req('GET', '/trash');
+      if (!res || !res.ok) return [];
+      const data = await res.json();
+      return (data && data.trash) || [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  async function trashRestore(id) {
+    try {
+      const res = await req('POST', '/trash/restore', { id });
+      if (!res) return { error: 'failed' };
+      return await res.json();
+    } catch (_) {
+      return { error: 'failed' };
+    }
+  }
+
+  async function trashDeleteForever(id) {
+    try {
+      const res = await req('POST', '/trash/deleteForever', { id });
+      if (!res) return { ok: false };
+      return await res.json();
+    } catch (_) {
+      return { ok: false };
+    }
+  }
+
+  async function trashEmpty() {
+    try {
+      const res = await req('POST', '/trash/empty');
+      if (!res) return { ok: false };
+      return await res.json();
+    } catch (_) {
+      return { ok: false };
+    }
+  }
   function crdtLoad() { return Promise.resolve(null); }
   function crdtSave() { return Promise.resolve(true); }
 

@@ -23,6 +23,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "core/**/*",
       "renderer/**/*",
       "node_modules/**/*",
       "notes/*.md",

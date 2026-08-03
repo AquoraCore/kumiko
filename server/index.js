@@ -1,5 +1,6 @@
 const express = require('express');
 const http = require('http');
+const fs = require('fs');
 const path = require('path');
 const { WebSocketServer } = require('ws');
 const { OAuth2Client } = require('google-auth-library');
@@ -9,6 +10,7 @@ const { setupConn, setPersistDir } = require('./relay');
 const { createNoteStore } = require('./notestore');
 const { createDbStore } = require('./dbstore');
 const { createPdfStore } = require('./pdfstore');
+const { createVaultFs } = require('./vaultfs');
 const aiCore = require('../core/ai');
 
 // Real verifier: validates a Google ID token against this app's client id.
@@ -48,6 +50,13 @@ async function startServer(opts = {}) {
   const googleClientId = opts.googleClientId || process.env.GOOGLE_CLIENT_ID || '';
   const verifyGoogleToken = opts.verifyGoogleToken || makeGoogleVerifier(googleClientId);
 
+  // Email allowlist (lock a deployment to specific accounts). Empty/unset ->
+  // allow everyone so existing tests + local dev stay open. Matching is
+  // case-insensitive via auth.normalizeEmail on both sides.
+  const allowRaw = opts.allowedEmails || process.env.ALLOWED_EMAILS || '';
+  const allowedEmails = allowRaw.split(',').map((s) => auth.normalizeEmail(s.trim())).filter(Boolean);
+  const emailAllowed = (email) => allowedEmails.length === 0 || allowedEmails.includes(auth.normalizeEmail(email || ''));
+
   // Managed AI config (Phase 7e): the server holds the LLM key, the browser never
   // sees it. Empty provider/key = "not configured" -> /ai/chat returns 501.
   const aiProvider = opts.aiProvider || process.env.MANAGED_AI_PROVIDER || '';
@@ -84,20 +93,35 @@ async function startServer(opts = {}) {
 
   // Static serving for the web entry (Phase 7d-3a). Only the dirs the page needs.
   const ROOT = path.join(__dirname, '..');
-  app.use('/core', express.static(path.join(ROOT, 'core')));
-  app.use('/renderer', express.static(path.join(ROOT, 'renderer')));
-  app.use('/web', express.static(path.join(ROOT, 'web')));
+  // Per-boot asset version: changes every server restart (every deploy) so the
+  // ?v= query on each local asset URL flips and browsers fetch fresh; stable
+  // between restarts so unchanged assets stay cached at the edge.
+  const assetVersion = Date.now().toString(36);
+  // ponytail: single-user app — prefer correctness over caching. Cloudflare
+  // honors origin Cache-Control, so set no-cache on every static + the HTML
+  // so deploys always serve fresh. Drop these headers to re-enable edge caching.
+  const noCache = (res) => { res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate'); };
+  app.use('/core', express.static(path.join(ROOT, 'core'), { setHeaders: noCache }));
+  app.use('/renderer', express.static(path.join(ROOT, 'renderer'), { setHeaders: noCache }));
+  app.use('/web', express.static(path.join(ROOT, 'web'), { setHeaders: noCache }));
   // /vendor -> renderer/vendor : the shared renderer/pdf.js sets pdf.js workerSrc to the RELATIVE
   // 'vendor/pdfjs/pdf.worker.min.js', which on the web (root page) resolves to /vendor/... — serve it here so
   // the PDF viewer's worker loads. (Desktop is unaffected; it resolves the same relative path off file://.)
-  app.use('/vendor', express.static(path.join(ROOT, 'renderer', 'vendor')));
-  app.get('/', (req, res) => res.sendFile(path.join(ROOT, 'web', 'index.html')));
+  app.use('/vendor', express.static(path.join(ROOT, 'renderer', 'vendor'), { setHeaders: noCache }));
+  app.get('/', (req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    let html;
+    try { html = fs.readFileSync(path.join(ROOT, 'web', 'index.html'), 'utf8'); }
+    catch (_) { return res.status(500).end(); }
+    res.type('html').send(html.replace(/__ASSET_VERSION__/g, assetVersion));
+  });
 
   // POST /auth/signup {email,password}
   app.post('/auth/signup', (req, res) => {
     const { email, password } = req.body || {};
     const v = auth.validateCredentials(email, password);
     if (!v.ok) return res.status(400).json({ error: v.error });
+    if (!emailAllowed(email)) return res.status(403).json({ error: 'not_allowed' });
     const em = auth.normalizeEmail(email);
     if (store.findByEmail(em)) return res.status(409).json({ error: 'email exists' });
     const user = store.create({ email: em, passwordHash: auth.hashPassword(password) });
@@ -108,6 +132,7 @@ async function startServer(opts = {}) {
   // POST /auth/login {email,password}
   app.post('/auth/login', (req, res) => {
     const { email, password } = req.body || {};
+    if (!emailAllowed(email)) return res.status(403).json({ error: 'not_allowed' });
     const em = auth.normalizeEmail(email);
     const user = store.findByEmail(em);
     if (!user || !auth.verifyPassword(password, user.passwordHash)) {
@@ -133,6 +158,7 @@ async function startServer(opts = {}) {
     const { idToken } = req.body || {};
     const g = await verifyGoogleToken(idToken);
     if (!g || !g.email) return res.status(401).json({ error: 'invalid google token' });
+    if (!emailAllowed(g.email)) return res.status(403).json({ error: 'not_allowed' });
     const user = store.findOrCreateGoogle(g.sub, auth.normalizeEmail(g.email));
     const token = auth.signToken({ sub: user.id, email: user.email }, secret);
     return res.json({ token, email: user.email });
@@ -147,6 +173,7 @@ async function startServer(opts = {}) {
   const notes = app.locals.notes;
   const dbs = app.locals.dbs;
   const pdfs = createPdfStore(path.join(dataDir, 'vaults'));
+  const vfs = createVaultFs(path.join(dataDir, 'vaults'));
 
   // GET /notes -> { notes: [...] }  (authed)
   app.get('/notes', requireAuth, (req, res) => {
@@ -166,11 +193,55 @@ async function startServer(opts = {}) {
     return res.status(ok ? 200 : 400).json({ ok });
   });
 
-  // DELETE /notes?name=<n> -> { ok }
+  // DELETE /notes?name=<n> -> { ok }. SOFT delete: moves the note into .trash
+  // (vfs.noteTrash) instead of hard-unlinking, mirroring Electron note:delete.
   app.delete('/notes', requireAuth, (req, res) => {
-    const name = req.query.name;
-    const ok = notes.remove(req.user.sub, name);
-    res.json({ ok });
+    const r = vfs.noteTrash(req.user.sub, req.query.name);
+    res.json({ ok: r.ok === true });
+  });
+
+  // ---- folders (per-user cloud folder storage; mirrors Electron folder:*) ----
+  // GET /folders -> { folders: [...] } (all dirs under userDir, including empty)
+  app.get('/folders', requireAuth, (req, res) => {
+    res.json({ folders: vfs.folderList(req.user.sub) });
+  });
+
+  // POST /folders { path } -> { name } | { error }
+  app.post('/folders', requireAuth, (req, res) => {
+    const r = vfs.folderCreate(req.user.sub, (req.body || {}).path);
+    res.status(r.error ? 400 : 200).json(r);
+  });
+
+  // POST /folders/rename { from, to } -> { name } | { error }
+  app.post('/folders/rename', requireAuth, (req, res) => {
+    const r = vfs.folderRename(req.user.sub, (req.body || {}).from, (req.body || {}).to);
+    res.status(r.error ? 400 : 200).json(r);
+  });
+
+  // DELETE /folders?path=<rel> -> { ok:true } | { error }  (moves folder to trash)
+  app.delete('/folders', requireAuth, (req, res) => {
+    res.json(vfs.folderDelete(req.user.sub, req.query.path));
+  });
+
+  // ---- trash (per-user cloud trash; mirrors Electron trash:*) ----
+  // GET /trash -> { trash: [...] } sorted by deletedAt DESC
+  app.get('/trash', requireAuth, (req, res) => {
+    res.json({ trash: vfs.trashList(req.user.sub) });
+  });
+
+  // POST /trash/restore { id } -> { ok:true } | { error }
+  app.post('/trash/restore', requireAuth, (req, res) => {
+    res.json(vfs.trashRestore(req.user.sub, (req.body || {}).id));
+  });
+
+  // POST /trash/deleteForever { id } -> { ok:true }
+  app.post('/trash/deleteForever', requireAuth, (req, res) => {
+    res.json(vfs.trashDeleteForever(req.user.sub, (req.body || {}).id));
+  });
+
+  // POST /trash/empty -> { ok:true }
+  app.post('/trash/empty', requireAuth, (req, res) => {
+    res.json(vfs.trashEmpty(req.user.sub));
   });
 
   // ---- databases (per-user cloud DB storage, JSON blobs) ----

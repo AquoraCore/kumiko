@@ -37,4 +37,30 @@ describe('web static /vendor (pdf.js worker route)', () => {
       await s.close();
     }
   });
+
+  it('static assets are served with a no-cache header', async () => {
+    const s = await startServer({ port: 0, dataDir: tmpDir() });
+    const base = 'http://127.0.0.1:' + s.port;
+    try {
+      const r = await fetch(base + '/web/boot.js');
+      expect(r.status).toBe(200);
+      expect((r.headers.get('cache-control') || '')).toMatch(/no-store|no-cache/);
+      await r.arrayBuffer(); // drain body so s.close() doesn't hang
+    } finally {
+      await s.close();
+    }
+  });
+
+  it('HAPPY: index.html asset URLs are version-stamped', async () => {
+    const s = await startServer({ port: 0, dataDir: tmpDir() });
+    const base = 'http://127.0.0.1:' + s.port;
+    try {
+      const r = await fetch(base + '/');
+      const html = await r.text();
+      expect(html).toMatch(/\/web\/api-web\.js\?v=/); // version query present
+      expect(html).not.toContain('__ASSET_VERSION__'); // placeholder replaced
+    } finally {
+      await s.close();
+    }
+  });
 });

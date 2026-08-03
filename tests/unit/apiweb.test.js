@@ -82,6 +82,63 @@ describe('web api shim', () => {
     }
   }, 20000);
 
+  it('HAPPY: createNote returns { name } and the note shows up in listNotes', async () => {
+    const s = await startServer({ port: 0, dataDir: tmpDir() });
+    const base = 'http://127.0.0.1:' + s.port;
+
+    let r = await fetch(base + '/auth/signup', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'create@b.com', password: 'password123' }),
+    });
+    expect(r.status).toBe(200);
+    let token = (await r.json()).token;
+
+    const api = createWebApi({ baseUrl: base, getToken: () => token });
+    try {
+      const res = await api.createNote('NewNote.md');
+      expect(res.name).toBe('NewNote.md');
+      expect((await api.listNotes()).notes).toContain('NewNote.md');
+    } finally {
+      await s.close();
+    }
+  }, 20000);
+
+  it('HAPPY: createNote appends .md when missing', async () => {
+    const s = await startServer({ port: 0, dataDir: tmpDir() });
+    const base = 'http://127.0.0.1:' + s.port;
+
+    let r = await fetch(base + '/auth/signup', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'noext@b.com', password: 'password123' }),
+    });
+    expect(r.status).toBe(200);
+    let token = (await r.json()).token;
+
+    const api = createWebApi({ baseUrl: base, getToken: () => token });
+    try {
+      const res = await api.createNote('NoExt');
+      expect(res.name).toBe('NoExt.md');
+      expect((await api.listNotes()).notes).toContain('NoExt.md');
+    } finally {
+      await s.close();
+    }
+  }, 20000);
+
+  it('EDGE: createNote against a logged-out backend returns { error } (no throw)', async () => {
+    const s = await startServer({ port: 0, dataDir: tmpDir() });
+    const base = 'http://127.0.0.1:' + s.port;
+    const api = createWebApi({ baseUrl: base, getToken: () => null });
+    try {
+      const res = await api.createNote('Nope.md');
+      expect(res.error).toBe('failed');
+      expect((await api.listNotes()).notes).not.toContain('Nope.md');
+    } finally {
+      await s.close();
+    }
+  }, 20000);
+
   it('logged-out shim degrades safely (no token)', async () => {
     const s = await startServer({ port: 0, dataDir: tmpDir() });
     const base = 'http://127.0.0.1:' + s.port;
