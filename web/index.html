@@ -6,29 +6,6 @@
   <title>Kumiko</title>
   <link rel="stylesheet" href="/renderer/styles.css" />
   <link rel="stylesheet" href="/renderer/vendor/crepe.bundle.css" />
-  <script src="/web/api-web.js"></script>
-  <script src="/web/boot.js"></script>
-  <script src="/renderer/vendor/crepe.bundle.js"></script>
-  <!-- ponytail: xterm.js + addon-fit.js live in node_modules which is NOT served
-       (constraint: do not expose node_modules). Paths below expect them vendored
-       into renderer/vendor/. Until then renderer.js will crash at `new Terminal()`.
-       See report. -->
-  <script src="/renderer/vendor/xterm.js"></script>
-  <script src="/renderer/vendor/addon-fit.js"></script>
-  <script src="/renderer/vendor/pdfjs/pdf.min.js"></script>
-  <script src="/core/markdown.js"></script>
-  <script src="/core/frontmatter.js"></script>
-  <script src="/core/textdiff.js"></script>
-  <script src="/core/textsim.js"></script>
-  <script src="/core/rag.js"></script>
-  <script src="/renderer/i18n.js"></script>
-  <script src="/renderer/state.js"></script>
-  <script src="/renderer/db.js"></script>
-  <script src="/renderer/dashboard.js"></script>
-  <script src="/renderer/pdf.js"></script>
-  <script src="/renderer/chat.js"></script>
-  <script src="/renderer/sidebar.js"></script>
-  <script src="/renderer/renderer.js"></script>
   <style>
     #webLogin {
       position: fixed; inset: 0; z-index: 9999; display: none;
@@ -281,5 +258,28 @@
     <div id="settingsOverlay" hidden></div>
     <div id="diffOverlay" hidden></div>
   </div>
+  <script src="/web/api-web.js"></script>
+  <script src="/web/boot.js"></script>
+  <script src="/renderer/vendor/crepe.bundle.js"></script>
+  <!-- ponytail: xterm.js + addon-fit.js live in node_modules which is NOT served
+       (constraint: do not expose node_modules). Paths below expect them vendored
+       into renderer/vendor/. Until then renderer.js will crash at `new Terminal()`.
+       See report. -->
+  <script src="/renderer/vendor/xterm.js"></script>
+  <script src="/renderer/vendor/addon-fit.js"></script>
+  <script src="/renderer/vendor/pdfjs/pdf.min.js"></script>
+  <script src="/core/markdown.js"></script>
+  <script src="/core/frontmatter.js"></script>
+  <script src="/core/textdiff.js"></script>
+  <script src="/core/textsim.js"></script>
+  <script src="/core/rag.js"></script>
+  <script src="/renderer/i18n.js"></script>
+  <script src="/renderer/state.js"></script>
+  <script src="/renderer/db.js"></script>
+  <script src="/renderer/dashboard.js"></script>
+  <script src="/renderer/pdf.js"></script>
+  <script src="/renderer/chat.js"></script>
+  <script src="/renderer/sidebar.js"></script>
+  <script src="/renderer/renderer.js"></script>
 </body>
 </html>
