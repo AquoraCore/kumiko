@@ -10,6 +10,33 @@ function tmpDir() {
   return path.join(os.tmpdir(), 'washi-apiweb-' + counter + '-' + process.pid);
 }
 
+// In-memory localStorage-shaped store for Node tests (the shim's default opts.store path).
+function memStore() {
+  const m = {};
+  return {
+    getItem: (k) => (k in m ? m[k] : null),
+    setItem: (k, v) => { m[k] = String(v); },
+    removeItem: (k) => { delete m[k]; },
+  };
+}
+
+// Every function name preload.js exposes on window.api (56). collabRelay is a string
+// value, not a function, so it's intentionally absent. This list IS the contract:
+// if the shim is missing any of these, the renderer hits an undefined call at boot.
+const PRELOAD_METHODS = [
+  'startPty', 'ptyInput', 'ptyResize', 'ptyRestart', 'onPtyData',
+  'listNotes', 'openNote', 'readNote', 'importPdf', 'readPdf', 'renamePdf', 'readAnnots', 'saveAnnots',
+  'saveNote', 'onNoteChanged', 'createNote', 'renameNote', 'deleteNote', 'searchNotes', 'backlinks',
+  'crdtLoad', 'crdtSave', 'noteTable', 'graphData',
+  'dbList', 'dbRead', 'dbSave', 'dbCreate', 'dbDelete', 'folderCreate', 'folderRename', 'folderDelete',
+  'trashList', 'trashRestore', 'trashDeleteForever', 'trashEmpty',
+  'runEngine', 'stopEngine', 'onEngineOutput', 'onEngineDone',
+  'openExternal',
+  'vaultList', 'vaultSwitch', 'vaultOpen', 'vaultCreate', 'vaultConfigRead', 'vaultConfigWrite', 'vaultStateReadSync',
+  'aiGetConfig', 'aiSetConfig', 'aiSetKey', 'aiTestConnection', 'ragContext',
+  'authSetToken', 'authGetToken', 'authClear',
+];
+
 describe('web api shim', () => {
   it('the web api shim round-trips notes through the cloud backend', async () => {
     const s = await startServer({ port: 0, dataDir: tmpDir() });
@@ -70,4 +97,59 @@ describe('web api shim', () => {
       await s.close();
     }
   }, 20000);
+
+  it('exposes every method the Electron preload defines (contract parity, 56)', () => {
+    const api = createWebApi({ baseUrl: 'http://x', getToken: () => null, store: memStore() });
+    const missing = PRELOAD_METHODS.filter((n) => typeof api[n] !== 'function');
+    expect(missing).toEqual([]);
+    expect(PRELOAD_METHODS.length).toBe(56);
+  });
+
+  it('vault state round-trips through store (vaultStateReadSync is sync)', async () => {
+    const api = createWebApi({ baseUrl: 'http://x', getToken: () => null, store: memStore() });
+    expect(api.vaultStateReadSync()).toBe(null); // empty store
+    await api.vaultConfigWrite('state', { a: 1 });
+    // sync read sees the mirror written by vaultConfigWrite('state', ...)
+    expect(api.vaultStateReadSync()).toEqual({ a: 1 });
+    // arbitrary config key round-trips via the async read
+    await api.vaultConfigWrite('x', { b: 2 });
+    expect(await api.vaultConfigRead('x')).toEqual({ b: 2 });
+    expect(await api.vaultConfigRead('missing')).toBe(null);
+  });
+
+  it('auth token round-trips through store', async () => {
+    const api = createWebApi({ baseUrl: 'http://x', getToken: () => null, store: memStore() });
+    expect(await api.authGetToken()).toBe(null);
+    await api.authSetToken('T', 'e@e.com');
+    expect(await api.authGetToken()).toEqual({ token: 'T', email: 'e@e.com' });
+    await api.authClear();
+    expect(await api.authGetToken()).toBe(null);
+  });
+
+  it('derived stubs and pty no-ops never throw', async () => {
+    const api = createWebApi({ baseUrl: 'http://x', getToken: () => null, store: memStore() });
+    await Promise.all([
+      api.searchNotes('x'), api.dbList(), api.trashList(), api.graphData(),
+      api.ragContext('x'), api.aiGetConfig(),
+    ]);
+    expect(api.vaultStateReadSync()).toBe(null);
+    api.startPty();
+    api.ptyInput('x');
+    api.ptyResize({ cols: 80, rows: 24 });
+    api.ptyRestart({ cols: 80, rows: 24 });
+    api.onPtyData(() => {});
+  });
+
+  it('runEngine emits the web AI-not-available notice via the output callback', async () => {
+    const api = createWebApi({ baseUrl: 'http://x', getToken: () => null, store: memStore() });
+    let out = null;
+    let done = null;
+    api.onEngineOutput((m) => { out = m; });
+    api.onEngineDone((m) => { done = m; });
+    await api.runEngine({ runId: 'r' });
+    expect(out).not.toBe(null);
+    expect(out.runId).toBe('r');
+    expect(String(out.data)).toContain('not available');
+    expect(done).toEqual({ runId: 'r', code: 0 });
+  });
 });
