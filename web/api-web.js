@@ -22,6 +22,11 @@ function _baseName(rel){
   return b.replace(/\.md$/i, '');
 }
 
+// Dual-mode CoreRag: browser global (set by core/rag.js UMD wrapper) else Node require.
+// ponytail: null when neither is available (e.g. sandbox without the script) —
+// ragContext then degrades to the empty fallback instead of throwing.
+const _rag = (typeof window !== 'undefined' && window.CoreRag) ? window.CoreRag : (typeof require !== 'undefined' ? require('../core/rag') : null);
+
 function createWebApi(opts) {
   opts = opts || {};
   let baseUrl = opts.baseUrl || 'http://127.0.0.1:4321';
@@ -222,7 +227,45 @@ function createWebApi(opts) {
   }
   function aiSetKey() { return Promise.resolve(true); }
   function aiTestConnection() { return Promise.resolve({ ok: false, error: 'not available on web' }); }
-  function ragContext() { return Promise.resolve({ context: '', sources: [] }); }
+  // LEXICAL BM25 + wikilink expansion over the user's cloud notes — mirrors
+  // main.js buildVaultContext (lexical-only branch). ponytail: no embeddings
+  // on web for now; semantic fusion is a future step. Never throws — {} on error.
+  async function ragContext(question) {
+    try {
+      if (!_rag) return { context: '', sources: [] };
+      const all = await _allNotes();
+      const docs = all.map((n) => ({ id: n.name, name: _baseName(n.name), text: n.content || '' }));
+      if (!docs.length) return { context: '', sources: [] };
+      // wikilink graph: id -> [neighbour ids], resolved by basename (first-wins), like buildVaultContext
+      const baseToId = {};
+      for (const d of docs) { const k = d.name.toLowerCase(); if (!(k in baseToId)) baseToId[k] = d.id; }
+      const linkGraph = {};
+      for (const d of docs) {
+        const nb = [], seen = {};
+        for (const raw of _wikiTargets(d.text)) {
+          const tid = baseToId[String(raw).toLowerCase().trim()];
+          if (tid && tid !== d.id && !seen[tid]) { seen[tid] = 1; nb.push(tid); }
+        }
+        linkGraph[d.id] = nb;
+      }
+      const index = _rag.buildIndex(docs);
+      const ranked = _rag.rank(question, index, 6);
+      if (!ranked.length) return { context: '', sources: [] };
+      let orderedIds = _rag.expandByLinks(ranked.map((r) => r.id), linkGraph, 1);
+      if (orderedIds.length > 10) orderedIds = orderedIds.slice(0, 10);
+      const byId = {}; for (const d of docs) byId[d.id] = d;
+      const entries = [];
+      for (const id of orderedIds) {
+        const d = byId[id];
+        if (d) entries.push({ id: d.id, name: d.name, text: d.text });
+      }
+      const context = _rag.buildContextBlock(entries, 6000);
+      const sources = entries.filter((d) => d.text && String(d.text).trim() !== '').map((d) => d.name);
+      return { context, sources };
+    } catch (_) {
+      return { context: '', sources: [] };
+    }
+  }
 
   let _engineOut = null;
   let _engineDone = null;

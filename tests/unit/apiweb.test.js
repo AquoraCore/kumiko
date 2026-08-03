@@ -236,4 +236,39 @@ describe('web api shim', () => {
       await s.close();
     }
   }, 20000);
+
+  it('ragContext builds vault context client-side', async () => {
+    const s = await startServer({ port: 0, dataDir: tmpDir() });
+    const base = 'http://127.0.0.1:' + s.port;
+
+    let r = await fetch(base + '/auth/signup', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'rag@b.com', password: 'password123' }),
+    });
+    expect(r.status).toBe(200);
+    let token = (await r.json()).token;
+
+    const api = createWebApi({ baseUrl: base, getToken: () => token });
+
+    try {
+      await api.saveNote('Nephron.md', '# Nephron\n\nthe nephron filters blood in the kidney');
+      await api.saveNote('Mitochondria.md', '# Mitochondria\n\nmakes ATP energy');
+
+      // HAPPY — BM25 ranks Nephron for this query; Mitochondria is irrelevant.
+      const r1 = await api.ragContext('nephron kidney');
+      expect(r1.context).toContain('Nephron');
+      expect(r1.context.toLowerCase()).toContain('filters');
+      expect(r1.sources).toContain('Nephron');
+      expect(r1.context).not.toContain('Mitochondria');
+
+      // EDGE — no lexical match -> empty; empty query -> empty context.
+      const r2 = await api.ragContext('zzzznomatch qqqq');
+      expect(r2).toEqual({ context: '', sources: [] });
+      const r3 = await api.ragContext('');
+      expect(r3.context).toBe('');
+    } finally {
+      await s.close();
+    }
+  }, 20000);
 });
