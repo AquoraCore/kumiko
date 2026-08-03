@@ -7,6 +7,7 @@ const auth = require('./auth');
 const { createStore } = require('./store');
 const { setupConn, setPersistDir } = require('./relay');
 const { createNoteStore } = require('./notestore');
+const { createDbStore } = require('./dbstore');
 const aiCore = require('../core/ai');
 
 // Real verifier: validates a Google ID token against this app's client id.
@@ -77,6 +78,7 @@ async function startServer(opts = {}) {
   const app = express();
   app.locals.secret = secret;
   app.locals.notes = createNoteStore(path.join(dataDir, 'vaults'));
+  app.locals.dbs = createDbStore(path.join(dataDir, 'vaults'));
   app.use(express.json());
 
   // Static serving for the web entry (Phase 7d-3a). Only the dirs the page needs.
@@ -138,6 +140,7 @@ async function startServer(opts = {}) {
   });
 
   const notes = app.locals.notes;
+  const dbs = app.locals.dbs;
 
   // GET /notes -> { notes: [...] }  (authed)
   app.get('/notes', requireAuth, (req, res) => {
@@ -162,6 +165,29 @@ async function startServer(opts = {}) {
     const name = req.query.name;
     const ok = notes.remove(req.user.sub, name);
     res.json({ ok });
+  });
+
+  // ---- databases (per-user cloud DB storage, JSON blobs) ----
+  // GET /dbs -> { dbs: [{ id, name, icon, cols, rows }] } (sorted by name)
+  app.get('/dbs', requireAuth, (req, res) => {
+    res.json({ dbs: dbs.list(req.user.sub) });
+  });
+
+  // GET /dbs/one?id=<id> -> { db: fullDB|null }
+  app.get('/dbs/one', requireAuth, (req, res) => {
+    res.json({ db: dbs.read(req.user.sub, req.query.id) });
+  });
+
+  // PUT /dbs { db } -> { ok }
+  app.put('/dbs', requireAuth, (req, res) => {
+    const db = (req.body || {}).db;
+    const ok = dbs.write(req.user.sub, db);
+    return res.status(ok ? 200 : 400).json({ ok });
+  });
+
+  // DELETE /dbs?id=<id> -> { ok }
+  app.delete('/dbs', requireAuth, (req, res) => {
+    res.json({ ok: dbs.remove(req.user.sub, req.query.id) });
   });
 
   // POST /ai/chat (authed, streaming) — managed AI proxy using the SERVER's key.

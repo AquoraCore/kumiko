@@ -365,11 +365,76 @@ function createWebApi(opts) {
   function renamePdf() { return Promise.resolve({ ok: true }); }
   function readAnnots() { return Promise.resolve({}); }
   function saveAnnots() { return Promise.resolve(true); }
-  function dbList() { return Promise.resolve([]); }
-  function dbRead() { return Promise.resolve(null); }
-  function dbSave() { return Promise.resolve({ ok: true }); }
-  function dbCreate() { return Promise.resolve({ ok: true }); }
-  function dbDelete() { return Promise.resolve({ ok: true }); }
+
+  // ---- databases (per-user cloud DB storage) ----
+  // Matches Electron main.js db shapes; renderer's DB module consumes these
+  // unchanged. dbCreate seeds client-side (same seed as Electron) then saves.
+  async function dbList() {
+    try {
+      const res = await req('GET', '/dbs');
+      if (!res || !res.ok) return [];
+      const data = await res.json();
+      return (data && data.dbs) || [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  async function dbRead(id) {
+    try {
+      const res = await req('GET', '/dbs/one?id=' + encodeURIComponent(id));
+      if (!res || !res.ok) return null;
+      const data = await res.json();
+      return (data && data.db) || null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function dbSave(db) {
+    try {
+      const res = await req('PUT', '/dbs', { db });
+      if (!res || !res.ok) return false;
+      const data = await res.json();
+      return !!(data && data.ok === true);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async function dbDelete(id) {
+    try {
+      const res = await req('DELETE', '/dbs?id=' + encodeURIComponent(id));
+      if (!res || !res.ok) return false;
+      const data = await res.json();
+      return !!(data && data.ok === true);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async function dbCreate(opts) {
+    const o = opts || {};
+    const id = 'db_' + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36);
+    const db = {
+      id,
+      name: o.name || 'ฐานข้อมูลใหม่',
+      icon: o.icon || '',
+      columns: [
+        { id: 'c1', name: 'ชื่อ', type: 'text' },
+        { id: 'c2', name: 'สถานะ', type: 'select', options: [
+          { name: 'ยังไม่เริ่ม', color: 'gray' },
+          { name: 'กำลังทำ', color: 'amber' },
+          { name: 'เสร็จ', color: 'green' },
+        ] },
+        { id: 'c3', name: 'เสร็จ', type: 'checkbox' },
+      ],
+      rows: [ { id: 'r' + Date.now().toString(36), c1: '', c2: '', c3: false } ],
+    };
+    await dbSave(db);
+    return db;
+  }
+
   function folderCreate() { return Promise.resolve({ ok: true }); }
   function folderDelete() { return Promise.resolve({ ok: true }); }
   function folderRename() { return Promise.resolve({ ok: true }); }
