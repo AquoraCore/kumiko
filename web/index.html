@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kumiko</title>
+  <link rel="stylesheet" href="/renderer/styles.css" />
+  <link rel="stylesheet" href="/renderer/vendor/crepe.bundle.css" />
+  <script src="/web/api-web.js"></script>
+  <script src="/web/boot.js"></script>
+  <script src="/renderer/vendor/crepe.bundle.js"></script>
+  <!-- ponytail: xterm.js + addon-fit.js live in node_modules which is NOT served
+       (constraint: do not expose node_modules). Paths below expect them vendored
+       into renderer/vendor/. Until then renderer.js will crash at `new Terminal()`.
+       See report. -->
+  <script src="/renderer/vendor/xterm.js"></script>
+  <script src="/renderer/vendor/addon-fit.js"></script>
+  <script src="/renderer/vendor/pdfjs/pdf.min.js"></script>
+  <script src="/core/markdown.js"></script>
+  <script src="/core/frontmatter.js"></script>
+  <script src="/core/textdiff.js"></script>
+  <script src="/core/textsim.js"></script>
+  <script src="/core/rag.js"></script>
+  <script src="/renderer/i18n.js"></script>
+  <script src="/renderer/state.js"></script>
+  <script src="/renderer/db.js"></script>
+  <script src="/renderer/dashboard.js"></script>
+  <script src="/renderer/pdf.js"></script>
+  <script src="/renderer/chat.js"></script>
+  <script src="/renderer/sidebar.js"></script>
+  <script src="/renderer/renderer.js"></script>
+  <style>
+    #webLogin {
+      position: fixed; inset: 0; z-index: 9999; display: none;
+      align-items: center; justify-content: center;
+      background: rgba(0,0,0,.5);
+      font: 14px/1.4 system-ui, sans-serif;
+    }
+    #webLogin .card {
+      background: #fff; color: #111; padding: 20px; border-radius: 10px;
+      width: 280px; box-shadow: 0 8px 32px rgba(0,0,0,.3);
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    #webLogin h2 { margin: 0 0 4px; font-size: 16px; }
+    #webLogin input { padding: 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+    #webLogin button { padding: 8px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+    #webLogin .primary { background: #2563eb; color: #fff; }
+    #webLogin .secondary { background: #e5e7eb; color: #111; }
+    #webLoginMsg { min-height: 1em; color: #dc2626; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <!-- WEB LOGIN OVERLAY (web-only chrome; hidden until boot.js shows it) -->
+  <div id="webLogin">
+    <div class="card">
+      <h2>Kumiko</h2>
+      <input id="webLoginEmail" type="email" placeholder="email" />
+      <input id="webLoginPass" type="password" placeholder="password" />
+      <button id="webLoginBtn" class="primary">เข้าสู่ระบบ / Log in</button>
+      <button id="webSignupBtn" class="secondary">สมัคร / Sign up</button>
+      <div id="webLoginMsg"></div>
+    </div>
+  </div>
+
+   <!-- ICON SPRITE — stroke icons used across the whole app (no emoji) -->
+   <svg id="icoSprite" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
+     <symbol id="i-note" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/></symbol>
+     <symbol id="i-graph" viewBox="0 0 24 24"><circle cx="6" cy="7" r="2.5"/><circle cx="18" cy="9" r="2.5"/><circle cx="11" cy="18" r="2.5"/><path d="M8.2 8.2l7.2 1M16.6 11.2L12.6 15.6M8.4 9.2l1.6 6.5"/></symbol>
+     <symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/><path d="M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/></symbol>
+     <symbol id="i-dash" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></symbol>
+     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></symbol>
+     <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+      <symbol id="i-folderplus" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11.5v5M9.5 14h5"/></symbol>
+       <symbol id="i-crate" viewBox="0 0 24 24"><path d="M12 3L20 7.5L20 16.5L12 21L4 16.5L4 7.5Z"/><path d="M12 12L20 7.5M12 12L12 21M12 12L4 7.5"/><path d="M16 5.25l-8 4.5"/></symbol>
+     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+     <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M4.5 12a7.5 7.5 0 0 1 .2-1.7l-1.9-1.5 2-3.4 2.2.9a7.6 7.6 0 0 1 2.9-1.7L10.4 2h3.9l.5 2.4a7.6 7.6 0 0 1 2.9 1.7l2.2-.9 2 3.4-1.9 1.5a7.5 7.5 0 0 1 0 3.4l1.9 1.5-2 3.4-2.2-.9a7.6 7.6 0 0 1-2.9 1.7l-.5 2.4h-3.9l-.5-2.4a7.6 7.6 0 0 1-2.9-1.7l-2.2.9-2-3.4 1.9-1.5A7.5 7.5 0 0 1 4.5 12z"/></symbol>
+     <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a6.6 6.6 0 0 0 9.8 9.8z"/></symbol>
+     <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></symbol>
+     <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8z"/></symbol>
+     <symbol id="i-thread" viewBox="0 0 24 24"><path d="M4 6c5 0 5 6 10 6s6-4 6-4"/><circle cx="4" cy="6" r="1.6"/><path d="M20 18c-5 0-5-6-10-6"/><circle cx="20" cy="18" r="1.6"/></symbol>
+     <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3v-5.6A8 8 0 1 1 21 12z"/></symbol>
+     <symbol id="i-save" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></symbol>
+     <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></symbol>
+     <symbol id="i-sidebar" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></symbol>
+     <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></symbol>
+     <symbol id="i-task" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="2.5"/><path d="M8 12.5l2.6 2.5L16 9.5"/></symbol>
+     <symbol id="i-send" viewBox="0 0 24 24"><path d="M21 3L3 10.5l7 3 3 7z"/><path d="M21 3l-11 11"/></symbol>
+     <symbol id="i-check" viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5"/></symbol>
+     <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+     <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4 20h4L20 8a2.5 2.5 0 0 0-3.5-3.5L4 16.5z"/></symbol>
+     <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></symbol>
+     <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></symbol>
+     <symbol id="i-board" viewBox="0 0 24 24"><rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="11" rx="1.5"/><rect x="17" y="4" width="4" height="15" rx="1.5"/></symbol>
+     <symbol id="i-table" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M9 4v16"/></symbol>
+     <symbol id="i-gallery" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M4 18l5-4 4 3 3-2.5 4 3.5"/></symbol>
+     <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V4"/><rect x="7" y="12" width="4" height="8" rx="1"/><rect x="13" y="8" width="4" height="12" rx="1"/><rect x="19" y="15" width="2" height="5" rx="1"/></symbol>
+     <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></symbol>
+     <symbol id="i-hash" viewBox="0 0 24 24"><path d="M9 3L7 21M17 3l-2 18M3.5 8.5h17M3 15.5h17"/></symbol>
+     <symbol id="i-text" viewBox="0 0 24 24"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></symbol>
+     <symbol id="i-select" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.2"/></symbol>
+     <symbol id="i-checkbox" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.5 12.3l2.5 2.4 4.6-4.9"/></symbol>
+     <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
+     <symbol id="i-chevdown" viewBox="0 0 24 24"><path d="M5 9l7 7 7-7"/></symbol>
+     <symbol id="i-clip" viewBox="0 0 24 24"><path d="M21 11l-9 9a5.5 5.5 0 0 1-8-8l9-9a3.7 3.7 0 0 1 5 5l-9 9a1.8 1.8 0 0 1-2.6-2.6L14 6"/></symbol>
+     <symbol id="i-quiz" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.2 9.3a2.9 2.9 0 1 1 3.6 3.4v1.4"/><path d="M12.8 17.4h.01"/></symbol>
+     <symbol id="i-tldr" viewBox="0 0 24 24"><path d="M4 6h16M4 11h16M4 16h9"/><path d="M15.5 19l2 2 4-4.5"/></symbol>
+     <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5l12 7.5-12 7.5z"/></symbol>
+     <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+     <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-1.9 6.3"/><path d="M20 4v6h-6"/></symbol>
+     <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/></symbol>
+     <symbol id="i-swap" viewBox="0 0 24 24"><path d="M4 8h13l-3-3M20 16H7l3 3"/></symbol>
+     <symbol id="i-eraser" viewBox="0 0 24 24"><path d="M4 16.5L11.5 9a2.5 2.5 0 0 1 3.5 0l4 4a2.5 2.5 0 0 1 0 3.5L16.5 19H8z"/><path d="M4 21h16"/></symbol>
+     <symbol id="i-pin" viewBox="0 0 24 24"><path d="M9 3h6l-1 6 3.5 3.5H6.5L10 9z"/><path d="M12 12.5V21"/></symbol>
+     <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3.5l2.6 5.6 6 .8-4.4 4.2 1.1 6-5.3-2.9-5.3 2.9 1.1-6L3.4 9.9l6-.8z"/></symbol>
+     <symbol id="i-dots" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></symbol>
+     <symbol id="i-pdf" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5z"/><path d="M14 3v5h5"/></symbol>
+      <symbol id="i-scissors" viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></symbol>
+      <symbol id="i-book" viewBox="0 0 24 24"><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M9 7h7M9 11h5"/></symbol>
+      <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M6 2h12a1 1 0 0 1 1 1v18l-7-4.5L5 21V3a1 1 0 0 1 1-1z"/></symbol>
+    </svg>
+  <div id="app">
+    <!-- SIDEBAR: note list + search -->
+    <aside id="sidebar">
+      <div class="sb-head">
+        <span class="sb-title" data-i18n="โน้ต">โน้ต</span>
+        <button id="newFolderBtn" class="ghost" title="กล่องใหม่" data-i18n-title="กล่องใหม่"></button>
+        <button id="newNoteBtn" class="ghost" title="โน้ตใหม่" data-i18n-title="โน้ตใหม่"></button>
+      </div>
+      <div class="search-row">
+        <div class="search-field">
+          <svg class="ic sm srch-ic"><use href="#i-search"/></svg>
+          <input id="searchInput" type="search" placeholder="ค้นหา…" data-i18n-ph="ค้นหา…" />
+          <kbd class="search-kbd">⌘F</kbd>
+        </div>
+        <div id="searchResults" class="search-results" hidden></div>
+      </div>
+      <div id="noteList" class="note-list"></div>
+      <div class="sb-actions">
+        <button id="newMenuBtn" title="สร้างใหม่" data-i18n-title="สร้างใหม่"><svg class="ic sm"><use href="#i-plus"/></svg><span data-i18n="ใหม่">ใหม่</span></button>
+        <span class="rail-sp"></span>
+        <button id="settingsBtn2" class="ghost sm" title="ตั้งค่า" data-i18n-title="ตั้งค่า"><svg class="ic"><use href="#i-settings"/></svg></button>
+        <button id="trashBtn2" class="ghost sm" title="ถังขยะ" data-i18n-title="ถังขยะ"><svg class="ic"><use href="#i-trash"/></svg></button>
+      </div>
+      <div id="vaultChip">
+        <svg class="ic sm vc-crate"><use href="#i-crate"/></svg>
+        <span class="vault-nm">Vault</span>
+        <svg class="ic xs vc-caret"><use href="#i-chevdown"/></svg>
+      </div>
+    </aside>
+
+    <!-- LEFT: editor -->
+    <section id="left">
+      <header class="bar">
+        <div class="bar-left">
+          <div class="crumb" id="crumb"><b data-i18n="โน้ต">โน้ต</b></div>
+</div>
+        <div class="bar-right">
+          <span id="collabBar" hidden>
+            <span id="collabStatus" class="collab-status"></span>
+            <span id="collabPresence" class="collab-presence"></span>
+          </span>
+          <span class="saved-tag" id="savedTag" title="บันทึกแล้ว" data-i18n-title="บันทึกแล้ว"><i class="dot"></i><span class="saved-txt" data-i18n="บันทึกแล้ว">บันทึกแล้ว</span></span>
+          <span id="dirty" class="dirty" hidden></span>
+          <button id="aiMenuBtn" class="ghost" title="เครื่องมือ AI" data-i18n-title="เครื่องมือ AI"><svg class="ic"><use href="#i-sparkle"/></svg></button>
+          <button id="autolinkBtn" class="ghost" title="ร้อยเชือก — AI แนะนำลิงก์ไปโน้ตอื่น" data-i18n-title="ร้อยเชือก — AI แนะนำลิงก์ไปโน้ตอื่น"><svg class="ic"><use href="#i-thread"/></svg></button>
+          <button id="sideChatBtn" class="ghost" title="แชตลอย (⌘J)" data-i18n-title="แชตลอย (⌘J)"><svg class="ic"><use href="#i-chat"/></svg></button>
+          <button id="saveBtn" class="ghost" title="บันทึก (⌘S)" data-i18n-title="บันทึก (⌘S)"><svg class="ic"><use href="#i-save"/></svg></button>
+          <span class="bar-div"></span>
+          <button id="sidebarToggle" class="ghost" title="ซ่อน/แสดงแถบโน้ต" data-i18n-title="ซ่อน/แสดงแถบโน้ต"><svg class="ic"><use href="#i-sidebar"/></svg></button>
+          <button id="termToggle" class="ghost" title="ซ่อน/แสดงพาเนล AI" data-i18n-title="ซ่อน/แสดงพาเนล AI"><svg class="ic"><use href="#i-panel"/></svg></button>
+          <button id="tldrBtn" class="ghost" hidden>TL;DR</button>
+          <button id="quizBtn" class="ghost" hidden data-i18n="ทดสอบฉัน">ทดสอบฉัน</button>
+          <button id="settingsBtn" class="ghost" hidden data-i18n="ตั้งค่า">ตั้งค่า</button>
+          <button id="themeBtn" class="ghost" hidden data-i18n="ธีม">ธีม</button>
+        </div>
+      </header>
+
+      <div id="propsBar" class="props-bar">
+        <label data-i18n="สถานะ">สถานะ</label>
+        <select id="statusSelect">
+          <option value="" data-i18n="— ไม่ระบุ —">— ไม่ระบุ —</option>
+          <option value="ใหม่" data-i18n="ใหม่">ใหม่</option>
+          <option value="กำลังอ่าน" data-i18n="กำลังอ่าน">กำลังอ่าน</option>
+          <option value="เข้าใจแล้ว" data-i18n="เข้าใจแล้ว">เข้าใจแล้ว</option>
+          <option value="ต้องทวน" data-i18n="ต้องทวน">ต้องทวน</option>
+        </select>
+        <label data-i18n="แท็ก">แท็ก</label>
+        <input id="tagsInput" type="text" placeholder="เช่น สอบกลางภาค, ต้องทวน" data-i18n-ph="เช่น สอบกลางภาค, ต้องทวน" />
+      </div>
+
+      <div id="reloadBanner" class="banner" hidden>
+        <span><b data-i18n="Claude แก้ไฟล์นี้">Claude แก้ไฟล์นี้</b> — <span data-i18n="คุณมีการแก้ที่ยังไม่บันทึก">คุณมีการแก้ที่ยังไม่บันทึก</span></span>
+        <span>
+          <button id="reloadKeep" class="ghost sm" data-i18n="เก็บของฉัน">เก็บของฉัน</button>
+          <button id="reloadTake" class="solid sm" data-i18n="โหลดของ Claude">โหลดของ Claude</button>
+        </span>
+      </div>
+
+      <div id="aiUndo" class="ai-undo" hidden><span data-i18n="AI แก้โน้ตนี้แล้ว">AI แก้โน้ตนี้แล้ว</span><span><button id="aiUndoBtn" class="ghost sm" data-i18n="↩ เลิกทำ AI">↩ เลิกทำ AI</button><button id="aiUndoDismiss" class="ghost sm" data-i18n="ปิด">ปิด</button></span></div>
+
+      <div id="editorWrap">
+        <div id="noteTitle" class="note-title" hidden></div>
+        <div id="editorHost"></div>
+      </div>
+      <div id="graphView" class="main-view"></div>
+      <div id="tableView" class="main-view"></div>
+      <div id="dashView" class="main-view"></div>
+      <div id="crateView" class="main-view"></div>
+      <div id="trashView" class="main-view"></div>
+      <div id="pdfView" class="main-view">
+        <div class="pdf-toolbar">
+          <span class="pdf-nav">
+            <button id="pdfPrev" title="หน้าก่อน" data-i18n-title="หน้าก่อน">‹</button>
+            <span id="pdfCount">1 / 1</span>
+            <button id="pdfNext" title="หน้าถัดไป" data-i18n-title="หน้าถัดไป">›</button>
+          </span>
+          <span class="pdf-spacer"></span>
+          <button id="pdfNoteBtn" class="pdf-tb" title="โน้ตคู่หูของ PDF นี้" data-i18n-title="โน้ตคู่หูของ PDF นี้"><svg class="ic sm"><use href="#i-note"/></svg></button>
+          <button id="pdfAnnotsBtn" class="pdf-tb" title="รายการไฮไลต์" data-i18n-title="รายการไฮไลต์"><svg class="ic sm"><use href="#i-list"/></svg></button>
+          <button id="pdfCropBtn" class="pdf-tb" title="ตัดกระดาษ / เลือกพื้นที่ (ไฮไลต์ภาพสแกนได้)" data-i18n-title="ตัดกระดาษ / เลือกพื้นที่ (ไฮไลต์ภาพสแกนได้)"><svg class="ic sm"><use href="#i-scissors"/></svg></button>
+          <button id="pdfTextBtn" class="pdf-tb" title="ใส่กล่องข้อความ" data-i18n-title="ใส่กล่องข้อความ"><svg class="ic sm"><use href="#i-text"/></svg></button>
+        </div>
+        <div class="pdf-body">
+          <div id="pdfPages"></div>
+          <aside id="pdfAnnotsPanel" hidden></aside>
+        </div>
+      </div>
+
+      <div id="backlinks" class="backlinks" hidden></div>
+      <div id="autolinkBar" hidden></div>
+
+      <!-- selection action bar -->
+      <div id="actionBar" class="action-bar" hidden>
+        <span class="sel-label"><span data-i18n="เลือก: ">เลือก: </span><b id="selText"></b></span>
+        <div class="action-btns">
+          <button data-act="explain"><svg class="ic sm"><use href="#i-sparkle"/></svg> <span data-i18n="อธิบาย">อธิบาย</span></button>
+          <button data-act="search"><svg class="ic sm"><use href="#i-search"/></svg> <span data-i18n="หาข้อมูล">หาข้อมูล</span></button>
+          <button data-act="link"><svg class="ic sm"><use href="#i-link"/></svg> <span data-i18n="ทำลิงก์">ทำลิงก์</span></button>
+          <button data-act="task"><svg class="ic sm"><use href="#i-task"/></svg> <span data-i18n="เพิ่มเป็น Task">เพิ่มเป็น Task</span></button>
+          <button data-act="sidechat" title="คุยเรื่องนี้ในแชตลอย" data-i18n-title="คุยเรื่องนี้ในแชตลอย"><svg class="ic sm"><use href="#i-chat"/></svg> <span data-i18n="คุยเรื่องนี้">คุยเรื่องนี้</span></button>
+        </div>
+      </div>
+    </section>
+
+    <div id="divider"></div>
+
+    <!-- RIGHT: terminal -->
+    <section id="right">
+      <header class="bar term-bar">
+        <div class="bar-left"></div>
+        <div class="bar-right">
+          <button id="chatClearBtn" class="ghost" title="ล้างแชต" data-i18n-title="ล้างแชต"><svg class="ic"><use href="#i-eraser"/></svg></button>
+          <button id="termPosBtn" class="ghost" title="ลากหรือกดเพื่อย้าย ขวา/ล่าง" data-i18n-title="ลากหรือกดเพื่อย้าย ขวา/ล่าง"><svg class="ic"><use href="#i-swap"/></svg></button>
+          <select id="engineSelect" title="เลือก engine" data-i18n-title="เลือก engine"><option value="glm">GLM (OpenCode)</option><option value="claude">Claude</option></select>
+          <select id="modelSelect" title="โมเดล GLM" data-i18n-title="โมเดล GLM"><option value="glm-5.2">glm-5.2</option><option value="glm-5.1">glm-5.1</option><option value="glm-5-turbo">glm-5-turbo</option><option value="glm-4.7">glm-4.7</option><option value="glm-4.5-air">glm-4.5-air</option></select>
+          <button id="claudeBtn" class="ghost"><svg class="ic"><use href="#i-play"/></svg></button>
+          <button id="termStopBtn" class="ghost" title="หยุดคำสั่ง (Ctrl+C)" data-i18n-title="หยุดคำสั่ง (Ctrl+C)"><svg class="ic"><use href="#i-stop"/></svg></button>
+          <button id="termRestartBtn" class="ghost" title="รีสตาร์ท terminal" data-i18n-title="รีสตาร์ท terminal"><svg class="ic"><use href="#i-refresh"/></svg></button>
+          <button id="clearBtn" class="ghost" title="ล้างจอ" data-i18n-title="ล้างจอ"><svg class="ic"><use href="#i-eraser"/></svg></button>
+          <button id="termHideBtn" class="ghost" title="ซ่อน terminal" data-i18n-title="ซ่อน terminal"><svg class="ic"><use href="#i-x"/></svg></button>
+        </div>
+      </header>
+      <div id="chatPanel">
+        <div id="sessionTabs" class="session-tabs"></div>
+        <div id="sessionHead" class="session-head"></div>
+        <div id="chatMessages"></div>
+        <div class="chat-input">
+          <textarea id="chatInput" rows="1" placeholder="พิมพ์ข้อความ… (Enter ส่ง · Shift+Enter ขึ้นบรรทัด)" data-i18n-ph="พิมพ์ข้อความ… (Enter ส่ง · Shift+Enter ขึ้นบรรทัด)"></textarea>
+          <button id="chatSend" title="ส่ง" data-i18n-title="ส่ง"><svg class="ic sm"><use href="#i-send"/></svg></button>
+        </div>
+      </div>
+      <div id="terminal"></div>
+      <p class="hint" id="hint"></p>
+    </section>
+
+    <div id="tableOverlay" hidden></div>
+    <div id="graphOverlay" hidden></div>
+    <div id="settingsOverlay" hidden></div>
+    <div id="diffOverlay" hidden></div>
+  </div>
+</body>
+</html>

@@ -31,6 +31,13 @@ async function startServer(opts = {}) {
   app.locals.notes = createNoteStore(path.join(dataDir, 'vaults'));
   app.use(express.json());
 
+  // Static serving for the web entry (Phase 7d-3a). Only the dirs the page needs.
+  const ROOT = path.join(__dirname, '..');
+  app.use('/core', express.static(path.join(ROOT, 'core')));
+  app.use('/renderer', express.static(path.join(ROOT, 'renderer')));
+  app.use('/web', express.static(path.join(ROOT, 'web')));
+  app.get('/', (req, res) => res.sendFile(path.join(ROOT, 'web', 'index.html')));
+
   // POST /auth/signup {email,password}
   app.post('/auth/signup', (req, res) => {
     const { email, password } = req.body || {};
