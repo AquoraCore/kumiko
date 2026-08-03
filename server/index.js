@@ -8,6 +8,7 @@ const { createStore } = require('./store');
 const { setupConn, setPersistDir } = require('./relay');
 const { createNoteStore } = require('./notestore');
 const { createDbStore } = require('./dbstore');
+const { createPdfStore } = require('./pdfstore');
 const aiCore = require('../core/ai');
 
 // Real verifier: validates a Google ID token against this app's client id.
@@ -141,6 +142,7 @@ async function startServer(opts = {}) {
 
   const notes = app.locals.notes;
   const dbs = app.locals.dbs;
+  const pdfs = createPdfStore(path.join(dataDir, 'vaults'));
 
   // GET /notes -> { notes: [...] }  (authed)
   app.get('/notes', requireAuth, (req, res) => {
@@ -188,6 +190,48 @@ async function startServer(opts = {}) {
   // DELETE /dbs?id=<id> -> { ok }
   app.delete('/dbs', requireAuth, (req, res) => {
     res.json({ ok: dbs.remove(req.user.sub, req.query.id) });
+  });
+
+  // ---- pdfs (per-user cloud PDF binary + annot storage) ----
+  // GET /pdfs -> { pdfs: [...] } (sorted filenames, excludes *.annot.json sidecars)
+  app.get('/pdfs', requireAuth, (req, res) => {
+    res.json({ pdfs: pdfs.list(req.user.sub) });
+  });
+
+  // POST /pdfs/upload?name=<file> -> { name }. RAW octet-stream body (NOT json) so
+  // the binary bytes flow straight through; express.raw sits in front of requireAuth.
+  app.post('/pdfs/upload', requireAuth, express.raw({ type: 'application/octet-stream', limit: '50mb' }), (req, res) => {
+    const name = req.query.name;
+    const buf = req.body;
+    if (!Buffer.isBuffer(buf) || !buf.length) return res.status(400).json({ error: 'empty' });
+    const saved = pdfs.write(req.user.sub, name, buf);
+    if (!saved) return res.status(400).json({ error: 'invalid' });
+    res.json({ name: saved });
+  });
+
+  // GET /pdfs/read?name=<file> -> raw PDF bytes (application/pdf); 404 on miss.
+  app.get('/pdfs/read', requireAuth, (req, res) => {
+    const buf = pdfs.read(req.user.sub, req.query.name);
+    if (!buf) return res.status(404).end();
+    res.setHeader('content-type', 'application/pdf');
+    res.end(buf);
+  });
+
+  // POST /pdfs/rename { from, to } -> { name } | { error }
+  app.post('/pdfs/rename', requireAuth, (req, res) => {
+    const { from, to } = req.body || {};
+    res.json(pdfs.rename(req.user.sub, from, to));
+  });
+
+  // GET /pdfs/annots?name=<file> -> { highlights:[...] } (default empty)
+  app.get('/pdfs/annots', requireAuth, (req, res) => {
+    res.json(pdfs.readAnnots(req.user.sub, req.query.name));
+  });
+
+  // PUT /pdfs/annots { name, data } -> { ok }
+  app.put('/pdfs/annots', requireAuth, (req, res) => {
+    const { name, data } = req.body || {};
+    res.json({ ok: pdfs.saveAnnots(req.user.sub, name, data) });
   });
 
   // POST /ai/chat (authed, streaming) — managed AI proxy using the SERVER's key.

@@ -79,18 +79,25 @@ function createWebApi(opts) {
 
   // ---- storage: real cloud backend (7d-1) ----
   async function listNotes() {
+    let notes = [];
     try {
       const res = await req('GET', '/notes');
       if (!res || !res.ok) return { notes: [], folders: [], pdfs: [] };
       const data = await res.json();
-      const notes = (data && data.notes) || [];
-      // Derive folders from note rel-paths (web has no filesystem to walk): each
-      // path prefix becomes a folder, e.g. 'a/b/c.md' -> 'a' and 'a/b'. Matches
-      // Electron note:list which returns notes/folders/pdfs/companions.
-      return { notes, folders: _foldersOf(notes), pdfs: [], companions: {} };
+      notes = (data && data.notes) || [];
     } catch (_) {
       return { notes: [], folders: [], pdfs: [] };
     }
+    // Side-channel fetch of the user's pdfs; guarded — never breaks note listing.
+    let pdfs = [];
+    try {
+      const pr = await req('GET', '/pdfs');
+      if (pr && pr.ok) { const pd = await pr.json(); pdfs = (pd && pd.pdfs) || []; }
+    } catch (_) {}
+    // Derive folders from note rel-paths (web has no filesystem to walk): each
+    // path prefix becomes a folder, e.g. 'a/b/c.md' -> 'a' and 'a/b'. Matches
+    // Electron note:list which returns notes/folders/pdfs/companions.
+    return { notes, folders: _foldersOf(notes), pdfs, companions: {} };
   }
 
   async function readNote(name) {
@@ -360,11 +367,102 @@ function createWebApi(opts) {
   }
 
   function noteTable() { return Promise.resolve([]); }
-  function importPdf() { return Promise.resolve(null); }
-  function readPdf() { return Promise.resolve(null); }
-  function renamePdf() { return Promise.resolve({ ok: true }); }
-  function readAnnots() { return Promise.resolve({}); }
-  function saveAnnots() { return Promise.resolve(true); }
+
+  // ---- pdfs (per-user cloud PDF storage; mirrors Electron pdf:* handlers) ----
+  // TESTABLE upload: raw octet-stream POST. Uses fetch directly (NOT `req`,
+  // which JSON-stringifies the body) so the bytes flow through untouched.
+  // ponytail: bytes accepted as Buffer/Uint8Array/ArrayBuffer — fetch handles all.
+  async function uploadPdf(name, bytes) {
+    try {
+      const res = await fetch(baseUrl + '/pdfs/upload?name=' + encodeURIComponent(name), {
+        method: 'POST',
+        headers: authHeaders({ 'content-type': 'application/octet-stream' }),
+        body: bytes,
+      });
+      if (!res || !res.ok) return null;
+      const d = await res.json();
+      return { name: d.name };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // BROWSER-ONLY picker (the one piece that needs a real DOM and so can't be
+  // unit-tested). importPdf = pick a file via a hidden <input type=file>, then
+  // hand the bytes to uploadPdf. Non-browser -> null. If the user cancels the
+  // picker there is no reliable event, so the promise stays pending (matches a
+  // canceled native dialog). Never throws — resolves null on any failure.
+  async function importPdf() {
+    if (typeof document === 'undefined') return null;
+    return await new Promise((resolve) => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'application/pdf';
+      input.style.display = 'none';
+      document.body.appendChild(input);
+      input.onchange = async () => {
+        try {
+          const file = input.files && input.files[0];
+          if (!file) { resolve(null); return; }
+          const buf = await file.arrayBuffer();
+          const r = await uploadPdf(file.name, new Uint8Array(buf));
+          resolve(r);
+        } catch (_) {
+          resolve(null);
+        } finally {
+          try { input.remove(); } catch (__) {}
+        }
+      };
+      input.click();
+    });
+  }
+
+  // readPdf MUST resolve to a Uint8Array (or ArrayBuffer) on web — the renderer
+  // does `pdfjsLib.getDocument({data})` with the result. Guarded; never throws.
+  async function readPdf(name) {
+    try {
+      const res = await fetch(baseUrl + '/pdfs/read?name=' + encodeURIComponent(name), {
+        method: 'GET',
+        headers: authHeaders(),
+      });
+      if (!res || !res.ok) return null;
+      const ab = await res.arrayBuffer();
+      return new Uint8Array(ab);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function renamePdf(from, to) {
+    try {
+      const res = await req('POST', '/pdfs/rename', { from, to });
+      if (!res || !res.ok) return { error: 'failed' };
+      return await res.json();
+    } catch (_) {
+      return { error: 'failed' };
+    }
+  }
+
+  async function readAnnots(name) {
+    try {
+      const res = await req('GET', '/pdfs/annots?name=' + encodeURIComponent(name));
+      if (!res || !res.ok) return { highlights: [] };
+      return await res.json();
+    } catch (_) {
+      return { highlights: [] };
+    }
+  }
+
+  async function saveAnnots(name, data) {
+    try {
+      const res = await req('PUT', '/pdfs/annots', { name, data });
+      if (!res || !res.ok) return false;
+      const d = await res.json();
+      return d.ok === true;
+    } catch (_) {
+      return false;
+    }
+  }
 
   // ---- databases (per-user cloud DB storage) ----
   // Matches Electron main.js db shapes; renderer's DB module consumes these
@@ -466,7 +564,7 @@ function createWebApi(opts) {
     startPty, ptyInput, ptyResize, ptyRestart, onPtyData,
     // derived
     searchNotes, backlinks, noteTable, graphData,
-    importPdf, readPdf, renamePdf, readAnnots, saveAnnots,
+    importPdf, uploadPdf, readPdf, renamePdf, readAnnots, saveAnnots,
     dbList, dbRead, dbSave, dbCreate, dbDelete,
     folderCreate, folderDelete, folderRename,
     trashList, trashRestore, trashDeleteForever, trashEmpty,
