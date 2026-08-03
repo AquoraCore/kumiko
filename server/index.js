@@ -87,6 +87,10 @@ async function startServer(opts = {}) {
   app.use('/core', express.static(path.join(ROOT, 'core')));
   app.use('/renderer', express.static(path.join(ROOT, 'renderer')));
   app.use('/web', express.static(path.join(ROOT, 'web')));
+  // /vendor -> renderer/vendor : the shared renderer/pdf.js sets pdf.js workerSrc to the RELATIVE
+  // 'vendor/pdfjs/pdf.worker.min.js', which on the web (root page) resolves to /vendor/... — serve it here so
+  // the PDF viewer's worker loads. (Desktop is unaffected; it resolves the same relative path off file://.)
+  app.use('/vendor', express.static(path.join(ROOT, 'renderer', 'vendor')));
   app.get('/', (req, res) => res.sendFile(path.join(ROOT, 'web', 'index.html')));
 
   // POST /auth/signup {email,password}
