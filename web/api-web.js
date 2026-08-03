@@ -4,6 +4,24 @@
 // or safe stubs (PTY, AI, derived) so the renderer boots without error.
 // Dual-mode: Node require + browser global. No browser build yet (that's 7d-3).
 
+// ---- pure helpers (mirror core/wikilinks + core/pathutil so the renderer
+// consumes search/backlinks/graph output unchanged from the Electron shapes) ----
+// Same tolerant regex as core/wikilinks: matches [[Note]], \[\[Note]], [[Note|alias]].
+function _wikiTargets(text){
+  const re = /\\?\[\\?\[([^\[\]\n]+?)\\?\]\\?\]/g;
+  const out = []; let m;
+  while ((m = re.exec(text || ''))) {
+    const t = String(m[1]).split('|')[0].trim();
+    if (t) out.push(t);
+  }
+  return out;
+}
+// Same semantics as core/pathutil baseName: strip dir + .md suffix.
+function _baseName(rel){
+  const b = String(rel || '').split('/').pop();
+  return b.replace(/\.md$/i, '');
+}
+
 function createWebApi(opts) {
   opts = opts || {};
   let baseUrl = opts.baseUrl || 'http://127.0.0.1:4321';
@@ -60,8 +78,11 @@ function createWebApi(opts) {
       const res = await req('GET', '/notes');
       if (!res || !res.ok) return { notes: [], folders: [], pdfs: [] };
       const data = await res.json();
-      // folders/pdfs empty — web MVP is notes-only; keep the shape the renderer expects.
-      return { notes: (data && data.notes) || [], folders: [], pdfs: [] };
+      const notes = (data && data.notes) || [];
+      // Derive folders from note rel-paths (web has no filesystem to walk): each
+      // path prefix becomes a folder, e.g. 'a/b/c.md' -> 'a' and 'a/b'. Matches
+      // Electron note:list which returns notes/folders/pdfs/companions.
+      return { notes, folders: _foldersOf(notes), pdfs: [], companions: {} };
     } catch (_) {
       return { notes: [], folders: [], pdfs: [] };
     }
@@ -76,6 +97,27 @@ function createWebApi(opts) {
     } catch (_) {
       return '';
     }
+  }
+
+  // Directory prefixes of a set of `/`-separated rel-paths. ponytail: cloud
+  // paths are unix-style; server never emits `\`, so `/`-split is enough.
+  function _foldersOf(notes){
+    const set = new Set();
+    for (const n of notes){
+      const parts = String(n).split('/');
+      for (let i = 1; i < parts.length; i++) set.add(parts.slice(0, i).join('/'));
+    }
+    return Array.from(set).sort();
+  }
+
+  // Fetch every note's content. ponytail: N reads (one per note) — fine for a
+  // personal vault; if this gets slow, add a server /notes/all endpoint later.
+  async function _allNotes(){
+    const l = await listNotes();
+    const names = (l && l.notes) || [];
+    const out = [];
+    for (const n of names) out.push({ name: n, content: await readNote(n) });
+    return out;
   }
 
   // ponytail: openNote returns the content string; the Electron version returns
@@ -201,11 +243,62 @@ function createWebApi(opts) {
   function ptyRestart() {}
   function onPtyData() {}
 
-  // ---- derived / not-yet-on-web (safe empties so the UI renders) ----
-  function searchNotes() { return Promise.resolve([]); }
-  function backlinks() { return Promise.resolve([]); }
+  // ---- derived: computed client-side over /notes (Electron shapes) ----
+  // Matches ipc note:search: {name, line:0+name match, else 1-indexed line}, cap 40.
+  async function searchNotes(q) {
+    const ql = String(q || '').trim().toLowerCase();
+    if (!ql) return [];
+    const results = [];
+    for (const { name, content } of await _allNotes()) {
+      if (name.toLowerCase().includes(ql)) results.push({ name, line: 0, snippet: name });
+      const lines = String(content).split(/\r?\n/);
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].toLowerCase().includes(ql)) {
+          results.push({ name, line: i + 1, snippet: lines[i].trim().slice(0, 120) });
+        }
+        if (results.length >= 40) return results;
+      }
+    }
+    return results;
+  }
+
+  // Matches ipc note:backlinks: string[] of rel-paths whose wikilinks target
+  // the basename of `name` (case-insensitive). Self skipped on exact rel-path.
+  async function backlinks(name) {
+    const base = _baseName(name).toLowerCase();
+    const out = [];
+    for (const { name: f, content } of await _allNotes()) {
+      if (f === name) continue;
+      if (_wikiTargets(content).some((t) => t.toLowerCase() === base)) out.push(f);
+    }
+    return out;
+  }
+
+  // Matches ipc graph:data: nodes deduped by lowercased basename (first wins),
+  // edges per from→to pair, skip self-edges and targets with no node.
+  async function graphData() {
+    const notes = await _allNotes();
+    const fileByBase = {};
+    for (const { name } of notes) {
+      const k = _baseName(name).toLowerCase();
+      if (!(k in fileByBase)) fileByBase[k] = name;
+    }
+    const nodes = Object.keys(fileByBase).map((k) => ({ id: _baseName(fileByBase[k]), file: fileByBase[k] }));
+    const edgeSeen = new Set(); const edges = [];
+    for (const { name, content } of notes) {
+      const fromKey = _baseName(name).toLowerCase();
+      for (const raw of _wikiTargets(content)) {
+        const toKey = raw.toLowerCase();
+        if (!fileByBase[toKey] || toKey === fromKey) continue;
+        const key = fromKey + '->' + toKey;
+        if (edgeSeen.has(key)) continue; edgeSeen.add(key);
+        edges.push({ from: _baseName(fileByBase[fromKey] || name), to: _baseName(fileByBase[toKey]) });
+      }
+    }
+    return { nodes, edges };
+  }
+
   function noteTable() { return Promise.resolve([]); }
-  function graphData() { return Promise.resolve({ nodes: [], edges: [] }); }
   function importPdf() { return Promise.resolve(null); }
   function readPdf() { return Promise.resolve(null); }
   function renamePdf() { return Promise.resolve({ ok: true }); }

@@ -152,4 +152,53 @@ describe('web api shim', () => {
     expect(String(out.data)).toContain('not available');
     expect(done).toEqual({ runId: 'r', code: 0 });
   });
+
+  it('searchNotes / backlinks / graphData / listNotes folders match Electron shapes (client-side)', async () => {
+    const s = await startServer({ port: 0, dataDir: tmpDir() });
+    const base = 'http://127.0.0.1:' + s.port;
+
+    let r = await fetch(base + '/auth/signup', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'web@c.com', password: 'password123' }),
+    });
+    expect(r.status).toBe(200);
+    let token = (await r.json()).token;
+
+    const api = createWebApi({ baseUrl: base, getToken: () => token });
+
+    try {
+      // Seed a tiny vault: index wikilinks Nephron (root) + Kidney (in bio/).
+      await api.saveNote('index.md', 'see [[Nephron]] and [[Kidney]] here');
+      await api.saveNote('Nephron.md', '# Nephron\nit filters blood');
+      await api.saveNote('bio/Kidney.md', '# Kidney\nthe organ');
+
+      // SEARCH — empty query short-circuits; non-empty yields Electron's
+      // {name, line, snippet} and finds content hits across notes.
+      expect(await api.searchNotes('')).toEqual([]);
+      const found = await api.searchNotes('filters');
+      expect(found.some((x) => x.name === 'Nephron.md')).toBe(true);
+      expect(found.every((x) => typeof x.name === 'string' && typeof x.line === 'number' && typeof x.snippet === 'string')).toBe(true);
+
+      // BACKLINKS — string[] of rel-paths; basename match crosses folders
+      // (index links [[Kidney]] -> bio/Kidney.md resolves by basename).
+      expect((await api.backlinks('Nephron.md'))).toContain('index.md');
+      expect((await api.backlinks('bio/Kidney.md'))).toContain('index.md');
+
+      // GRAPH — nodes keyed by basename, edges by from→to basename pairs.
+      const g = await api.graphData();
+      expect(g.nodes.some((n) => n.id === 'Nephron')).toBe(true);
+      expect(g.nodes.some((n) => n.id === 'index')).toBe(true);
+      expect(g.nodes.some((n) => n.id === 'Kidney')).toBe(true);
+      expect(g.edges.some((e) => e.from === 'index' && e.to === 'Nephron')).toBe(true);
+      expect(g.edges.some((e) => e.from === 'index' && e.to === 'Kidney')).toBe(true);
+
+      // FOLDERS — derived from note rel-paths; 'bio/Kidney.md' -> 'bio'.
+      const listed = await api.listNotes();
+      expect(listed.folders).toContain('bio');
+      expect(listed.notes).toContain('bio/Kidney.md');
+    } finally {
+      await s.close();
+    }
+  }, 20000);
 });
