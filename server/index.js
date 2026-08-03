@@ -2,10 +2,27 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const { WebSocketServer } = require('ws');
+const { OAuth2Client } = require('google-auth-library');
 const auth = require('./auth');
 const { createStore } = require('./store');
 const { setupConn, setPersistDir } = require('./relay');
 const { createNoteStore } = require('./notestore');
+
+// Real verifier: validates a Google ID token against this app's client id.
+// Returns { sub, email, name } on success, null on failure. Never throws.
+function makeGoogleVerifier(clientId) {
+  if (!clientId) return null;
+  const client = new OAuth2Client(clientId);
+  return async (idToken) => {
+    try {
+      const ticket = await client.verifyIdToken({ idToken, audience: clientId });
+      const p = ticket.getPayload();
+      return (p && p.sub && p.email) ? { sub: p.sub, email: p.email, name: p.name } : null;
+    } catch (_) {
+      return null;
+    }
+  };
+}
 
 function requireAuth(req, res, next) {
   const h = req.headers.authorization || '';
@@ -25,6 +42,8 @@ async function startServer(opts = {}) {
   const dataDir = opts.dataDir || path.join(__dirname, '..', '.server-data');
   setPersistDir(path.join(dataDir, 'rooms'));
   const store = createStore(path.join(dataDir, 'users.json'));
+  const googleClientId = opts.googleClientId || process.env.GOOGLE_CLIENT_ID || '';
+  const verifyGoogleToken = opts.verifyGoogleToken || makeGoogleVerifier(googleClientId);
 
   const app = express();
   app.locals.secret = secret;
@@ -69,6 +88,24 @@ async function startServer(opts = {}) {
     const payload = auth.verifyToken(token, secret);
     if (!payload) return res.status(401).json({ error: 'unauthorized' });
     return res.json({ email: payload.email, sub: payload.sub });
+  });
+
+  // POST /auth/google { idToken } -> verifies a Google ID token via the configured
+  // (or injected) verifier, find-or-create-and-links the user, issues OUR JWT.
+  app.post('/auth/google', async (req, res) => {
+    if (!verifyGoogleToken) return res.status(501).json({ error: 'google login not configured' });
+    const { idToken } = req.body || {};
+    const g = await verifyGoogleToken(idToken);
+    if (!g || !g.email) return res.status(401).json({ error: 'invalid google token' });
+    const user = store.findOrCreateGoogle(g.sub, auth.normalizeEmail(g.email));
+    const token = auth.signToken({ sub: user.id, email: user.email }, secret);
+    return res.json({ token, email: user.email });
+  });
+
+  // GET /auth/config -> { googleClientId }. PUBLIC — the web frontend needs the
+  // client id to render the Google button; empty string means "not available".
+  app.get('/auth/config', (req, res) => {
+    res.json({ googleClientId });
   });
 
   const notes = app.locals.notes;
@@ -122,7 +159,7 @@ async function startServer(opts = {}) {
     wss.close(() => server.close(res));
   });
 
-  return { server, wss, port: realPort, secret, close };
+  return { server, wss, port: realPort, secret, googleClientId, close };
 }
 
 module.exports = { startServer };

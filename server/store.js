@@ -29,21 +29,49 @@ function createStore(filePath) {
     return load().find((u) => u.email === em) || null;
   }
 
-  function create({ email, passwordHash }) {
+  function findByGoogleId(googleId) {
+    const gid = String(googleId == null ? '' : googleId);
+    if (!gid) return null;
+    return load().find((u) => u.googleId === gid) || null;
+  }
+
+  // passwordHash + googleId both optional now (Google users have no password).
+  function create({ email, passwordHash, googleId }) {
     load();
     if (users.some((u) => u.email === email)) return null;
     const count = users.length + 1;
-    const user = { id: 'u' + count + '_' + email, email, passwordHash, createdAt: new Date().toISOString() };
+    const user = {
+      id: 'u' + count + '_' + email,
+      email,
+      createdAt: new Date().toISOString(),
+    };
+    if (passwordHash != null) user.passwordHash = passwordHash;
+    if (googleId != null) user.googleId = googleId;
     users.push(user);
     save();
     return user;
+  }
+
+  // find-or-create-and-link: by googleId first, then LINK to an existing email account,
+  // otherwise create a fresh Google-only user. Persists on the link + create paths.
+  function findOrCreateGoogle(googleId, email) {
+    const byG = findByGoogleId(googleId);
+    if (byG) return byG;
+    const em = String(email == null ? '' : email).trim().toLowerCase();
+    const byE = load().find((u) => u.email === em) || null;
+    if (byE) {
+      byE.googleId = googleId;
+      save();
+      return byE;
+    }
+    return create({ email: em, googleId });
   }
 
   function _all() {
     return load();
   }
 
-  return { findByEmail, create, _all };
+  return { findByEmail, findByGoogleId, create, findOrCreateGoogle, _all };
 }
 
 module.exports = { createStore };
