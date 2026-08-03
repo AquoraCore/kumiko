@@ -140,18 +140,53 @@ describe('web api shim', () => {
     api.onPtyData(() => {});
   });
 
-  it('runEngine emits the web AI-not-available notice via the output callback', async () => {
-    const api = createWebApi({ baseUrl: 'http://x', getToken: () => null, store: memStore() });
+  it('runEngine degrades safely when the AI endpoint is unreachable (no server)', async () => {
+    // closed local port -> fetch rejects -> catch fires done with code:-1, no output
+    const api = createWebApi({ baseUrl: 'http://127.0.0.1:1', getToken: () => null, store: memStore() });
     let out = null;
     let done = null;
     api.onEngineOutput((m) => { out = m; });
     api.onEngineDone((m) => { done = m; });
     await api.runEngine({ runId: 'r' });
-    expect(out).not.toBe(null);
-    expect(out.runId).toBe('r');
-    expect(String(out.data)).toContain('not available');
-    expect(done).toEqual({ runId: 'r', code: 0 });
-  });
+    expect(out).toBe(null);
+    expect(done).toEqual({ runId: 'r', code: -1 });
+  }, 20000);
+
+  it('runEngine streams the managed /ai/chat reply through onEngineOutput', async () => {
+    const s = await startServer({
+      port: 0, dataDir: tmpDir(),
+      streamChat: async function* (prompt) { yield 'Hello, '; yield 'you said: '; yield prompt; },
+    });
+    const base = 'http://127.0.0.1:' + s.port;
+
+    let r = await fetch(base + '/auth/signup', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'ai@b.com', password: 'password123' }),
+    });
+    expect(r.status).toBe(200);
+    let token = (await r.json()).token;
+
+    const api = createWebApi({ baseUrl: base, getToken: () => token });
+    try {
+      const parts = [];
+      let done = null;
+      api.onEngineOutput((m) => { parts.push(m.data); });
+      api.onEngineDone((m) => { done = m; });
+      await api.runEngine({ runId: 'r', prompt: 'hi' });
+      // runEngine resolves only after _engineDone fires, but poll defensively.
+      const ok = await new Promise((resolve) => {
+        const start = Date.now();
+        const tick = () => { if (done) return resolve(true); if (Date.now() - start > 5000) return resolve(false); setTimeout(tick, 20); };
+        tick();
+      });
+      expect(ok).toBe(true);
+      expect(parts.join('')).toBe('Hello, you said: hi');
+      expect(done).toEqual({ runId: 'r', code: 0 });
+    } finally {
+      await s.close();
+    }
+  }, 20000);
 
   it('searchNotes / backlinks / graphData / listNotes folders match Electron shapes (client-side)', async () => {
     const s = await startServer({ port: 0, dataDir: tmpDir() });

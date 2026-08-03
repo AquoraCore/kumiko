@@ -7,6 +7,7 @@ const auth = require('./auth');
 const { createStore } = require('./store');
 const { setupConn, setPersistDir } = require('./relay');
 const { createNoteStore } = require('./notestore');
+const aiCore = require('../core/ai');
 
 // Real verifier: validates a Google ID token against this app's client id.
 // Returns { sub, email, name } on success, null on failure. Never throws.
@@ -44,6 +45,34 @@ async function startServer(opts = {}) {
   const store = createStore(path.join(dataDir, 'users.json'));
   const googleClientId = opts.googleClientId || process.env.GOOGLE_CLIENT_ID || '';
   const verifyGoogleToken = opts.verifyGoogleToken || makeGoogleVerifier(googleClientId);
+
+  // Managed AI config (Phase 7e): the server holds the LLM key, the browser never
+  // sees it. Empty provider/key = "not configured" -> /ai/chat returns 501.
+  const aiProvider = opts.aiProvider || process.env.MANAGED_AI_PROVIDER || '';
+  const aiKey = opts.aiKey || process.env.MANAGED_AI_KEY || '';
+  const aiModel = opts.aiModel || process.env.MANAGED_AI_MODEL || (aiProvider === 'anthropic' ? 'claude-opus-4-8' : 'glm-5.2');
+
+  // Streaming chat over the configured provider. INJECTABLE via opts.streamChat so
+  // tests run without a real LLM/key. Yields text deltas; returns early if unset.
+  const streamChat = opts.streamChat || (async function* (prompt) {
+    if (!aiProvider || !aiKey) return;
+    const req = aiCore.buildApiRequest(aiProvider, aiModel, prompt, aiKey);
+    if (!req) return;
+    const res = await fetch(req.url, { method: 'POST', headers: req.headers, body: JSON.stringify(req.body) });
+    if (!res.ok || !res.body) return;
+    const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '';
+    while (true) {
+      const { value, done } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i); buf = buf.slice(i + 1);
+        const m = line.match(/^data:\s?(.*)$/); if (!m) continue;
+        const delta = aiCore.parseSseDelta(aiProvider, m[1]);
+        if (delta) yield delta;
+      }
+    }
+  });
 
   const app = express();
   app.locals.secret = secret;
@@ -133,6 +162,25 @@ async function startServer(opts = {}) {
     const name = req.query.name;
     const ok = notes.remove(req.user.sub, name);
     res.json({ ok });
+  });
+
+  // POST /ai/chat (authed, streaming) — managed AI proxy using the SERVER's key.
+  // Streams text/plain deltas back to the caller. 501 when neither an injected
+  // streamChat nor provider/key is configured.
+  app.post('/ai/chat', requireAuth, async (req, res) => {
+    const prompt = (req.body && req.body.prompt) || '';
+    if (!opts.streamChat && (!aiProvider || !aiKey)) return res.status(501).json({ error: 'managed AI not configured' });
+    res.setHeader('content-type', 'text/plain; charset=utf-8');
+    try {
+      for await (const delta of streamChat(prompt)) res.write(delta);
+      res.end();
+    } catch (_) { try { res.end(); } catch (__) {} }
+  });
+
+  // GET /ai/config -> { available }. PUBLIC (mirrors /auth/config) so the web UI
+  // can decide whether to surface AI controls without an auth round-trip.
+  app.get('/ai/config', (req, res) => {
+    res.json({ available: !!(opts.streamChat || (aiProvider && aiKey)) });
   });
 
   const server = http.createServer(app);

@@ -213,7 +213,7 @@ function createWebApi(opts) {
     return Promise.resolve(true);
   }
 
-  // ---- AI (web MVP placeholders; real managed AI is 7e) ----
+  // ---- AI (web: streams the managed /ai/chat proxy; config via /ai/config) ----
   function aiGetConfig() {
     return Promise.resolve({ mode: 'managed', provider: '', model: '', hasKey: { anthropic: false, zai: false } });
   }
@@ -228,11 +228,29 @@ function createWebApi(opts) {
   let _engineDone = null;
   function onEngineOutput(cb) { _engineOut = cb; }
   function onEngineDone(cb) { _engineDone = cb; }
-  function runEngine(payload) {
+  // Streams the managed /ai/chat reply: each chunk -> onEngineOutput, then
+  // onEngineDone({code:0}). Unreachable/non-ok -> [AI unavailable] + code:-1.
+  // ponytail: stopEngine stays a no-op; a fetch AbortController is a future nicety.
+  async function runEngine(payload) {
     const runId = payload && payload.runId;
-    if (_engineOut) _engineOut({ runId, data: 'AI is not available on the web build yet.\r\n' });
-    if (_engineDone) _engineDone({ runId, code: 0 });
-    return Promise.resolve();
+    const prompt = (payload && payload.prompt) || '';
+    try {
+      const res = await fetch(baseUrl + '/ai/chat', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ prompt }) });
+      if (!res.ok || !res.body) {
+        if (_engineOut) _engineOut({ runId, data: '[AI unavailable]\r\n' });
+        if (_engineDone) _engineDone({ runId, code: -1 });
+        return;
+      }
+      const reader = res.body.getReader(); const dec = new TextDecoder();
+      while (true) {
+        const { value, done } = await reader.read(); if (done) break;
+        const chunk = dec.decode(value, { stream: true });
+        if (chunk && _engineOut) _engineOut({ runId, data: chunk });
+      }
+      if (_engineDone) _engineDone({ runId, code: 0 });
+    } catch (_) {
+      if (_engineDone) _engineDone({ runId, code: -1 });
+    }
   }
   function stopEngine() { return Promise.resolve(true); }
 
