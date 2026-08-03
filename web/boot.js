@@ -1,6 +1,7 @@
 // Phase 7d-3a: web boot — install the window.api shim, then wire the login overlay.
 // Runs BEFORE renderer scripts (loaded right after api-web.js).
 window.api = window.createWebApi({ baseUrl: location.origin, store: window.localStorage });
+if (!localStorage.getItem("collabRelay")) localStorage.setItem("collabRelay", (location.protocol==="https:"?"wss":"ws")+"://"+location.host);
 
 function webAuthed() {
   try { return !!(JSON.parse(localStorage.getItem('webAuth') || 'null') || {}).token; }
