@@ -11,6 +11,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:all": "vitest run && playwright test",
+    "predeploy": "vitest run",
+    "deploy": "bash scripts/deploy-ally.sh",
     "relay": "node server/relay.js",
     "server": "node server/index.js"
   },

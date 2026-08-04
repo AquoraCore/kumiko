@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Deploy changed files to the Kumiko home server (ROG Ally) over Cloudflare-tunnel SSH.
+#
+# THE GATE: this script is invoked via `npm run deploy`, and package.json defines a
+# `predeploy` script (`vitest run`) that npm runs FIRST. If any test is red, npm aborts
+# before this script executes — so nothing ever ships without the full regression suite
+# passing. Every bug the user reports must gain a test in tests/unit (or tests/e2e) so it
+# becomes part of this gate for all future deploys. See feedback_kumiko_predeploy_gate.
+#
+# Usage:  npm run deploy -- <file> [file ...]
+#   e.g.  npm run deploy -- server/index.js web/index.html renderer/pdf.js
+# Files are repo-relative; each is scp'd to C:/kumiko/<same-path>. If any server/*.js is
+# among them, the KumikoServer scheduled task is restarted (server code is loaded at boot;
+# static web/renderer/core assets are served no-store and go live on the next reload).
+set -euo pipefail
+
+HOST="kumiko-win"
+FILES=("$@")
+if [ ${#FILES[@]} -eq 0 ]; then
+  echo "usage: npm run deploy -- <file> [file ...]" >&2
+  exit 1
+fi
+
+NEED_RESTART=0
+for f in "${FILES[@]}"; do
+  if [ ! -f "$f" ]; then echo "ERROR: no such file: $f" >&2; exit 1; fi
+  scp -o ConnectTimeout=25 "$f" "$HOST:C:/kumiko/$f"
+  echo "  ✓ sent $f"
+  case "$f" in
+    server/*) NEED_RESTART=1 ;;
+  esac
+done
+
+if [ "$NEED_RESTART" = "1" ]; then
+  echo "server code changed → restarting KumikoServer…"
+  ssh -o ConnectTimeout=30 "$HOST" "powershell -NoProfile -Command \"Stop-ScheduledTask -TaskName KumikoServer; Start-Sleep 2; Start-ScheduledTask -TaskName KumikoServer; Start-Sleep 4\""
+fi
+
+echo "health check:"
+ssh -o ConnectTimeout=30 "$HOST" "powershell -NoProfile -Command \"try { 'http=' + (Invoke-WebRequest -UseBasicParsing http://127.0.0.1:4321/ -TimeoutSec 8).StatusCode } catch { \$_.Exception.Message }\""
+echo "deploy done."
