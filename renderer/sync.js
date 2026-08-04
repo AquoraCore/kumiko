@@ -2,6 +2,19 @@
 // local vault (window.api IPC — real files) with the cloud vault (fetch to backend).
 // Uses the pure core/sync.js planSync. Web build is a no-op: on web, window.api IS
 // the cloud shim so "local" already equals cloud — syncing would be pointless.
+// v2.2: background auto-sync (initial + 60s interval + after-save debounce) with a
+// concurrency guard + a status chip. syncNow() body is unchanged; syncTick wraps it.
+let _syncing = false, _syncState = { state:'idle', at:0 };
+let _soonT = null;
+function _now(){ return (window.__NOW__ || Date.now()); }
+function applySyncChip(){
+  const chip = document.getElementById('syncChip');
+  if (!chip) return;
+  if (typeof window.KUMIKO_WEB !== 'undefined'){ chip.hidden = true; return; }
+  const v = window.CoreSyncStatus.syncStatusView({ state:_syncState.state, at:_syncState.at, now:_now() });
+  if (!v.label){ chip.hidden = true; return; }
+  chip.hidden = false; chip.textContent = v.label; chip.title = v.title; chip.className = 'sync-chip ' + v.tone;
+}
 async function syncNow() {
   if (typeof window.KUMIKO_WEB !== 'undefined') return { ok:false, error:'web' };
   try {
@@ -53,7 +66,46 @@ async function syncNow() {
   } catch (e) { return { ok:false, error:String(e && e.message || e) }; }
 }
 window.syncNow = syncNow;
-// auto-sync ~2s after load if logged in (desktop only), then refresh the note list
+// Guarded wrapper the schedulers call. Keeps syncNow's contract intact and updates
+// the chip + state. Reason is for traceability only ('load' | 'interval' | 'save' | 'online').
+async function syncTick(reason){
+  if (typeof window.KUMIKO_WEB !== 'undefined') return { ok:false, error:'web' };
+  if (_syncing) return { ok:false, error:'busy' };
+  if (typeof navigator !== 'undefined' && navigator.onLine === false){
+    _syncState = { state:'offline', at:_syncState.at }; applySyncChip();
+    return { ok:false, error:'offline' };
+  }
+  _syncing = true; _syncState = { state:'syncing', at:_syncState.at }; applySyncChip();
+  let r;
+  try { r = await syncNow(); } finally { _syncing = false; }
+  if (r && r.ok){
+    _syncState = { state:'synced', at:_now() };
+  } else if (r && r.error === 'not-logged-in'){
+    _syncState = { state:'idle', at:_syncState.at };
+  } else {
+    _syncState = { state:'error', at:_syncState.at };
+  }
+  applySyncChip();
+  if (r && r.ok && (r.pulled || r.conflicts || r.deletedLocal) && typeof refreshList === 'function'){
+    try { await refreshList(); } catch(_){}
+  }
+  return r;
+}
+window.syncTick = syncTick;
+// Debounced after-save sync. Coalesces rapid Ctrl-S presses into one sync.
+window.syncSoon = function(delay){
+  if (typeof window.KUMIKO_WEB !== 'undefined') return;
+  clearTimeout(_soonT);
+  _soonT = setTimeout(() => syncTick('save'), delay == null ? 2500 : delay);
+};
+// v2.2 background auto-sync (desktop only): initial @2s, periodic @60s,
+// online/offline hooks, and an initial chip paint (hidden while idle).
 if (typeof window.KUMIKO_WEB === 'undefined') {
-  setTimeout(async () => { try { const r = await syncNow(); if (r.ok && (r.pulled||r.conflicts||r.deletedLocal) && typeof refreshList==='function') await refreshList(); } catch(_){} }, 2000);
+  setTimeout(() => syncTick('load'), 2000);
+  setInterval(() => syncTick('interval'), 60000);
+  if (typeof window !== 'undefined' && window.addEventListener){
+    window.addEventListener('online',  () => { applySyncChip(); syncTick('online'); });
+    window.addEventListener('offline', () => { _syncState = { state:'offline', at:_syncState.at }; applySyncChip(); });
+  }
+  setTimeout(applySyncChip, 0);
 }

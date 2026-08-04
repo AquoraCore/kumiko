@@ -1677,3 +1677,13 @@ table.db tr:hover .db-delrow { opacity: 1; }
   word-break: normal; pointer-events: none; }
 .ProseMirror-yjs-cursor > div { position: absolute; top: -1.4em; left: -1px; font-size: 11px;
   color: #fff; padding: 0 4px; border-radius: 4px 4px 4px 0; white-space: nowrap; user-select: none; }
+
+/* v2.2 sync status chip (idle/syncing/synced+time/offline/error) */
+.sync-chip { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.sync-chip.ok   { color: #3f7d52; border-color: #cfe3d4; }
+.sync-chip.busy { color: var(--muted); }
+.sync-chip.warn { color: #9a6a2f; border-color: #ecdcc2; }
+.sync-chip.err  { color: #bd5540; border-color: #e6c6bd; }
+:root[data-theme="dark"] .sync-chip.ok { color:#7fc99a; border-color:#2f4636; }
+:root[data-theme="dark"] .sync-chip.warn { color:#d3a566; border-color:#463a2f; }
+:root[data-theme="dark"] .sync-chip.err { color:#e08a76; border-color:#4a352f; }

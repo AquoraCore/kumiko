@@ -77,4 +77,53 @@ test.describe('desktop <-> cloud sync (Option B)', () => {
     });
     expect(localHasCloud).toBe(true);
   }, 30000);
+
+  // Phase V2.2: proves AFTER-SAVE auto-sync via window.syncSoon (debounced) pushes
+  // a brand-new note to the cloud WITHOUT a manual syncNow call. Reuses the same
+  // ephemeral-server + signup setup as the HAPPY test above.
+  test('AFTERSAVE: window.syncSoon() pushes a newly saved note without manual syncNow', async () => {
+    s = await startServer({ port: 0, dataDir: mkTmp('washi-sync-soon-data-') });
+    const wsUrl = 'ws://127.0.0.1:' + s.port;
+    const httpBase = 'http://127.0.0.1:' + s.port;
+
+    A = await launchApp({ notes: [{ name: 'Seed.md', content: '# seed' }] });
+    const page = A.page;
+
+    await page.evaluate((u) => { localStorage.setItem('collabRelay', u); }, wsUrl);
+    await page.evaluate(async ({ httpBase }) => {
+      const r = await fetch(httpBase + '/auth/signup', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'syncsoon@e2e.local', password: 'secret123' }),
+      });
+      if (!r.ok) throw new Error('signup failed: ' + r.status);
+      const { token, email } = await r.json();
+      await window.api.authSetToken(token, email);
+    }, { httpBase });
+
+    // establish base via one guarded tick
+    await page.evaluate(() => window.syncTick('load'));
+
+    // create + save a brand-new note locally (no manual syncNow)
+    await page.evaluate(async () => {
+      await window.api.createNote('AutoSaved.md');
+      await window.api.saveNote('AutoSaved.md', '# auto');
+    });
+    // fire the debounced after-save sync (delay=0)
+    await page.evaluate(() => window.syncSoon(0));
+
+    // poll the cloud /notes for this vault until 'AutoSaved.md' shows up (<=4s)
+    let cloudHas = false;
+    for (let i = 0; i < 20; i++) {
+      cloudHas = await page.evaluate(async ({ httpBase }) => {
+        const acc = await window.api.authGetToken(); const tok = acc && acc.token;
+        const H = { authorization: 'Bearer ' + tok };
+        const vid = (await (await fetch(httpBase + '/vaults', { headers: H })).json()).vaults[0].id;
+        const names = (await (await fetch(httpBase + '/notes', { headers: Object.assign({ 'x-vault': vid }, H) })).json()).notes || [];
+        return names.includes('AutoSaved.md');
+      }, { httpBase });
+      if (cloudHas) break;
+      await page.waitForTimeout(200);
+    }
+    expect(cloudHas).toBe(true);
+  }, 30000);
 });

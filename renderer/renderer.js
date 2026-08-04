@@ -403,6 +403,7 @@ async function save() {
   if (!currentNote) return;
   await window.api.saveNote(currentNote, getFullMarkdown());
   setDirty(false);
+  if (window.syncSoon) window.syncSoon();
 }
 document.getElementById('saveBtn').onclick = save;
 window.addEventListener('keydown', (e) => {
