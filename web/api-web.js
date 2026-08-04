@@ -30,6 +30,10 @@ const _rag = (typeof window !== 'undefined' && window.CoreRag) ? window.CoreRag 
 // ponytail: null when neither is available — renameNote then skips link rewrite instead of throwing.
 const _wl = (typeof window !== 'undefined' && window.CoreWikilinks) ? window.CoreWikilinks
           : (typeof require !== 'undefined' ? require('../core/wikilinks') : null);
+// Dual-mode CoreFrontmatter: browser global (set by core/frontmatter.js UMD wrapper) else Node require.
+// ponytail: null when neither is available — noteTable then skips frontmatter parsing instead of throwing.
+const _fm = (typeof window !== 'undefined' && window.CoreFrontmatter) ? window.CoreFrontmatter
+          : (typeof require !== 'undefined' ? require('../core/frontmatter') : null);
 
 function createWebApi(opts) {
   opts = opts || {};
@@ -434,7 +438,28 @@ function createWebApi(opts) {
     return { nodes, edges };
   }
 
-  function noteTable() { return Promise.resolve([]); }
+  // Matches ipc note:table: one row per note {name, status, tags, backlinks}.
+  // status/tags from the note's YAML frontmatter; backlinks = count of OTHER
+  // notes whose [[wikilinks]] target this note's basename. Client-side, never throws.
+  async function noteTable() {
+    try {
+      const all = await _allNotes();
+      const rows = [];
+      for (const n of all) {
+        const attrs = (_fm && _fm.parseFrontmatter) ? (_fm.parseFrontmatter(n.content || '').attrs || {}) : {};
+        const base = _baseName(n.name);
+        let backlinks = 0;
+        for (const m of all) {
+          if (m.name === n.name) continue;
+          if (_wl && _wl.linksTo && _wl.linksTo(m.content || '', base)) backlinks++;
+        }
+        rows.push({ name: n.name, status: attrs.status || '', tags: attrs.tags || '', backlinks });
+      }
+      return rows;
+    } catch (_) {
+      return [];
+    }
+  }
 
   // ---- pdfs (per-user cloud PDF storage; mirrors Electron pdf:* handlers) ----
   // TESTABLE upload: raw octet-stream POST. Uses fetch directly (NOT `req`,

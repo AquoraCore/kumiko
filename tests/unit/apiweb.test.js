@@ -402,4 +402,32 @@ describe('web api shim', () => {
       await s.close();
     }
   }, 20000);
+
+  it('noteTable returns rows with status/tags/backlinks', async () => {
+    const s = await startServer({ port: 0, dataDir: tmpDir() });
+    const base = 'http://127.0.0.1:' + s.port;
+
+    let r = await fetch(base + '/auth/signup', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'table@b.com', password: 'password123' }),
+    });
+    expect(r.status).toBe(200);
+    let token = (await r.json()).token;
+
+    const api = createWebApi({ baseUrl: base, getToken: () => token });
+    try {
+      await api.saveNote('Kidney.md', '---\nstatus: อ่านแล้ว\ntags: bio\n---\n# Kidney\n\nthe kidney');
+      await api.saveNote('Nephron.md', '# Nephron\n\npart of the [[Kidney]] system');
+      const rows = await api.noteTable();
+      const kidney = rows.find(r => r.name === 'Kidney.md');
+      expect(kidney.status).toBe('อ่านแล้ว');
+      expect(kidney.tags).toBe('bio');
+      expect(kidney.backlinks).toBe(1);
+      const nephron = rows.find(r => r.name === 'Nephron.md');
+      expect(nephron.backlinks).toBe(0);
+    } finally {
+      await s.close();
+    }
+  }, 20000);
 });
