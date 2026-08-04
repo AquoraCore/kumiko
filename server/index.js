@@ -101,7 +101,9 @@ async function startServer(opts = {}) {
   app.locals.secret = secret;
   app.locals.notes = createNoteStore(path.join(dataDir, 'vaults'));
   app.locals.dbs = createDbStore(path.join(dataDir, 'vaults'));
-  app.use(express.json());
+  // 25mb so crop-into-note (base64 PNG data-URIs) + large DB/annot payloads fit;
+  // the express default is 100kb, which silently 413s a single cropped image.
+  app.use(express.json({ limit: '25mb' }));
 
   // Per-user vault registry (Phase 8.2). Resolves the x-vault header to a
   // real vault id, falling back to the user's default vault.
