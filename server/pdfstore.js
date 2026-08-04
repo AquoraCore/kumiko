@@ -12,12 +12,12 @@ function safeName(name) {
 }
 
 function createPdfStore(rootDir) {
-  function dir(userId) {
-    return path.join(rootDir, encodeURIComponent(String(userId)), 'pdfs');
+  function dir(userId, vaultId) {
+    return path.join(rootDir, encodeURIComponent(String(userId)), encodeURIComponent(String(vaultId)), 'pdfs');
   }
 
-  function list(userId) {
-    const d = dir(userId);
+  function list(userId, vaultId) {
+    const d = dir(userId, vaultId);
     let ents = [];
     try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch (_) { return []; }
     const out = [];
@@ -31,21 +31,21 @@ function createPdfStore(rootDir) {
     return out;
   }
 
-  function read(userId, name) {
+  function read(userId, vaultId, name) {
     const n = safeName(name);
     if (!n) return null;
     try {
-      return fs.readFileSync(path.join(dir(userId), n));
+      return fs.readFileSync(path.join(dir(userId, vaultId), n));
     } catch (_) {
       return null;
     }
   }
 
-  function write(userId, name, buffer) {
+  function write(userId, vaultId, name, buffer) {
     const n0 = safeName(name);
     if (!n0) return null;
     try {
-      const d = dir(userId);
+      const d = dir(userId, vaultId);
       fs.mkdirSync(d, { recursive: true });
       // DEDUP: append " (1)", " (2)"... until the path is free. Mirrors
       // Electron's native dialog copy-into-vault dedup shape.
@@ -63,13 +63,13 @@ function createPdfStore(rootDir) {
     }
   }
 
-  function rename(userId, from, to) {
+  function rename(userId, vaultId, from, to) {
     const f = safeName(from);
     if (!f) return { error: 'invalid' };
     // Coerce `to` to a .pdf basename; if caller omitted the extension, append it.
     const t = safeName(/\.pdf$/i.test(String(to || '')) ? to : String(to || '').trim() + '.pdf');
     if (!t) return { error: 'invalid' };
-    const d = dir(userId);
+    const d = dir(userId, vaultId);
     const fp = path.join(d, f);
     const tp = path.join(d, t);
     if (fs.existsSync(tp)) return { error: 'exists' };
@@ -87,22 +87,22 @@ function createPdfStore(rootDir) {
     return { name: t };
   }
 
-  function readAnnots(userId, name) {
+  function readAnnots(userId, vaultId, name) {
     const n = safeName(name);
     if (!n) return { highlights: [] };
     try {
-      return JSON.parse(fs.readFileSync(path.join(dir(userId), n + '.annot.json'), 'utf8'))
+      return JSON.parse(fs.readFileSync(path.join(dir(userId, vaultId), n + '.annot.json'), 'utf8'))
         || { highlights: [] };
     } catch (_) {
       return { highlights: [] };
     }
   }
 
-  function saveAnnots(userId, name, data) {
+  function saveAnnots(userId, vaultId, name, data) {
     const n = safeName(name);
     if (!n) return false;
     try {
-      const d = dir(userId);
+      const d = dir(userId, vaultId);
       fs.mkdirSync(d, { recursive: true });
       fs.writeFileSync(path.join(d, n + '.annot.json'), JSON.stringify(data || { highlights: [] }));
       return true;

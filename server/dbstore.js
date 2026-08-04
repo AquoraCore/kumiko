@@ -9,12 +9,12 @@ function safeId(id) {
 }
 
 function createDbStore(rootDir) {
-  function dbDir(userId) {
-    return path.join(rootDir, encodeURIComponent(String(userId)), 'databases');
+  function vaultDir(userId, vaultId) {
+    return path.join(rootDir, encodeURIComponent(String(userId)), encodeURIComponent(String(vaultId)), 'databases');
   }
 
-  function list(userId) {
-    const dir = dbDir(userId);
+  function list(userId, vaultId) {
+    const dir = vaultDir(userId, vaultId);
     let ents = [];
     try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return []; }
     const out = [];
@@ -36,22 +36,22 @@ function createDbStore(rootDir) {
     return out;
   }
 
-  function read(userId, id) {
+  function read(userId, vaultId, id) {
     const sid = safeId(id);
     if (!sid) return null;
     try {
-      return JSON.parse(fs.readFileSync(path.join(dbDir(userId), sid + '.json'), 'utf8')) || null;
+      return JSON.parse(fs.readFileSync(path.join(vaultDir(userId, vaultId), sid + '.json'), 'utf8')) || null;
     } catch (_) {
       return null;
     }
   }
 
-  function write(userId, db) {
+  function write(userId, vaultId, db) {
     if (!db || !db.id) return false;
     const sid = safeId(db.id);
     if (!sid) return false;
     try {
-      const full = path.join(dbDir(userId), sid + '.json');
+      const full = path.join(vaultDir(userId, vaultId), sid + '.json');
       fs.mkdirSync(path.dirname(full), { recursive: true });
       fs.writeFileSync(full, JSON.stringify(db, null, 2));
       return true;
@@ -60,11 +60,11 @@ function createDbStore(rootDir) {
     }
   }
 
-  function remove(userId, id) {
+  function remove(userId, vaultId, id) {
     const sid = safeId(id);
     if (!sid) return false;
     try {
-      const full = path.join(dbDir(userId), sid + '.json');
+      const full = path.join(vaultDir(userId, vaultId), sid + '.json');
       if (fs.existsSync(full)) fs.unlinkSync(full);
       return true;
     } catch (_) {
@@ -72,7 +72,7 @@ function createDbStore(rootDir) {
     }
   }
 
-  return { dbDir, list, read, write, remove };
+  return { list, read, write, remove };
 }
 
 module.exports = { createDbStore };

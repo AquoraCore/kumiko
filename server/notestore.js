@@ -3,8 +3,8 @@ const path = require('path');
 const { safeRel } = require('../core/pathutil');
 
 function createNoteStore(rootDir) {
-  function userDir(userId) {
-    return path.join(rootDir, encodeURIComponent(String(userId)));
+  function vaultDir(userId, vaultId) {
+    return path.join(rootDir, encodeURIComponent(String(userId)), encodeURIComponent(String(vaultId)));
   }
 
   function walk(dir, base) {
@@ -21,25 +21,25 @@ function createNoteStore(rootDir) {
     return out;
   }
 
-  function list(userId) {
-    return walk(userDir(userId));
+  function list(userId, vaultId) {
+    return walk(vaultDir(userId, vaultId));
   }
 
-  function read(userId, name) {
+  function read(userId, vaultId, name) {
     const rel = safeRel(name);
     if (!rel) return '';
     try {
-      return fs.readFileSync(path.join(userDir(userId), rel), 'utf8');
+      return fs.readFileSync(path.join(vaultDir(userId, vaultId), rel), 'utf8');
     } catch (_) {
       return '';
     }
   }
 
-  function write(userId, name, content) {
+  function write(userId, vaultId, name, content) {
     const rel = safeRel(name);
     if (!rel) return false;
     try {
-      const full = path.join(userDir(userId), rel);
+      const full = path.join(vaultDir(userId, vaultId), rel);
       fs.mkdirSync(path.dirname(full), { recursive: true });
       fs.writeFileSync(full, content);
       return true;
@@ -48,11 +48,11 @@ function createNoteStore(rootDir) {
     }
   }
 
-  function remove(userId, name) {
+  function remove(userId, vaultId, name) {
     const rel = safeRel(name);
     if (!rel) return false;
     try {
-      const full = path.join(userDir(userId), rel);
+      const full = path.join(vaultDir(userId, vaultId), rel);
       if (fs.existsSync(full)) fs.unlinkSync(full);
       return true;
     } catch (_) {
@@ -60,7 +60,7 @@ function createNoteStore(rootDir) {
     }
   }
 
-  return { userDir, list, read, write, remove };
+  return { list, read, write, remove };
 }
 
 module.exports = { createNoteStore };

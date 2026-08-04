@@ -11,6 +11,7 @@ const { createNoteStore } = require('./notestore');
 const { createDbStore } = require('./dbstore');
 const { createPdfStore } = require('./pdfstore');
 const { createVaultFs } = require('./vaultfs');
+const { createVaultReg } = require('./vaultreg');
 const aiCore = require('../core/ai');
 
 // Real verifier: validates a Google ID token against this app's client id.
@@ -36,6 +37,15 @@ function requireAuth(req, res, next) {
   if (!p) return res.status(401).json({ error: 'unauthorized' });
   req.user = p;
   next();
+}
+
+// Reads the x-vault header, validates against the per-user registry, and falls
+// back to the user's default (first) vault. Keeps existing no-header callers
+// (and tests) on the default vault unchanged.
+function makeVaultOf(vreg) {
+  return function vaultOf(req) {
+    return vreg.resolve(req.user.sub, req.get('x-vault'));
+  };
 }
 
 async function startServer(opts = {}) {
@@ -92,6 +102,11 @@ async function startServer(opts = {}) {
   app.locals.notes = createNoteStore(path.join(dataDir, 'vaults'));
   app.locals.dbs = createDbStore(path.join(dataDir, 'vaults'));
   app.use(express.json());
+
+  // Per-user vault registry (Phase 8.2). Resolves the x-vault header to a
+  // real vault id, falling back to the user's default vault.
+  const vreg = createVaultReg(path.join(dataDir, 'vaults'));
+  const vaultOf = makeVaultOf(vreg);
 
   // Static serving for the web entry (Phase 7d-3a). Only the dirs the page needs.
   const ROOT = path.join(__dirname, '..');
@@ -177,118 +192,158 @@ async function startServer(opts = {}) {
   const pdfs = createPdfStore(path.join(dataDir, 'vaults'));
   const vfs = createVaultFs(path.join(dataDir, 'vaults'));
 
+  // ---- vaults (Phase 8.2): per-user vault registry CRUD ----
+  // GET /vaults -> { vaults: [...] } (default vault is lazily created on first read)
+  app.get('/vaults', requireAuth, (req, res) => {
+    res.json({ vaults: vreg.list(req.user.sub) });
+  });
+
+  // POST /vaults { name } -> { vault }
+  app.post('/vaults', requireAuth, (req, res) => {
+    res.json({ vault: vreg.create(req.user.sub, (req.body || {}).name) });
+  });
+
+  // POST /vaults/rename { id, name } -> vault | { error }
+  app.post('/vaults/rename', requireAuth, (req, res) => {
+    res.json(vreg.rename(req.user.sub, (req.body || {}).id, (req.body || {}).name));
+  });
+
+  // DELETE /vaults?id=<id> -> { ok:true } | { error }  (never deletes the last vault)
+  app.delete('/vaults', requireAuth, (req, res) => {
+    res.json(vreg.remove(req.user.sub, req.query.id));
+  });
+
   // GET /notes -> { notes: [...] }  (authed)
   app.get('/notes', requireAuth, (req, res) => {
-    res.json({ notes: notes.list(req.user.sub) });
+    const v = vaultOf(req);
+    res.json({ notes: notes.list(req.user.sub, v) });
   });
 
   // GET /notes/content?name=<n> -> { name, content }
   app.get('/notes/content', requireAuth, (req, res) => {
+    const v = vaultOf(req);
     const name = req.query.name;
-    res.json({ name, content: notes.read(req.user.sub, name) });
+    res.json({ name, content: notes.read(req.user.sub, v, name) });
   });
 
   // PUT /notes { name, content } -> { ok }
   app.put('/notes', requireAuth, (req, res) => {
+    const v = vaultOf(req);
     const { name, content } = req.body || {};
-    const ok = notes.write(req.user.sub, name, String(content || ''));
+    const ok = notes.write(req.user.sub, v, name, String(content || ''));
     return res.status(ok ? 200 : 400).json({ ok });
   });
 
   // DELETE /notes?name=<n> -> { ok }. SOFT delete: moves the note into .trash
   // (vfs.noteTrash) instead of hard-unlinking, mirroring Electron note:delete.
   app.delete('/notes', requireAuth, (req, res) => {
-    const r = vfs.noteTrash(req.user.sub, req.query.name);
+    const v = vaultOf(req);
+    const r = vfs.noteTrash(req.user.sub, v, req.query.name);
     res.json({ ok: r.ok === true });
   });
 
-  // ---- folders (per-user cloud folder storage; mirrors Electron folder:*) ----
-  // GET /folders -> { folders: [...] } (all dirs under userDir, including empty)
+  // ---- folders (per-vault cloud folder storage; mirrors Electron folder:*) ----
+  // GET /folders -> { folders: [...] } (all dirs under vaultDir, including empty)
   app.get('/folders', requireAuth, (req, res) => {
-    res.json({ folders: vfs.folderList(req.user.sub) });
+    const v = vaultOf(req);
+    res.json({ folders: vfs.folderList(req.user.sub, v) });
   });
 
   // POST /folders { path } -> { name } | { error }
   app.post('/folders', requireAuth, (req, res) => {
-    const r = vfs.folderCreate(req.user.sub, (req.body || {}).path);
+    const v = vaultOf(req);
+    const r = vfs.folderCreate(req.user.sub, v, (req.body || {}).path);
     res.status(r.error ? 400 : 200).json(r);
   });
 
   // POST /folders/rename { from, to } -> { name } | { error }
   app.post('/folders/rename', requireAuth, (req, res) => {
-    const r = vfs.folderRename(req.user.sub, (req.body || {}).from, (req.body || {}).to);
+    const v = vaultOf(req);
+    const r = vfs.folderRename(req.user.sub, v, (req.body || {}).from, (req.body || {}).to);
     res.status(r.error ? 400 : 200).json(r);
   });
 
   // DELETE /folders?path=<rel> -> { ok:true } | { error }  (moves folder to trash)
   app.delete('/folders', requireAuth, (req, res) => {
-    res.json(vfs.folderDelete(req.user.sub, req.query.path));
+    const v = vaultOf(req);
+    res.json(vfs.folderDelete(req.user.sub, v, req.query.path));
   });
 
-  // ---- trash (per-user cloud trash; mirrors Electron trash:*) ----
+  // ---- trash (per-vault cloud trash; mirrors Electron trash:*) ----
   // GET /trash -> { trash: [...] } sorted by deletedAt DESC
   app.get('/trash', requireAuth, (req, res) => {
-    res.json({ trash: vfs.trashList(req.user.sub) });
+    const v = vaultOf(req);
+    res.json({ trash: vfs.trashList(req.user.sub, v) });
   });
 
   // POST /trash/restore { id } -> { ok:true } | { error }
   app.post('/trash/restore', requireAuth, (req, res) => {
-    res.json(vfs.trashRestore(req.user.sub, (req.body || {}).id));
+    const v = vaultOf(req);
+    res.json(vfs.trashRestore(req.user.sub, v, (req.body || {}).id));
   });
 
   // POST /trash/deleteForever { id } -> { ok:true }
   app.post('/trash/deleteForever', requireAuth, (req, res) => {
-    res.json(vfs.trashDeleteForever(req.user.sub, (req.body || {}).id));
+    const v = vaultOf(req);
+    res.json(vfs.trashDeleteForever(req.user.sub, v, (req.body || {}).id));
   });
 
   // POST /trash/empty -> { ok:true }
   app.post('/trash/empty', requireAuth, (req, res) => {
-    res.json(vfs.trashEmpty(req.user.sub));
+    const v = vaultOf(req);
+    res.json(vfs.trashEmpty(req.user.sub, v));
   });
 
-  // ---- databases (per-user cloud DB storage, JSON blobs) ----
+  // ---- databases (per-vault cloud DB storage, JSON blobs) ----
   // GET /dbs -> { dbs: [{ id, name, icon, cols, rows }] } (sorted by name)
   app.get('/dbs', requireAuth, (req, res) => {
-    res.json({ dbs: dbs.list(req.user.sub) });
+    const v = vaultOf(req);
+    res.json({ dbs: dbs.list(req.user.sub, v) });
   });
 
   // GET /dbs/one?id=<id> -> { db: fullDB|null }
   app.get('/dbs/one', requireAuth, (req, res) => {
-    res.json({ db: dbs.read(req.user.sub, req.query.id) });
+    const v = vaultOf(req);
+    res.json({ db: dbs.read(req.user.sub, v, req.query.id) });
   });
 
   // PUT /dbs { db } -> { ok }
   app.put('/dbs', requireAuth, (req, res) => {
+    const v = vaultOf(req);
     const db = (req.body || {}).db;
-    const ok = dbs.write(req.user.sub, db);
+    const ok = dbs.write(req.user.sub, v, db);
     return res.status(ok ? 200 : 400).json({ ok });
   });
 
   // DELETE /dbs?id=<id> -> { ok }
   app.delete('/dbs', requireAuth, (req, res) => {
-    res.json({ ok: dbs.remove(req.user.sub, req.query.id) });
+    const v = vaultOf(req);
+    res.json({ ok: dbs.remove(req.user.sub, v, req.query.id) });
   });
 
-  // ---- pdfs (per-user cloud PDF binary + annot storage) ----
+  // ---- pdfs (per-vault cloud PDF binary + annot storage) ----
   // GET /pdfs -> { pdfs: [...] } (sorted filenames, excludes *.annot.json sidecars)
   app.get('/pdfs', requireAuth, (req, res) => {
-    res.json({ pdfs: pdfs.list(req.user.sub) });
+    const v = vaultOf(req);
+    res.json({ pdfs: pdfs.list(req.user.sub, v) });
   });
 
   // POST /pdfs/upload?name=<file> -> { name }. RAW octet-stream body (NOT json) so
   // the binary bytes flow straight through; express.raw sits in front of requireAuth.
   app.post('/pdfs/upload', requireAuth, express.raw({ type: 'application/octet-stream', limit: '50mb' }), (req, res) => {
+    const v = vaultOf(req);
     const name = req.query.name;
     const buf = req.body;
     if (!Buffer.isBuffer(buf) || !buf.length) return res.status(400).json({ error: 'empty' });
-    const saved = pdfs.write(req.user.sub, name, buf);
+    const saved = pdfs.write(req.user.sub, v, name, buf);
     if (!saved) return res.status(400).json({ error: 'invalid' });
     res.json({ name: saved });
   });
 
   // GET /pdfs/read?name=<file> -> raw PDF bytes (application/pdf); 404 on miss.
   app.get('/pdfs/read', requireAuth, (req, res) => {
-    const buf = pdfs.read(req.user.sub, req.query.name);
+    const v = vaultOf(req);
+    const buf = pdfs.read(req.user.sub, v, req.query.name);
     if (!buf) return res.status(404).end();
     res.setHeader('content-type', 'application/pdf');
     res.end(buf);
@@ -296,19 +351,22 @@ async function startServer(opts = {}) {
 
   // POST /pdfs/rename { from, to } -> { name } | { error }
   app.post('/pdfs/rename', requireAuth, (req, res) => {
+    const v = vaultOf(req);
     const { from, to } = req.body || {};
-    res.json(pdfs.rename(req.user.sub, from, to));
+    res.json(pdfs.rename(req.user.sub, v, from, to));
   });
 
   // GET /pdfs/annots?name=<file> -> { highlights:[...] } (default empty)
   app.get('/pdfs/annots', requireAuth, (req, res) => {
-    res.json(pdfs.readAnnots(req.user.sub, req.query.name));
+    const v = vaultOf(req);
+    res.json(pdfs.readAnnots(req.user.sub, v, req.query.name));
   });
 
   // PUT /pdfs/annots { name, data } -> { ok }
   app.put('/pdfs/annots', requireAuth, (req, res) => {
+    const v = vaultOf(req);
     const { name, data } = req.body || {};
-    res.json({ ok: pdfs.saveAnnots(req.user.sub, name, data) });
+    res.json({ ok: pdfs.saveAnnots(req.user.sub, v, name, data) });
   });
 
   // POST /ai/chat (authed, streaming). Client may send its own {provider,key,model};

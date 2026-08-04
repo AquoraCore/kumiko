@@ -2,28 +2,28 @@ const fs = require('fs');
 const path = require('path');
 const { safeRel } = require('../core/pathutil');
 
-// Per-user folders + trash, mirroring the Electron handlers in main.js.
-// Reuses the SAME per-user dir as notestore (<rootDir>/<encodedUserId>),
+// Per-vault folders + trash, mirroring the Electron handlers in main.js.
+// Reuses the SAME per-vault dir as notestore (<rootDir>/<encodedUserId>/<encodedVaultId>),
 // so folderCreate/Delete/Rename operate on the dirs that listNotes derives
 // note folders from, and .trash sits next to notes but is dot-hidden.
 function createVaultFs(rootDir) {
-  function userDir(userId) {
-    return path.join(rootDir, encodeURIComponent(String(userId)));
+  function vaultDir(userId, vaultId) {
+    return path.join(rootDir, encodeURIComponent(String(userId)), encodeURIComponent(String(vaultId)));
   }
-  function trashDir(userId) {
-    return path.join(userDir(userId), '.trash');
+  function trashDir(userId, vaultId) {
+    return path.join(vaultDir(userId, vaultId), '.trash');
   }
-  function manifestPath(userId) {
-    return path.join(trashDir(userId), 'manifest.json');
+  function manifestPath(userId, vaultId) {
+    return path.join(trashDir(userId, vaultId), 'manifest.json');
   }
-  function readManifest(userId) {
-    try { return JSON.parse(fs.readFileSync(manifestPath(userId), 'utf8')) || []; }
+  function readManifest(userId, vaultId) {
+    try { return JSON.parse(fs.readFileSync(manifestPath(userId, vaultId), 'utf8')) || []; }
     catch (_) { return []; }
   }
-  function writeManifest(userId, arr) {
+  function writeManifest(userId, vaultId, arr) {
     try {
-      fs.mkdirSync(trashDir(userId), { recursive: true });
-      fs.writeFileSync(manifestPath(userId), JSON.stringify(arr));
+      fs.mkdirSync(trashDir(userId, vaultId), { recursive: true });
+      fs.writeFileSync(manifestPath(userId, vaultId), JSON.stringify(arr));
     } catch (_) {}
   }
   function newId() {
@@ -33,8 +33,8 @@ function createVaultFs(rootDir) {
   // ---- folders ----
   // ALL directory rel-paths under userDir (recursive), INCLUDING EMPTY ones,
   // skipping dot-dirs (so .trash is excluded). Matches Electron note:list shape.
-  function folderList(userId) {
-    const root = userDir(userId);
+  function folderList(userId, vaultId) {
+    const root = vaultDir(userId, vaultId);
     const out = [];
     const walk = (dir, base) => {
       let ents = [];
@@ -43,7 +43,7 @@ function createVaultFs(rootDir) {
         if (ent.name.startsWith('.')) continue;
         if (!ent.isDirectory()) continue;
         const rel = base ? base + '/' + ent.name : ent.name;
-        // Hide the top-level reserved pdfstore dir (lives at <userId>/pdfs);
+        // Hide the top-level reserved pdfstore dir (lives at <vaultId>/pdfs);
         // nested folders literally named "pdfs" deeper down are kept.
         if (!base && rel === 'pdfs') continue;
         out.push(rel);
@@ -54,10 +54,10 @@ function createVaultFs(rootDir) {
     return out.sort();
   }
 
-  function folderCreate(userId, name) {
+  function folderCreate(userId, vaultId, name) {
     const rel = safeRel(name);
     if (!rel) return { error: 'invalid' };
-    const p = path.join(userDir(userId), rel);
+    const p = path.join(vaultDir(userId, vaultId), rel);
     if (fs.existsSync(p)) return { error: 'exists' };
     try {
       fs.mkdirSync(p, { recursive: true });
@@ -67,12 +67,12 @@ function createVaultFs(rootDir) {
     }
   }
 
-  function folderRename(userId, from, to) {
+  function folderRename(userId, vaultId, from, to) {
     const relFrom = safeRel(from);
     const relTo = safeRel(to);
     if (!relFrom || !relTo) return { error: 'invalid' };
-    const fromP = path.join(userDir(userId), relFrom);
-    const toP = path.join(userDir(userId), relTo);
+    const fromP = path.join(vaultDir(userId, vaultId), relFrom);
+    const toP = path.join(vaultDir(userId, vaultId), relTo);
     if (fs.existsSync(toP)) return { error: 'exists' };
     try {
       fs.mkdirSync(path.dirname(toP), { recursive: true });
@@ -83,20 +83,20 @@ function createVaultFs(rootDir) {
     }
   }
 
-  function folderDelete(userId, name) {
+  function folderDelete(userId, vaultId, name) {
     const rel = safeRel(name);
     if (!rel) return { error: 'invalid' };
-    const src = path.join(userDir(userId), rel);
+    const src = path.join(vaultDir(userId, vaultId), rel);
     if (!fs.existsSync(src)) return { error: 'failed' };
     const id = newId();
     const trashedName = id;
     try {
-      fs.mkdirSync(trashDir(userId), { recursive: true });
-      fs.renameSync(src, path.join(trashDir(userId), trashedName));
+      fs.mkdirSync(trashDir(userId, vaultId), { recursive: true });
+      fs.renameSync(src, path.join(trashDir(userId, vaultId), trashedName));
     } catch (_) {
       return { error: 'failed' };
     }
-    const arr = readManifest(userId);
+    const arr = readManifest(userId, vaultId);
     arr.push({
       id, type: 'folder',
       name: rel.split('/').pop(),
@@ -104,27 +104,27 @@ function createVaultFs(rootDir) {
       deletedAt: new Date().toISOString(),
       trashedName,
     });
-    writeManifest(userId, arr);
+    writeManifest(userId, vaultId, arr);
     return { ok: true };
   }
 
   // ---- trash ----
   // Soft-delete a note: moves the file into .trash, records a manifest entry.
   // Mirrors Electron note:delete (never hard-unlinks). {ok:false} on any miss/fail.
-  function noteTrash(userId, name) {
+  function noteTrash(userId, vaultId, name) {
     const rel = safeRel(name);
     if (!rel) return { ok: false };
-    const src = path.join(userDir(userId), rel);
+    const src = path.join(vaultDir(userId, vaultId), rel);
     if (!fs.existsSync(src)) return { ok: false };
     const id = newId();
     const trashedName = id;
     try {
-      fs.mkdirSync(trashDir(userId), { recursive: true });
-      fs.renameSync(src, path.join(trashDir(userId), trashedName));
+      fs.mkdirSync(trashDir(userId, vaultId), { recursive: true });
+      fs.renameSync(src, path.join(trashDir(userId, vaultId), trashedName));
     } catch (_) {
       return { ok: false };
     }
-    const arr = readManifest(userId);
+    const arr = readManifest(userId, vaultId);
     arr.push({
       id, type: 'note',
       name: rel.split('/').pop(),
@@ -132,13 +132,13 @@ function createVaultFs(rootDir) {
       deletedAt: new Date().toISOString(),
       trashedName,
     });
-    writeManifest(userId, arr);
+    writeManifest(userId, vaultId, arr);
     return { ok: true };
   }
 
-  function trashList(userId) {
-    const td = trashDir(userId);
-    const arr = readManifest(userId);
+  function trashList(userId, vaultId) {
+    const td = trashDir(userId, vaultId);
+    const arr = readManifest(userId, vaultId);
     const out = [];
     for (const ent of arr || []) {
       if (!ent || !ent.trashedName) continue;
@@ -155,18 +155,18 @@ function createVaultFs(rootDir) {
     return out;
   }
 
-  function trashRestore(userId, id) {
-    const arr = readManifest(userId);
+  function trashRestore(userId, vaultId, id) {
+    const arr = readManifest(userId, vaultId);
     const idx = arr.findIndex((e) => e && e.id === id);
     if (idx < 0) return { error: 'notfound' };
     const ent = arr[idx];
-    const tp = path.join(trashDir(userId), ent.trashedName);
+    const tp = path.join(trashDir(userId, vaultId), ent.trashedName);
     if (!fs.existsSync(tp)) {
       arr.splice(idx, 1);
-      writeManifest(userId, arr);
+      writeManifest(userId, vaultId, arr);
       return { error: 'gone' };
     }
-    const dest = path.join(userDir(userId), ent.origPath);
+    const dest = path.join(vaultDir(userId, vaultId), ent.origPath);
     if (fs.existsSync(dest)) return { error: 'exists' };
     try {
       fs.mkdirSync(path.dirname(dest), { recursive: true });
@@ -175,28 +175,28 @@ function createVaultFs(rootDir) {
       return { error: 'failed' };
     }
     arr.splice(idx, 1);
-    writeManifest(userId, arr);
+    writeManifest(userId, vaultId, arr);
     return { ok: true };
   }
 
-  function trashDeleteForever(userId, id) {
-    const arr = readManifest(userId);
+  function trashDeleteForever(userId, vaultId, id) {
+    const arr = readManifest(userId, vaultId);
     const idx = arr.findIndex((e) => e && e.id === id);
     if (idx < 0) return { ok: true };
     const ent = arr[idx];
     try {
-      fs.rmSync(path.join(trashDir(userId), ent.trashedName), { recursive: true, force: true });
+      fs.rmSync(path.join(trashDir(userId, vaultId), ent.trashedName), { recursive: true, force: true });
     } catch (_) {}
     arr.splice(idx, 1);
-    writeManifest(userId, arr);
+    writeManifest(userId, vaultId, arr);
     return { ok: true };
   }
 
-  function trashEmpty(userId) {
+  function trashEmpty(userId, vaultId) {
     try {
-      fs.rmSync(trashDir(userId), { recursive: true, force: true });
+      fs.rmSync(trashDir(userId, vaultId), { recursive: true, force: true });
     } catch (_) {}
-    writeManifest(userId, []);
+    writeManifest(userId, vaultId, []);
     return { ok: true };
   }
 
