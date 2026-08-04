@@ -29,6 +29,20 @@ async function signupViaRenderer(page, email, password, httpBase) {
   }, { email, password, httpBase });
 }
 
+// Log a SECOND instance into an EXISTING account (signup would 409 on the dup email).
+// Used to authenticate two instances as the SAME user (one person, two devices).
+async function loginViaRenderer(page, email, password, httpBase) {
+  await page.evaluate(async ({ email, password, httpBase }) => {
+    const res = await fetch(httpBase + '/auth/login', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!res.ok) throw new Error('login failed: ' + res.status);
+    const { token, email: em } = await res.json();
+    await window.api.authSetToken(token, em || email);
+  }, { email, password, httpBase });
+}
+
 test.describe('collab auth — app wired to the gated backend (step 7b-4)', () => {
   let s, ctx, B;
   test.afterEach(async () => {
@@ -64,7 +78,7 @@ test.describe('collab auth — app wired to the gated backend (step 7b-4)', () =
     expect(tok.token.length).toBeGreaterThan(0);
   }, 30000);
 
-  test('EDGE: collab syncs through the GATED backend when logged in', async () => {
+  test('EDGE: SAME-user collab syncs through the GATED backend (web<->desktop share the per-user room)', async () => {
     s = await startServer({ port: 0, dataDir: mkTmp('washi-auth-data-') });
     const wsUrl = 'ws://127.0.0.1:' + s.port;
     const httpBase = 'http://127.0.0.1:' + s.port;
@@ -73,9 +87,10 @@ test.describe('collab auth — app wired to the gated backend (step 7b-4)', () =
     ctx = await launchApp({ collab: true, collabRelay: wsUrl, notes: [{ name: 'shared.md', content: '' }] });
     B = await launchApp({ collab: true, collabRelay: wsUrl, notesDir: ctx.notesDir });
 
-    // Distinct accounts per instance — both hold valid tokens for the gated relay.
-    await signupViaRenderer(ctx.page, 'a@test.com', 'password123', httpBase);
-    await signupViaRenderer(B.page, 'b@test.com', 'password456', httpBase);
+    // SAME account on both (one person, two devices) → same per-user room (V2.3 scopes
+    // the collab room by email: <email>::<note>). A signs up; B logs into that account.
+    await signupViaRenderer(ctx.page, 'me@test.com', 'password123', httpBase);
+    await loginViaRenderer(B.page, 'me@test.com', 'password123', httpBase);
 
     // A opens 'shared', connects (token in the WS query → upgrade accepted), types.
     await ctx.page.locator('#noteList .note-item', { hasText: 'shared' }).click();
@@ -83,12 +98,39 @@ test.describe('collab auth — app wired to the gated backend (step 7b-4)', () =
     await ctx.page.waitForSelector('[data-collab="connected"]', { timeout: 10000 });
     await ctx.page.keyboard.type('hello from A');
 
-    // B opens the same note; its provider (also authed) syncs A's edit through the gate.
+    // B opens the same note; its provider (same user → same room) syncs A's edit.
     await B.page.locator('#noteList .note-item', { hasText: 'shared' }).click();
     await B.page.waitForSelector('[data-collab="connected"]', { timeout: 10000 });
     await expect.poll(
       async () => B.page.locator('#editorHost .ProseMirror').textContent(),
       { timeout: 15000, intervals: [200, 500, 1000] }
     ).toContain('hello from A');
+  }, 40000);
+
+  // Guards the V2.3 fix (core/collabroom.js): before scoping, two DIFFERENT users with a
+  // same-named note shared ONE room = cross-user live-edit leak. Now they must NOT sync.
+  test('EDGE: DIFFERENT users do NOT share a collab room (per-user isolation, V2.3)', async () => {
+    s = await startServer({ port: 0, dataDir: mkTmp('washi-auth-iso-') });
+    const wsUrl = 'ws://127.0.0.1:' + s.port;
+    const httpBase = 'http://127.0.0.1:' + s.port;
+
+    ctx = await launchApp({ collab: true, collabRelay: wsUrl, notes: [{ name: 'shared.md', content: '' }] });
+    B = await launchApp({ collab: true, collabRelay: wsUrl, notesDir: ctx.notesDir });
+
+    // Distinct accounts → distinct per-user rooms for the same note name.
+    await signupViaRenderer(ctx.page, 'a@test.com', 'password123', httpBase);
+    await signupViaRenderer(B.page, 'b@test.com', 'password456', httpBase);
+
+    await ctx.page.locator('#noteList .note-item', { hasText: 'shared' }).click();
+    await ctx.page.locator('#editorHost .ProseMirror').click();
+    await ctx.page.waitForSelector('[data-collab="connected"]', { timeout: 10000 });
+    await ctx.page.keyboard.type('secret from A');
+
+    await B.page.locator('#noteList .note-item', { hasText: 'shared' }).click();
+    await B.page.waitForSelector('[data-collab="connected"]', { timeout: 10000 });
+    // Give the relay ample time to (not) deliver — B must NEVER receive A's text.
+    await B.page.waitForTimeout(3000);
+    const bText = await B.page.locator('#editorHost .ProseMirror').textContent();
+    expect(bText || '').not.toContain('secret from A');
   }, 40000);
 });
