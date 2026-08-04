@@ -328,4 +328,31 @@ describe('web api shim', () => {
       await s.close();
     }
   }, 20000);
+
+  it('renameNote rewrites [[links]] in other notes', async () => {
+    const s = await startServer({ port: 0, dataDir: tmpDir() });
+    const base = 'http://127.0.0.1:' + s.port;
+
+    let r = await fetch(base + '/auth/signup', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'rename@b.com', password: 'password123' }),
+    });
+    expect(r.status).toBe(200);
+    let token = (await r.json()).token;
+
+    const api = createWebApi({ baseUrl: base, getToken: () => token });
+    try {
+      await api.saveNote('Alpha.md', '# Alpha\n\nsee [[Beta]] here');
+      await api.saveNote('Beta.md', '# Beta\n\nbody');
+      await api.renameNote('Beta.md', 'Gamma.md');
+      const alpha = await api.readNote('Alpha.md');
+      expect(alpha).toContain('[[Gamma]]');
+      expect(alpha).not.toContain('[[Beta]]');
+      expect((await api.listNotes()).notes).toContain('Gamma.md');
+      expect((await api.listNotes()).notes).not.toContain('Beta.md');
+    } finally {
+      await s.close();
+    }
+  }, 20000);
 });

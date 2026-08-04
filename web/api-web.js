@@ -26,6 +26,10 @@ function _baseName(rel){
 // ponytail: null when neither is available (e.g. sandbox without the script) —
 // ragContext then degrades to the empty fallback instead of throwing.
 const _rag = (typeof window !== 'undefined' && window.CoreRag) ? window.CoreRag : (typeof require !== 'undefined' ? require('../core/rag') : null);
+// Dual-mode CoreWikilinks: browser global (set by core/wikilinks.js UMD wrapper) else Node require.
+// ponytail: null when neither is available — renameNote then skips link rewrite instead of throwing.
+const _wl = (typeof window !== 'undefined' && window.CoreWikilinks) ? window.CoreWikilinks
+          : (typeof require !== 'undefined' ? require('../core/wikilinks') : null);
 
 function createWebApi(opts) {
   opts = opts || {};
@@ -192,11 +196,28 @@ function createWebApi(opts) {
   // ponytail: no backend rename endpoint; compose read+write+delete.
   // Add a server /notes/rename when atomicity matters — a crash between the
   // write and the delete currently orphans the old file under the old name.
+  // After the move, rewrite [[links]] that pointed to the old basename across
+  // every other note so links don't break (parity with the desktop renameNote).
   async function renameNote(from, to) {
     const c = await readNote(from);
     const w = await saveNote(to, c);
     if (!w || !w.ok) return { ok: false };
     await deleteNote(from);
+    // rewrite [[links]] that pointed to the old basename -> new basename
+    try {
+      if (_wl && _wl.rewriteLinkTargets) {
+        const oldBase = _baseName(from);
+        const newBase = _baseName(to);
+        if (oldBase && newBase && oldBase !== newBase) {
+          const all = await _allNotes();
+          for (const n of all) {
+            if (n.name === from || n.name === to) continue;
+            const rewritten = _wl.rewriteLinkTargets(n.content || '', oldBase, newBase);
+            if (rewritten !== (n.content || '')) { await saveNote(n.name, rewritten); }
+          }
+        }
+      }
+    } catch (_) {}
     return { ok: true };
   }
 

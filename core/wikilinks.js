@@ -41,3 +41,4 @@ function rewriteLinkTargets(text, oldBase, newBase){
 }
 
 module.exports = { wikiTargets, linksTo, rewriteLinkTargets };
+if (typeof window !== 'undefined') { window.CoreWikilinks = { wikiTargets, linksTo, rewriteLinkTargets }; }
