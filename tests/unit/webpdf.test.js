@@ -76,4 +76,21 @@ describe('web pdfs (per-user cloud PDF storage + annot sidecars)', () => {
       await s.close();
     }
   }, 20000);
+
+  it('MOVE: rename a PDF into a folder path keeps bytes + sidecar; list shows the nested path', async () => {
+    const s = await startServer({ port: 0, dataDir: tmpDir() });
+    const base = 'http://127.0.0.1:' + s.port;
+    const token = await signup(base, 'webpdf-move@b.com');
+    const api = createWebApi({ baseUrl: base, getToken: () => token });
+    try {
+      await api.uploadPdf('m.pdf', PDF_BYTES);
+      await api.saveAnnots('m.pdf', { highlights: [{ id: 'h', text: 'y' }] });
+      const rn = await api.renamePdf('m.pdf', 'Box/m.pdf');
+      expect(rn).toEqual({ name: 'Box/m.pdf' });
+      expect((await api.listNotes()).pdfs).toContain('Box/m.pdf');
+      expect(Buffer.from(await api.readPdf('Box/m.pdf')).equals(PDF_BYTES)).toBe(true);
+      expect((await api.readAnnots('Box/m.pdf')).highlights.length).toBe(1); // sidecar followed into the folder
+      expect(await api.readPdf('m.pdf')).toBe(null);                          // old flat path gone
+    } finally { await s.close(); }
+  }, 20000);
 });

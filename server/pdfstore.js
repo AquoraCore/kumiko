@@ -1,14 +1,16 @@
 const fs = require('fs');
 const path = require('path');
+const { safeRel } = require('../core/pathutil');
 
-// ponytail: basename + .pdf guard — same ceiling as notestore/dbstore (no
-// separators, no traversal). Upgrading to a slug lib is YAGNI for personal vaults.
-function safeName(name) {
-  return (typeof name === 'string'
-    && name === path.basename(name)
-    && /\.pdf$/i.test(name)
-    && !/\.annot\.json$/i.test(name))
-    ? name : null;
+// ponytail: rel-path guard over core/pathutil.safeRel — allows subfolders
+// (e.g. "Box/a.pdf"), blocks traversal/absolute, keeps .pdf + non-sidecar.
+// Ceiling: same as notestore/dbstore safeRel; no slug lib for personal vaults.
+function safePdfRel(name) {
+  const rel = safeRel(name);
+  if (!rel) return null;
+  if (!/\.pdf$/i.test(rel)) return null;
+  if (/\.annot\.json$/i.test(rel)) return null;
+  return rel;
 }
 
 function createPdfStore(rootDir) {
@@ -17,63 +19,67 @@ function createPdfStore(rootDir) {
   }
 
   function list(userId, vaultId) {
-    const d = dir(userId, vaultId);
-    let ents = [];
-    try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch (_) { return []; }
+    const root = dir(userId, vaultId);
     const out = [];
-    for (const ent of ents) {
-      if (!ent.isFile()) continue;
-      if (!/\.pdf$/i.test(ent.name)) continue;
-      if (/\.annot\.json$/i.test(ent.name)) continue;
-      out.push(ent.name);
-    }
+    const walk = (d, base) => {
+      let ents = [];
+      try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch (_) { return; }
+      for (const ent of ents) {
+        const rel = base ? base + '/' + ent.name : ent.name;
+        if (ent.isDirectory()) { walk(path.join(d, ent.name), rel); continue; }
+        if (!ent.isFile()) continue;
+        if (!/\.pdf$/i.test(ent.name)) continue;
+        if (/\.annot\.json$/i.test(ent.name)) continue;
+        out.push(rel);
+      }
+    };
+    walk(root, '');
     out.sort((a, b) => String(a).localeCompare(b));
     return out;
   }
 
   function read(userId, vaultId, name) {
-    const n = safeName(name);
-    if (!n) return null;
+    const rel = safePdfRel(name);
+    if (!rel) return null;
     try {
-      return fs.readFileSync(path.join(dir(userId, vaultId), n));
+      return fs.readFileSync(path.join(dir(userId, vaultId), rel));
     } catch (_) {
       return null;
     }
   }
 
   function write(userId, vaultId, name, buffer) {
-    const n0 = safeName(name);
-    if (!n0) return null;
+    const rel0 = safePdfRel(name);
+    if (!rel0) return null;
     try {
-      const d = dir(userId, vaultId);
-      fs.mkdirSync(d, { recursive: true });
-      // DEDUP: append " (1)", " (2)"... until the path is free. Mirrors
-      // Electron's native dialog copy-into-vault dedup shape.
-      let n = n0; let i = 1;
-      while (fs.existsSync(path.join(d, n))) {
-        const ext = path.extname(n0);
-        const stem = n0.slice(0, n0.length - ext.length);
-        n = stem + ' (' + i + ')' + ext;
+      const root = dir(userId, vaultId);
+      fs.mkdirSync(path.join(root, path.dirname(rel0)), { recursive: true });
+      const ext = path.extname(rel0);
+      const stem = rel0.slice(0, rel0.length - ext.length);
+      let rel = rel0; let i = 1;
+      while (fs.existsSync(path.join(root, rel))) {
+        rel = stem + ' (' + i + ')' + ext;
         i++;
       }
-      fs.writeFileSync(path.join(d, n), buffer);
-      return n;
+      fs.writeFileSync(path.join(root, rel), buffer);
+      return rel;
     } catch (_) {
       return null;
     }
   }
 
   function rename(userId, vaultId, from, to) {
-    const f = safeName(from);
+    const f = safePdfRel(from);
     if (!f) return { error: 'invalid' };
-    // Coerce `to` to a .pdf basename; if caller omitted the extension, append it.
-    const t = safeName(/\.pdf$/i.test(String(to || '')) ? to : String(to || '').trim() + '.pdf');
+    const tRaw = /\.pdf$/i.test(String(to || '')) ? to : String(to || '').trim() + '.pdf';
+    const t = safePdfRel(tRaw);
     if (!t) return { error: 'invalid' };
-    const d = dir(userId, vaultId);
-    const fp = path.join(d, f);
-    const tp = path.join(d, t);
+    const root = dir(userId, vaultId);
+    const fp = path.join(root, f);
+    const tp = path.join(root, t);
     if (fs.existsSync(tp)) return { error: 'exists' };
     try {
+      fs.mkdirSync(path.dirname(tp), { recursive: true });
       fs.renameSync(fp, tp);
     } catch (_) {
       return { error: 'failed' };
@@ -88,10 +94,10 @@ function createPdfStore(rootDir) {
   }
 
   function readAnnots(userId, vaultId, name) {
-    const n = safeName(name);
-    if (!n) return { highlights: [] };
+    const rel = safePdfRel(name);
+    if (!rel) return { highlights: [] };
     try {
-      return JSON.parse(fs.readFileSync(path.join(dir(userId, vaultId), n + '.annot.json'), 'utf8'))
+      return JSON.parse(fs.readFileSync(path.join(dir(userId, vaultId), rel + '.annot.json'), 'utf8'))
         || { highlights: [] };
     } catch (_) {
       return { highlights: [] };
@@ -99,12 +105,13 @@ function createPdfStore(rootDir) {
   }
 
   function saveAnnots(userId, vaultId, name, data) {
-    const n = safeName(name);
-    if (!n) return false;
+    const rel = safePdfRel(name);
+    if (!rel) return false;
     try {
       const d = dir(userId, vaultId);
-      fs.mkdirSync(d, { recursive: true });
-      fs.writeFileSync(path.join(d, n + '.annot.json'), JSON.stringify(data || { highlights: [] }));
+      const sidecar = path.join(d, rel + '.annot.json');
+      fs.mkdirSync(path.dirname(sidecar), { recursive: true });
+      fs.writeFileSync(sidecar, JSON.stringify(data || { highlights: [] }));
       return true;
     } catch (_) {
       return false;
@@ -114,4 +121,4 @@ function createPdfStore(rootDir) {
   return { dir, list, read, write, rename, readAnnots, saveAnnots };
 }
 
-module.exports = { createPdfStore, safeName };
+module.exports = { createPdfStore, safePdfRel };
