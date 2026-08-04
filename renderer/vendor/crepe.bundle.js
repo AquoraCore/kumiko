@@ -146293,8 +146293,52 @@ ${reason}`);
       } };
     }
   }));
+  var WIKI_RE = /\[\[([^\[\]\n]+?)\]\]/g;
+  var wikiLink = $prose(() => new Plugin({
+    key: new PluginKey("md-wikilink"),
+    props: {
+      decorations(state) {
+        const decos = [];
+        state.doc.descendants((node2, pos) => {
+          if (!node2.isText || !node2.text) return;
+          const text13 = node2.text;
+          let m;
+          WIKI_RE.lastIndex = 0;
+          while ((m = WIKI_RE.exec(text13)) !== null) {
+            const from5 = pos + m.index;
+            const to = from5 + m[0].length;
+            decos.push(Decoration2.inline(from5, to, { class: "md-wikilink" }));
+          }
+        });
+        return DecorationSet.create(state.doc, decos);
+      },
+      handleClick(view, clickPos) {
+        const $pos = view.state.doc.resolve(clickPos);
+        const parent = $pos.parent;
+        if (!parent || !parent.isTextblock) return false;
+        const start2 = $pos.start();
+        const text13 = parent.textContent || "";
+        const offset3 = clickPos - start2;
+        let m;
+        WIKI_RE.lastIndex = 0;
+        while ((m = WIKI_RE.exec(text13)) !== null) {
+          const a2 = m.index, b = m.index + m[0].length;
+          if (offset3 >= a2 && offset3 <= b) {
+            const raw3 = m[1].split("|")[0].trim();
+            if (raw3 && typeof window.__wikiNav === "function") {
+              window.__wikiNav(raw3);
+              return true;
+            }
+            return false;
+          }
+        }
+        return false;
+      }
+    }
+  }));
   window.Crepe = Crepe;
   window.MDHeadingFold = headingFold;
+  window.MDWikiLink = wikiLink;
   window.Y = yjs_exports;
   window.WebsocketProvider = WebsocketProvider;
   window.MilkdownCollab = { collab, collabServiceCtx };

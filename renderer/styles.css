@@ -243,6 +243,8 @@ button.danger:active { filter: brightness(.94); }
 .backlinks .bl-link:hover { background: var(--accent-bg); }
 
 /* wikilinks inside the editor — distinct from normal text */
+.md-wikilink { color: var(--accent, #c2683f); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.md-wikilink:hover { opacity: .8; }
 .milkdown .wikilink,
 #editorHost .wikilink {
   color: var(--coral-deep, var(--accent));

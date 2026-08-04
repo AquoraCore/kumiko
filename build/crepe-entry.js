@@ -84,8 +84,51 @@ const headingFold = $prose(() => new Plugin({
   },
 }));
 
+// Wikilink [[name]] / [[name|alias]] — decorate the span so it reads as a link,
+// and on click hand the resolved name to renderer-side window.__wikiNav.
+const WIKI_RE = /\[\[([^\[\]\n]+?)\]\]/g;
+
+const wikiLink = $prose(() => new Plugin({
+  key: new PluginKey('md-wikilink'),
+  props: {
+    decorations(state) {
+      const decos = [];
+      state.doc.descendants((node, pos) => {
+        if (!node.isText || !node.text) return;
+        const text = node.text; let m;
+        WIKI_RE.lastIndex = 0;
+        while ((m = WIKI_RE.exec(text)) !== null) {
+          const from = pos + m.index;
+          const to = from + m[0].length;
+          decos.push(Decoration.inline(from, to, { class: 'md-wikilink' }));
+        }
+      });
+      return DecorationSet.create(state.doc, decos);
+    },
+    handleClick(view, clickPos) {
+      const $pos = view.state.doc.resolve(clickPos);
+      const parent = $pos.parent;
+      if (!parent || !parent.isTextblock) return false;
+      const start = $pos.start();
+      const text = parent.textContent || '';
+      const offset = clickPos - start;
+      let m; WIKI_RE.lastIndex = 0;
+      while ((m = WIKI_RE.exec(text)) !== null) {
+        const a = m.index, b = m.index + m[0].length;
+        if (offset >= a && offset <= b) {
+          const raw = m[1].split('|')[0].trim();   // [[name|alias]] -> name
+          if (raw && typeof window.__wikiNav === 'function') { window.__wikiNav(raw); return true; }
+          return false;
+        }
+      }
+      return false;
+    },
+  },
+}));
+
 window.Crepe = Crepe;
 window.MDHeadingFold = headingFold;
+window.MDWikiLink = wikiLink;
 window.Y = Y;                                   // the ONE yjs instance for the whole app
 window.WebsocketProvider = WebsocketProvider;   // client provider (connects to the relay)
 window.MilkdownCollab = { collab, collabServiceCtx };   // the Milkdown collab plugin + its service ctx

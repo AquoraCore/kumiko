@@ -438,6 +438,19 @@ searchInput.addEventListener('input', () => {
 searchInput.addEventListener('blur', () => { setTimeout(() => { searchResults.hidden = true; }, 150); });
 searchInput.addEventListener('focus', () => { if (searchResults.innerHTML) searchResults.hidden = false; });
 
+// Wikilink click navigation — resolves a [[name]] (basename, no .md) to an actual note and opens it.
+// Called from the Crepe wikiLink plugin's handleClick via window.__wikiNav(rawName).
+window.__wikiNav = async (name) => {
+  try {
+    const key = String(name).toLowerCase().replace(/\.md$/, '');
+    const l = await window.api.listNotes();
+    const notes = (l && l.notes) || [];
+    let target = notes.find((p) => p.replace(/\.md$/i, '').split('/').pop().toLowerCase() === key);
+    if (!target) return;                          // no such note -> do nothing (no crash)
+    await openNote(target);
+  } catch (_) {}
+};
+
 async function save() {
   if (!currentNote) return;
   await window.api.saveNote(currentNote, getFullMarkdown());
