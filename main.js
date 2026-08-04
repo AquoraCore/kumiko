@@ -1,12 +1,10 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { spawn } = require('child_process');
-const pty = require('node-pty');
 const chokidar = require('chokidar');
 const { wikiTargets, linksTo, rewriteLinkTargets } = require('./core/wikilinks');
 const { safeRel, baseName, vaultName } = require('./core/pathutil');
-const { buildEngineInvocation, aiConfigView, setConfigKey, buildApiRequest, parseSseDelta, buildEmbedRequest, parseEmbedResponse } = require('./core/ai');
+const { aiConfigView, setConfigKey, buildApiRequest, parseSseDelta, buildEmbedRequest, parseEmbedResponse } = require('./core/ai');
 const CoreRag = require('./core/rag');
 
 // In dev, notes live beside the source. When packaged, __dirname is inside the
@@ -23,13 +21,13 @@ function readAiConfig(){
   try {
     const a = JSON.parse(fs.readFileSync(aiConfigFile(), 'utf8'));
     return {
-      mode: (a && typeof a.mode === 'string' && a.mode) ? a.mode : 'cli',
+      mode: (a && typeof a.mode === 'string' && a.mode) ? a.mode : 'api',
       provider: (a && typeof a.provider === 'string' && a.provider) ? a.provider : 'anthropic',
       model: (a && typeof a.model === 'string') ? a.model : '',
       keys: (a && a.keys && typeof a.keys === 'object') ? a.keys : {},
       _plain: !!(a && a._plain),
     };
-  } catch (_) { return { mode: 'cli', provider: 'anthropic', model: '', keys: {} }; }
+  } catch (_) { return { mode: 'api', provider: 'anthropic', model: '', keys: {} }; }
 }
 function writeAiConfig(cfg){
   try { fs.writeFileSync(aiConfigFile(), JSON.stringify(cfg, null, 2), 'utf8'); } catch (_) {}
@@ -321,7 +319,6 @@ function resolveNotesDir() {
 }
 
 let win;
-let ptyProc;
 let watcher;
 let openFilePath = null;
 let lastKnownContent = null;
@@ -377,37 +374,8 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  if (ptyProc) { try { ptyProc.kill(); } catch (_) {} }
   if (watcher) watcher.close();
   if (process.platform !== 'darwin') app.quit();
-});
-
-// ---- Embedded terminal (PTY) ----
-function spawnPty(size) {
-  const shell = process.env.SHELL || '/bin/zsh';
-  const env = Object.assign({}, process.env);
-  env.PATH = ['/opt/homebrew/bin', '/usr/local/bin', env.PATH || ''].join(':');
-  ptyProc = pty.spawn(shell, ['-l'], {
-    name: 'xterm-256color',
-    cols: (size && size.cols) || 80,
-    rows: (size && size.rows) || 24,
-    cwd: NOTES_DIR,
-    env,
-  });
-  ptyProc.onData((d) => { if (win && !win.isDestroyed()) win.webContents.send('pty:data', d); });
-  ptyProc.onExit(() => { ptyProc = null; });
-}
-ipcMain.on('pty:start', (e, size) => { if (ptyProc) return; spawnPty(size); });
-ipcMain.on('pty:restart', (e, size) => { if (ptyProc) { try { ptyProc.kill(); } catch (_) {} ptyProc = null; } spawnPty(size); });
-
-ipcMain.on('pty:input', (e, data) => {
-  if (ptyProc) ptyProc.write(data);
-});
-
-ipcMain.on('pty:resize', (e, size) => {
-  if (ptyProc && size) {
-    try { ptyProc.resize(size.cols, size.rows); } catch (_) {}
-  }
 });
 
 // ---- API provider runner (HTTPS streaming over global fetch) ----
@@ -489,34 +457,14 @@ ipcMain.handle('engine:run', (e, { engine, model, prompt, runId }) => {
     win.webContents.send('engine:done', { runId: rid, code: -1 });
     return;
   }
-  // API-key mode: route to the streaming provider instead of the CLI. Sits
-  // after the cap check above (so the queue limit still applies) and after the
-  // WASHI_TEST_ENGINE stub (so E2E never hits the network). CLI path below is
-  // the default (mode 'cli') and unchanged.
+  // AI runs exclusively via the API-key path now (the raw CLI/terminal was removed
+  // in phase 8.5). Sits after the cap check + WASHI_TEST_ENGINE stub so E2E never
+  // hits the network. If no key/api config is set, runApiProvider emits a graceful
+  // error below.
   const aicfg = readAiConfig();
-  if (aicfg.mode === 'api') {
-    const key = getDecryptedKey(aicfg.provider);
-    if (!key) { emit('\r\n[ยังไม่ได้ตั้งค่า API key — ไปที่ ⚙ ตั้งค่า AI]\r\n'); win.webContents.send('engine:done', { runId: rid, code: -1 }); return; }
-    runApiProvider({ provider: aicfg.provider, model: aicfg.model || model, prompt, key, rid, emit });
-    return;
-  }
-  const env = Object.assign({}, process.env);
-  env.PATH = ['/opt/homebrew/bin', '/usr/local/bin', env.PATH || ''].join(':');
-  const inv = buildEngineInvocation(engine, model, prompt);
-  if (!inv) return;
-  const proc = spawn(inv.cmd, inv.args, { cwd: NOTES_DIR, env });
-  engineProcs.set(rid, proc);
-  const killer = setTimeout(() => {
-    if (engineProcs.has(rid)) { try { proc.kill('SIGKILL'); } catch (_) {} emit('\r\n[timeout — engine killed]\r\n'); }
-  }, 300000);
-  const finish = (code) => { clearTimeout(killer); engineProcs.delete(rid); win.webContents.send('engine:done', { runId: rid, code }); };
-  proc.stdout.on('data', (d) => emit(d.toString()));
-  proc.stderr.on('data', (d) => emit(d.toString()));
-  proc.on('close', (code) => finish(code));
-  proc.on('error', (err) => { emit('\r\n[error] ' + err.message + '\r\n'); finish(-1); });
-  if (inv.stdin != null) {
-    try { proc.stdin.write(inv.stdin); proc.stdin.end(); } catch (_) {}
-  }
+  const key = getDecryptedKey(aicfg.provider);
+  if (!key) { emit('\r\n[ยังไม่ได้ตั้งค่า API key — ไปที่ ⚙ ตั้งค่า AI]\r\n'); win.webContents.send('engine:done', { runId: rid, code: -1 }); return; }
+  runApiProvider({ provider: aicfg.provider, model: aicfg.model || model, prompt, key, rid, emit });
 });
 
 // ---- Stop a running engine for ONE runId (other concurrent runs untouched) ----

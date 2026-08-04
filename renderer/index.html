@@ -4,7 +4,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Kumiko</title>
-  <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css" />
   <link rel="stylesheet" href="vendor/crepe.bundle.css" />
   <link rel="stylesheet" href="styles.css" />
   <script src="vendor/crepe.bundle.js"></script>
@@ -115,7 +114,6 @@
           <button id="saveBtn" class="ghost" title="บันทึก (⌘S)" data-i18n-title="บันทึก (⌘S)"><svg class="ic"><use href="#i-save"/></svg></button>
           <span class="bar-div"></span>
           <button id="sidebarToggle" class="ghost" title="ซ่อน/แสดงแถบโน้ต" data-i18n-title="ซ่อน/แสดงแถบโน้ต"><svg class="ic"><use href="#i-sidebar"/></svg></button>
-          <button id="termToggle" class="ghost" title="ซ่อน/แสดงพาเนล AI" data-i18n-title="ซ่อน/แสดงพาเนล AI"><svg class="ic"><use href="#i-panel"/></svg></button>
           <button id="tldrBtn" class="ghost" hidden>TL;DR</button>
           <button id="quizBtn" class="ghost" hidden data-i18n="ทดสอบฉัน">ทดสอบฉัน</button>
           <button id="settingsBtn" class="ghost" hidden data-i18n="ตั้งค่า">ตั้งค่า</button>
@@ -198,14 +196,8 @@
         <div class="bar-left"></div>
         <div class="bar-right">
           <button id="chatClearBtn" class="ghost" title="ล้างแชต" data-i18n-title="ล้างแชต"><svg class="ic"><use href="#i-eraser"/></svg></button>
-          <button id="termPosBtn" class="ghost" title="ลากหรือกดเพื่อย้าย ขวา/ล่าง" data-i18n-title="ลากหรือกดเพื่อย้าย ขวา/ล่าง"><svg class="ic"><use href="#i-swap"/></svg></button>
           <select id="engineSelect" title="เลือก engine" data-i18n-title="เลือก engine"><option value="glm">GLM (OpenCode)</option><option value="claude">Claude</option></select>
           <select id="modelSelect" title="โมเดล GLM" data-i18n-title="โมเดล GLM"><option value="glm-5.2">glm-5.2</option><option value="glm-5.1">glm-5.1</option><option value="glm-5-turbo">glm-5-turbo</option><option value="glm-4.7">glm-4.7</option><option value="glm-4.5-air">glm-4.5-air</option></select>
-          <button id="claudeBtn" class="ghost"><svg class="ic"><use href="#i-play"/></svg></button>
-          <button id="termStopBtn" class="ghost" title="หยุดคำสั่ง (Ctrl+C)" data-i18n-title="หยุดคำสั่ง (Ctrl+C)"><svg class="ic"><use href="#i-stop"/></svg></button>
-          <button id="termRestartBtn" class="ghost" title="รีสตาร์ท terminal" data-i18n-title="รีสตาร์ท terminal"><svg class="ic"><use href="#i-refresh"/></svg></button>
-          <button id="clearBtn" class="ghost" title="ล้างจอ" data-i18n-title="ล้างจอ"><svg class="ic"><use href="#i-eraser"/></svg></button>
-          <button id="termHideBtn" class="ghost" title="ซ่อน terminal" data-i18n-title="ซ่อน terminal"><svg class="ic"><use href="#i-x"/></svg></button>
         </div>
       </header>
       <div id="chatPanel">
@@ -217,7 +209,6 @@
           <button id="chatSend" title="ส่ง" data-i18n-title="ส่ง"><svg class="ic sm"><use href="#i-send"/></svg></button>
         </div>
       </div>
-      <div id="terminal"></div>
       <p class="hint" id="hint"></p>
     </section>
 
@@ -227,8 +218,6 @@
     <div id="diffOverlay" hidden></div>
   </div>
 
-  <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
-  <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
   <script src="vendor/pdfjs/pdf.min.js"></script>
   <script src="../core/markdown.js"></script>
   <script src="../core/frontmatter.js"></script>

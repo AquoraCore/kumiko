@@ -35,18 +35,19 @@ test.describe('AI provider settings (step 3a-2)', () => {
     await expect(page.locator('#aiKeyInput')).toHaveAttribute('placeholder', /ตั้งค่าไว้แล้ว|set/);
   });
 
-  test('EDGE: switch to API then Cancel → nothing persists (still cli)', async () => {
+  test('EDGE: type a key then Cancel → nothing persists', async () => {
     const { page } = ctx;
     await openAiPanel(page);
 
-    await page.locator('.ai-mode-btn[data-mode="api"]').click();
+    // api is the only real mode now (cli removed in 8.5) → its section is shown by default
+    await expect(page.locator('.ai-mode-btn[data-mode="api"]')).toHaveClass(/on/);
     await expect(page.locator('#aiApiSection')).toBeVisible();
+    await page.locator('#aiKeyInput').fill('sk-should-not-persist');
     await page.locator('#aiSettingsCancel').click();
     await expect(page.locator('#aiSettingsModal')).toHaveCount(0);
 
-    // reopen → default cli still selected, api not on
+    // reopen → the cancelled key did NOT persist (no "key is set" placeholder)
     await openAiPanel(page);
-    await expect(page.locator('.ai-mode-btn[data-mode="cli"]')).toHaveClass(/on/);
-    await expect(page.locator('.ai-mode-btn[data-mode="api"]')).not.toHaveClass(/on/);
+    await expect(page.locator('#aiKeyInput')).not.toHaveAttribute('placeholder', /ตั้งค่าไว้แล้ว|set/);
   });
 });

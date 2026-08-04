@@ -187,7 +187,6 @@ function buildSessionPrompt(s, msg){
 window.api.onEngineOutput((payload) => {
   const runId = payload && payload.runId;
   const data = (payload && payload.data) || '';
-  term.write(data.replace(/\n/g, '\r\n'));
   if (!runId) return;
   const s = sessionById(runId); if (!s) return;
   const last = s.messages[s.messages.length - 1]; if (!last || last.role !== 'ai') return;
@@ -195,7 +194,6 @@ window.api.onEngineOutput((payload) => {
   const shown = cleanChatText(last._acc).trim();
   if (shown) { last.text = shown; if (runId === activeId && liveBubble) { liveBubble.innerHTML = mdToHtml(shown); chatScroll(); } }
 });
-window.api.onEngineDone((payload) => { if (payload && typeof payload.code !== 'undefined') term.write('\r\n\x1b[32m[done] ' + t('เสร็จ') + ' (exit ' + payload.code + ')\x1b[0m\r\n'); });
 window.api.onEngineDone((payload) => {
   const runId = payload && payload.runId; if (!runId) return;
   const s = sessionById(runId); if (!s) return;

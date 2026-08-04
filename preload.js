@@ -5,12 +5,6 @@ contextBridge.exposeInMainWorld('__WASHI_TEST_COLLAB', !!process.env.WASHI_TEST_
 const collabRelay = process.env.WASHI_COLLAB_RELAY || '';
 
 contextBridge.exposeInMainWorld('api', {
-  startPty: (size) => ipcRenderer.send('pty:start', size),
-  ptyInput: (data) => ipcRenderer.send('pty:input', data),
-  ptyResize: (size) => ipcRenderer.send('pty:resize', size),
-  ptyRestart: (size) => ipcRenderer.send('pty:restart', size),
-  onPtyData: (cb) => ipcRenderer.on('pty:data', (_e, d) => cb(d)),
-
   listNotes: () => ipcRenderer.invoke('note:list'),
   openNote: (name) => ipcRenderer.invoke('note:open', name),
   readNote: (name) => ipcRenderer.invoke('note:read', name),

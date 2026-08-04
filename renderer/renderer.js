@@ -4,56 +4,10 @@ const { parseFrontmatter, serializeFrontmatter } = window.CoreFrontmatter;
 const { _lcsOps, diffSegments, addLinesFromText, mergeSegments } = window.CoreTextDiff;
 const { _lev, _sim } = window.CoreTextSim;
 const { composeRagPrompt } = window.CoreRag;
-// ---------- Terminal ----------
-const term = new Terminal({
-  fontFamily: '"SF Mono", "JetBrains Mono", Menlo, monospace',
-  fontSize: 13,
-  cursorBlink: true,
-  theme: {
-    background: '#1e1e1e', foreground: '#d4d4d4', cursor: '#d4d4d4',
-    selectionBackground: '#3a3d41',
-  },
-});
-const fit = new FitAddon.FitAddon();
-term.loadAddon(fit);
-term.open(document.getElementById('terminal'));
-
-const TERM_THEME = {
-  dark:  { background: '#1e1e1e', foreground: '#d4d4d4', cursor: '#d4d4d4', selectionBackground: '#3a3d41' },
-  light: { background: '#f4f2ec', foreground: '#2c2c2a', cursor: '#2c2c2a', selectionBackground: '#dcd9cf' },
-};
-function applyTermTheme() {
-  const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
-  term.options.theme = isDark ? TERM_THEME.dark : TERM_THEME.light;
-}
-applyTermTheme();
-
-function fitTerm() {
-  try {
-    fit.fit();
-    window.api.ptyResize({ cols: term.cols, rows: term.rows });
-  } catch (_) {}
-}
-
-window.api.startPty({ cols: term.cols, rows: term.rows });
-window.api.onPtyData((d) => term.write(d));
-term.onData((d) => window.api.ptyInput(d));
-setTimeout(fitTerm, 60);
-window.addEventListener('resize', () => setTimeout(fitTerm, 30));
-
-// i18n moved to renderer/i18n.js (loaded before renderer.js): uiLang, t(), setUiLang(), applyStaticI18n(), I18N_EN
-let termFontSize = parseInt(localStorage.getItem('termFontSize') || '13', 10);
-term.options.fontSize = termFontSize;
-
-document.getElementById('clearBtn').onclick = () => term.clear();
-
-document.getElementById('termStopBtn').onclick = () => { window.api.ptyInput('\x03'); term.focus(); };
-document.getElementById('termRestartBtn').onclick = () => { term.reset(); window.api.ptyRestart({ cols: term.cols, rows: term.rows }); term.focus(); };
 
 // ---------- Engine switcher ----------
 const engineSelect = document.getElementById('engineSelect');
 const modelSelect = document.getElementById('modelSelect');
-const claudeBtn = document.getElementById('claudeBtn');
 
 let currentEngine = localStorage.getItem('engine') || 'glm';
 let currentModel = localStorage.getItem('glmModel') || 'glm-5.2';
@@ -62,7 +16,6 @@ function applyEngineUI() {
   engineSelect.value = currentEngine;
   modelSelect.value = currentModel;
   modelSelect.hidden = currentEngine !== 'glm';
-  claudeBtn.innerHTML = icoSvg('play') + (currentEngine === 'glm' ? t(' เริ่ม opencode') : t(' เริ่ม claude'));
 }
 function updateHint() {
   const h = document.getElementById('hint');
@@ -76,11 +29,6 @@ function updateHint() {
 engineSelect.onchange = () => { currentEngine = engineSelect.value; localStorage.setItem('engine', currentEngine); applyEngineUI(); updateHint(); };
 modelSelect.onchange = () => { currentModel = modelSelect.value; localStorage.setItem('glmModel', currentModel); };
 applyEngineUI();
-
-claudeBtn.onclick = () => {
-  window.api.ptyInput(currentEngine === 'glm' ? 'opencode\r' : 'claude\r');
-  term.focus();
-};
 
 // AI chat multi-session module moved to renderer/chat.js
 
@@ -611,10 +559,8 @@ async function runEngineAction(prompt) {
   noteActionRunId = s.id;
   const engine = s.engine;
   const model = 'zai-coding-plan/' + s.model;
-  term.write('\r\n\x1b[36m▶ [' + (engine === 'glm' ? ('GLM ' + s.model) : 'Claude') + '] ' + prompt + '\x1b[0m\r\n');
   beginAiTurn(prompt);
   window.api.runEngine({ engine, model: (engine === 'glm' ? model : ''), prompt, runId: s.id });
-  term.focus();
 }
 
 actionBar.querySelectorAll('button[data-act]').forEach((btn) => {
@@ -829,14 +775,8 @@ divider.addEventListener('mousedown', (e) => {
   e.preventDefault();
   appEl.classList.add('resizing');
   const move = (ev) => {
-    if (termPos === 'bottom') {
-      const hh = Math.min(window.innerHeight - 120, Math.max(120, window.innerHeight - ev.clientY));
-      appEl.style.setProperty('--term-h', hh + 'px');
-    } else {
-      const rw = Math.min(760, Math.max(320, window.innerWidth - ev.clientX));
-      appEl.style.setProperty('--term-w', rw + 'px');
-    }
-    fitTerm();
+    const rw = Math.min(760, Math.max(320, window.innerWidth - ev.clientX));
+    appEl.style.setProperty('--term-w', rw + 'px');
   };
   const up = () => { appEl.classList.remove('resizing'); document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
   document.addEventListener('mousemove', move);
@@ -1009,7 +949,6 @@ document.querySelectorAll('.sb-views .sbv').forEach((b) => { b.onclick = () => s
 // ---------- Theme ----------
 function applyTheme(t) {
   document.documentElement.setAttribute('data-theme', t);
-  applyTermTheme();
 }
 document.getElementById('themeBtn').onclick = () => {
   const t = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
@@ -1100,8 +1039,9 @@ document.getElementById('settingsBtn').onclick = openSettings;
 
 // ---------- AI provider settings (step 3a-2) ----------
 // Modal into #settingsOverlay, same pattern as openSettings(). Loads the safe
-// view (aiGetConfig) — never the raw key. Default mode stays 'cli' so nothing
-// changes for current users until they opt in. Writes only via 3a-1 IPC.
+// view (aiGetConfig) — never the raw key. Default mode is 'api' (the raw CLI /
+// terminal was removed in phase 8.5); a stale 'cli' from an older config is
+// treated as 'api'. Writes only via 3a-1 IPC.
 const AI_MODELS = {
   anthropic: ['claude-opus-4-8','claude-sonnet-5','claude-haiku-4-5-20251001'],
   zai: ['glm-5.2','glm-5.1','glm-4.7'],
@@ -1118,17 +1058,18 @@ async function openAiSettings(){
   xBtn.onclick=dismiss;
   head.appendChild(title); head.appendChild(xBtn); card.appendChild(head);
 
-  let selectedMode = cfg.mode;
+  let selectedMode = (cfg.mode === 'cli') ? 'api' : cfg.mode;
 
-  // MODE segmented control — cli / api / managed(disabled)
+  // MODE segmented control — api / managed(disabled). The raw CLI mode was removed
+  // in phase 8.5; a stale 'cli' config is normalized to 'api' (above) so the API
+  // section renders by default.
   const modeSeg=document.createElement('div'); modeSeg.className='ai-mode-seg';
   const MODES=[
-    ['cli', t('CLI (บนเครื่อง)'), 'opencode / claude'],
     ['api', t('API key'), t('ใส่คีย์เอง')],
     ['managed', t('Managed'), t('เร็ว ๆ นี้')],
   ];
   MODES.forEach(([m, label, sub])=>{
-    const b=document.createElement('button'); b.type='button'; b.className='ai-mode-btn'+(cfg.mode===m?' on':''); b.dataset.mode=m;
+    const b=document.createElement('button'); b.type='button'; b.className='ai-mode-btn'+(selectedMode===m?' on':''); b.dataset.mode=m;
     const l=document.createElement('span'); l.className='ai-mode-lab'; l.textContent=label;
     const s=document.createElement('span'); s.className='ai-mode-sub'; s.textContent=sub;
     b.appendChild(l); b.appendChild(s);
@@ -1352,32 +1293,11 @@ document.getElementById('sidebarToggle').onclick = () => {
 };
 
 const appEl = document.getElementById('app');
-let termPos = localStorage.getItem('termPos') || 'right';   // 'right' | 'bottom'
-let termHidden = localStorage.getItem('termHidden') === '1';
-function applyTermLayout() {
-  appEl.classList.toggle('term-right', termPos === 'right');
-  appEl.classList.toggle('term-bottom', termPos === 'bottom');
-  appEl.classList.toggle('term-hidden', termHidden);
-  setTimeout(fitTerm, 30);
-}
-applyTermLayout();
-function setTermHidden(v) { termHidden = v; localStorage.setItem('termHidden', v ? '1' : '0'); applyTermLayout(); }
-document.getElementById('termToggle').onclick = () => setTermHidden(!termHidden);
-document.getElementById('termHideBtn').onclick = () => setTermHidden(true);
-(() => {
-  const posBtn = document.getElementById('termPosBtn');
-  let drag = null;
-  posBtn.addEventListener('pointerdown', (e) => { try { posBtn.setPointerCapture(e.pointerId); } catch (_) {} drag = { x: e.clientX, y: e.clientY, moved: false }; });
-  posBtn.addEventListener('pointermove', (e) => { if (drag && (Math.abs(e.clientX - drag.x) > 5 || Math.abs(e.clientY - drag.y) > 5)) drag.moved = true; });
-  posBtn.addEventListener('pointerup', (e) => {
-    if (!drag) return;
-    const moved = drag.moved; drag = null;
-    if (moved) termPos = (e.clientY > window.innerHeight * 0.6) ? 'bottom' : 'right';
-    else termPos = (termPos === 'right') ? 'bottom' : 'right';
-    localStorage.setItem('termPos', termPos);
-    applyTermLayout();
-  });
-})();
+// ponytail: the panel is chat-only now (terminal removed in phase 8.5). The grid
+// template still lives on the .term-right class in styles.css, so apply it once
+// to give #right its column. The dynamic termPos/termHidden/toggle/drag logic is
+// gone — there is no terminal to reposition or hide.
+appEl.classList.add('term-right');
 
 // ---------- Chat send + mode toggle ----------
 const chatInput = document.getElementById('chatInput');
@@ -1417,11 +1337,10 @@ chatInput.addEventListener('input', () => { chatInput.style.height = 'auto'; cha
 chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } });
 
 const rightEl = document.getElementById('right');
-let rightMode = localStorage.getItem('rightMode') || 'chat';   // 'chat' | 'term'
+let rightMode = localStorage.getItem('rightMode') || 'chat';   // 'chat' only now (terminal removed)
 function applyRightMode(){
   rightEl.classList.toggle('chat-mode', rightMode === 'chat');
   rightEl.classList.toggle('term-mode', rightMode === 'term');
-  if (rightMode === 'term') setTimeout(fitTerm, 30);
 }
 applyRightMode();
 loadSessions();
