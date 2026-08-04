@@ -710,8 +710,7 @@ function makeTboxEl(b, cssW, cssH){
     const left = parseFloat(el.style.left) || 0, top = parseFloat(el.style.top) || 0;
     el.classList.add('dragging');
     const onMove = (e) => {
-      const nw = Math.max(48, Math.min(startW + (e.clientX - startX), wr.width - left));
-      const nh = Math.max(24, Math.min(startH + (e.clientY - startY), wr.height - top));
+      const { w: nw, h: nh } = window.CoreTbox.tboxClampSize(startW, startH, e.clientX - startX, e.clientY - startY, left, top, wr.width, wr.height);
       el.style.width = nw + 'px'; el.style.height = nh + 'px';
     };
     const onUp = () => {
