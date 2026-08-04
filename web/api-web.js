@@ -62,11 +62,14 @@ function createWebApi(opts) {
     catch (_) { return null; }
   });
 
+  function _curVault() { try { return store.getItem('webCurrentVault') || null; } catch (_) { return null; } }
+
   function authHeaders(extra) {
-    const token = getToken();
+    const token = getToken(); const v = _curVault();
     return Object.assign(
       { 'content-type': 'application/json' },
       token ? { authorization: 'Bearer ' + token } : {},
+      v ? { 'x-vault': v } : {},
       extra || {}
     );
   }
@@ -248,10 +251,42 @@ function createWebApi(opts) {
     return Promise.resolve(true);
   }
 
-  function vaultList() { return Promise.resolve([{ path: 'cloud', name: 'Cloud' }]); }
-  function vaultSwitch() { return Promise.resolve({ ok: true }); }
-  function vaultOpen() { return Promise.resolve({ ok: true }); }
-  function vaultCreate() { return Promise.resolve({ ok: true }); }
+  async function vaultList() {
+    try {
+      const res = await req('GET', '/vaults');
+      const arr = (res && res.ok) ? ((await res.json()).vaults || []) : [];
+      if (!arr.length) return { current: null, recents: [] };
+      const curId = _curVault();
+      const cur = arr.find((v) => v.id === curId) || arr[0];
+      return {
+        current: { name: cur.name, path: cur.id },
+        recents: arr.map((v) => ({ name: v.name, path: v.id })),
+      };
+    } catch (_) { return { current: null, recents: [] }; }
+  }
+  async function vaultSwitch(id) { try { store.setItem('webCurrentVault', String(id)); } catch (_) {} return { ok: true }; }
+  async function vaultCreate(name) {
+    try {
+      const res = await req('POST', '/vaults', { name: name || 'Vault ใหม่' });
+      if (!res || !res.ok) return { ok: false };
+      const v = (await res.json()).vault;
+      if (v && v.id) { try { store.setItem('webCurrentVault', v.id); } catch (_) {} }
+      return { ok: true, id: v && v.id };
+    } catch (_) { return { ok: false }; }
+  }
+  async function vaultRename(id, name) {
+    try { const res = await req('POST', '/vaults/rename', { id, name }); return (res && res.ok) ? await res.json() : { error: 'failed' }; }
+    catch (_) { return { error: 'failed' }; }
+  }
+  async function vaultDelete(id) {
+    try {
+      const res = await req('DELETE', '/vaults?id=' + encodeURIComponent(id));
+      const r = (res && res.ok) ? await res.json() : { error: 'failed' };
+      if (r && r.ok && _curVault() === String(id)) { try { store.removeItem('webCurrentVault'); } catch (_) {} }
+      return r;
+    } catch (_) { return { error: 'failed' }; }
+  }
+  function vaultOpen() { return Promise.resolve({ ok: false }); }
 
   // ---- auth (web token in store) ----
   function authGetToken() {
@@ -714,7 +749,7 @@ function createWebApi(opts) {
     // storage (7d-1, real)
     listNotes, openNote, readNote, saveNote, createNote, renameNote, deleteNote,
     // state / vault
-    vaultStateReadSync, vaultConfigRead, vaultConfigWrite, vaultList, vaultSwitch, vaultOpen, vaultCreate,
+    vaultStateReadSync, vaultConfigRead, vaultConfigWrite, vaultList, vaultSwitch, vaultOpen, vaultCreate, vaultRename, vaultDelete,
     // auth
     authGetToken, authSetToken, authClear,
     // ai

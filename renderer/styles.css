@@ -1124,6 +1124,8 @@ table.db tr:hover .db-delrow { opacity: 1; }
   font: 13px/1 var(--font); color: var(--text);
 }
 .vault-menu .vm-act:hover { background: var(--accent-bg); color: var(--accent); }
+.vm-mini { background:none; border:none; cursor:pointer; opacity:.6; padding:2px 4px; font-size:12px; }
+.vm-mini:hover{ opacity:1; }
 
 /* ---- sidebar: search ---- */
 /* gap lives on the row (padding-bottom) so the field box == input box;

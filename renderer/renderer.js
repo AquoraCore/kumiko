@@ -1440,6 +1440,16 @@ async function openVaultMenu(anchor){
       const nm = document.createElement('div'); nm.className = 'vm-nm'; nm.textContent = r.name; main.appendChild(nm);
       const pt = document.createElement('div'); pt.className = 'vm-path'; pt.textContent = r.path; main.appendChild(pt);
       row.appendChild(main);
+      if (window.KUMIKO_WEB) {
+        const ren = document.createElement('button'); ren.className = 'vm-mini'; ren.title = t('เปลี่ยนชื่อ'); ren.textContent = '✎';
+        ren.onclick = async (e) => { e.stopPropagation(); const nn = await askName(t('เปลี่ยนชื่อ vault'), r.name); if (!nn) return; await window.api.vaultRename(r.path, nn); openVaultMenu(document.getElementById('vaultChip')); };
+        row.appendChild(ren);
+        if (info.recents.length > 1) {
+          const del = document.createElement('button'); del.className = 'vm-mini'; del.title = t('ลบ'); del.textContent = '🗑';
+          del.onclick = async (e) => { e.stopPropagation(); if (!confirm(t('ลบ vault "') + r.name + t('" และโน้ตทั้งหมดในนั้น?'))) return; const res = await window.api.vaultDelete(r.path); if (res && res.ok) { if (info.current && r.path === info.current.path) location.reload(); else openVaultMenu(document.getElementById('vaultChip')); } };
+          row.appendChild(del);
+        }
+      }
       if (isCurrent) {
         const ck = document.createElement('span'); ck.className = 'vm-check'; ck.innerHTML = icoSvg('check', 'sm'); row.appendChild(ck);
       } else {
@@ -1450,12 +1460,20 @@ async function openVaultMenu(anchor){
     const sep = document.createElement('div'); sep.className = 'vm-sep'; menu.appendChild(sep);
   }
 
-  const open = document.createElement('div'); open.className = 'vm-act'; open.textContent = '📂 ' + t('เปิดโฟลเดอร์เป็น vault…');
-  open.onclick = async () => { closeVaultMenu(); const r = await window.api.vaultOpen(); if (r && r.ok) location.reload(); };
-  menu.appendChild(open);
+  if (!window.KUMIKO_WEB) {
+    const open = document.createElement('div'); open.className = 'vm-act'; open.textContent = '📂 ' + t('เปิดโฟลเดอร์เป็น vault…');
+    open.onclick = async () => { closeVaultMenu(); const r = await window.api.vaultOpen(); if (r && r.ok) location.reload(); };
+    menu.appendChild(open);
+  }
 
   const create = document.createElement('div'); create.className = 'vm-act'; create.textContent = '＋ ' + t('สร้าง vault ใหม่…');
-  create.onclick = async () => { closeVaultMenu(); const r = await window.api.vaultCreate(); if (r && r.ok) location.reload(); };
+  create.onclick = async () => {
+    closeVaultMenu();
+    let name = '';
+    if (window.KUMIKO_WEB) { name = await askName(t('ตั้งชื่อ vault ใหม่'), ''); if (name == null) return; }
+    const r = await window.api.vaultCreate(name);
+    if (r && r.ok) location.reload();
+  };
   menu.appendChild(create);
 
   document.body.appendChild(menu);
