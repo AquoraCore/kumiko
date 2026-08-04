@@ -648,6 +648,7 @@ function makeTboxEl(b, cssW, cssH){
   el.style.left = (b.x * cssW) + 'px';
   el.style.top = (b.y * cssH) + 'px';
   el.style.width = (b.w * cssW) + 'px';
+  if (b.h) el.style.height = (b.h * cssH) + 'px';
 
   const head = document.createElement('div'); head.className = 'pdf-tbox-head'; head.title = t('ลากเพื่อย้าย');
   const body = document.createElement('div'); body.className = 'pdf-tbox-body';
@@ -697,6 +698,34 @@ function makeTboxEl(b, cssW, cssH){
     clearTimeout(saveT); saveT = setTimeout(savePdfAnnots, 400);
   });
   body.addEventListener('blur', () => { b.text = body.innerText; clearTimeout(saveT); savePdfAnnots(); });
+
+  const rz = document.createElement('div'); rz.className = 'pdf-tbox-resize'; rz.title = t('ลากเพื่อปรับขนาด');
+  rz.addEventListener('mousedown', (ev) => {
+    if (ev.button !== 0) return;
+    ev.preventDefault(); ev.stopPropagation();
+    const wrap = el.closest('.pdf-page-wrap'); if (!wrap) return;
+    const wr = wrap.getBoundingClientRect();
+    const startX = ev.clientX, startY = ev.clientY;
+    const startW = el.offsetWidth, startH = el.offsetHeight;
+    const left = parseFloat(el.style.left) || 0, top = parseFloat(el.style.top) || 0;
+    el.classList.add('dragging');
+    const onMove = (e) => {
+      const nw = Math.max(48, Math.min(startW + (e.clientX - startX), wr.width - left));
+      const nh = Math.max(24, Math.min(startH + (e.clientY - startY), wr.height - top));
+      el.style.width = nw + 'px'; el.style.height = nh + 'px';
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove, true);
+      window.removeEventListener('mouseup', onUp, true);
+      el.classList.remove('dragging');
+      b.w = el.offsetWidth / wr.width;
+      b.h = el.offsetHeight / wr.height;
+      savePdfAnnots();
+    };
+    window.addEventListener('mousemove', onMove, true);
+    window.addEventListener('mouseup', onUp, true);
+  });
+  el.appendChild(rz);
 
   el.appendChild(head); el.appendChild(body); el.appendChild(del);
   return el;
