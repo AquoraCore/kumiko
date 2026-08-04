@@ -54,7 +54,7 @@ async function startServer(opts = {}) {
   if (secret === 'dev-insecure-secret-change-me') {
     console.warn('[server] WARNING: using insecure default AUTH_SECRET — set AUTH_SECRET for anything but local dev.');
   }
-  const dataDir = opts.dataDir || path.join(__dirname, '..', '.server-data');
+  const dataDir = opts.dataDir || process.env.DATA_DIR || path.join(__dirname, '..', '.server-data');
   setPersistDir(path.join(dataDir, 'rooms'));
   const store = createStore(path.join(dataDir, 'users.json'));
   const googleClientId = opts.googleClientId || process.env.GOOGLE_CLIENT_ID || '';

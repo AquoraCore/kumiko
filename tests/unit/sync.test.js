@@ -36,16 +36,54 @@ describe('planSync (edge: one-sided change push/pull; two-sided conflict)', () =
   });
 });
 
-describe('planSync (edge: deletion NOT propagated in v1 -> re-push/re-pull to keep)', () => {
-  const base = { 'x.md': hashContent('v') };
-
-  it('deleted locally, still on cloud unchanged -> re-pull', () => {
+describe('planSync (V2.1: deletion propagates via base)', () => {
+  it('deleted locally, cloud unchanged-since-base -> delCloud; pulls empty; not in newBase', () => {
+    const base = { 'x.md': hashContent('v') };
     const p = planSync(base, {}, { 'x.md': 'v' });
-    expect(p.pulls.map(x => x.name)).toEqual(['x.md']);
+    expect(p.delCloud.map(x => x.name)).toEqual(['x.md']);
+    expect(p.pulls).toEqual([]);
+    expect(p.newBase['x.md']).toBeUndefined();
   });
 
-  it('deleted on cloud, still local unchanged -> re-push', () => {
+  it('deleted on cloud, local unchanged-since-base -> delLocal; pushes empty; not in newBase', () => {
+    const base = { 'x.md': hashContent('v') };
     const q = planSync(base, { 'x.md': 'v' }, {});
-    expect(q.pushes.map(x => x.name)).toEqual(['x.md']);
+    expect(q.delLocal.map(x => x.name)).toEqual(['x.md']);
+    expect(q.pushes).toEqual([]);
+    expect(q.newBase['x.md']).toBeUndefined();
+  });
+
+  it('DELETE-vs-EDIT (edit wins): deleted locally, cloud EDITED since base -> pull (resurrect), delCloud empty', () => {
+    const p = planSync({ 'x.md': hashContent('v') }, {}, { 'x.md': 'v2-cloud-edit' });
+    expect(p.pulls.map(x => x.name)).toEqual(['x.md']);
+    expect(p.delCloud).toEqual([]);
+  });
+
+  it('EDIT-vs-DELETE (edit wins): local EDITED since base, cloud deleted -> push, delLocal empty', () => {
+    const p = planSync({ 'x.md': hashContent('v') }, { 'x.md': 'local-edit' }, {});
+    expect(p.pushes.map(x => x.name)).toEqual(['x.md']);
+    expect(p.delLocal).toEqual([]);
+  });
+
+  it('FIRST-SYNC SAFETY (no base): local-only note with empty base -> push, delCloud empty', () => {
+    const p = planSync({}, { 'new.md': 'N' }, {});
+    expect(p.pushes.map(x => x.name)).toEqual(['new.md']);
+    expect(p.delCloud).toEqual([]);
+  });
+
+  it('FIRST-SYNC SAFETY (no base): cloud-only note with empty base -> pull, delLocal empty', () => {
+    const p = planSync({}, {}, { 'new.md': 'N' });
+    expect(p.pulls.map(x => x.name)).toEqual(['new.md']);
+    expect(p.delLocal).toEqual([]);
+  });
+
+  it('both deleted (in base, absent both sides) -> nothing anywhere; not in newBase', () => {
+    const base = { 'x.md': hashContent('v') };
+    const p = planSync(base, {}, {});
+    expect(p.pushes).toEqual([]);
+    expect(p.pulls).toEqual([]);
+    expect(p.delLocal).toEqual([]);
+    expect(p.delCloud).toEqual([]);
+    expect(p.newBase['x.md']).toBeUndefined();
   });
 });

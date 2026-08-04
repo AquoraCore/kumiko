@@ -1299,6 +1299,17 @@ const appEl = document.getElementById('app');
 // gone — there is no terminal to reposition or hide.
 appEl.classList.add('term-right');
 
+// AI chat panel show/hide — reuses the .term-hidden grid collapse in styles.css.
+function applyChatHidden(){
+  const hidden = localStorage.getItem('chatHidden') === '1';
+  appEl.classList.toggle('term-hidden', hidden);
+  const tgl = document.getElementById('aiPanelToggle');
+  if (tgl) tgl.classList.toggle('on', !hidden);
+}
+function setChatHidden(v){ localStorage.setItem('chatHidden', v ? '1' : '0'); applyChatHidden(); }
+applyChatHidden();
+{ const tg = document.getElementById('aiPanelToggle'); if (tg) tg.onclick = () => setChatHidden(localStorage.getItem('chatHidden') !== '1'); }
+
 // ---------- Chat send + mode toggle ----------
 const chatInput = document.getElementById('chatInput');
 const chatSend = document.getElementById('chatSend');

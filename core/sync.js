@@ -6,7 +6,7 @@ function planSync(base, local, cloud){
   base = base || {};
   local = local || {};
   cloud = cloud || {};
-  const pushes = [], pulls = [], conflicts = [], newBase = {};
+  const pushes = [], pulls = [], conflicts = [], delLocal = [], delCloud = [], newBase = {};
   const seen = Object.create(null);
   for (const k in base) seen[k] = 1;
   for (const k in local) seen[k] = 1;
@@ -15,6 +15,7 @@ function planSync(base, local, cloud){
     const L = Object.prototype.hasOwnProperty.call(local, name) ? local[name] : undefined;
     const C = Object.prototype.hasOwnProperty.call(cloud, name) ? cloud[name] : undefined;
     const b = base[name];
+    const inBase = Object.prototype.hasOwnProperty.call(base, name);
     const lh = L===undefined ? undefined : hashContent(L);
     const ch = C===undefined ? undefined : hashContent(C);
     if (L!==undefined && C!==undefined){
@@ -26,13 +27,17 @@ function planSync(base, local, cloud){
         else { conflicts.push({ name, localContent:L, cloudContent:C }); newBase[name]=lh; }
       }
     } else if (L!==undefined && C===undefined){
-      pushes.push({name,content:L}); newBase[name]=lh;
+      // present local, absent cloud: delete-propagation (V2.1, base-driven).
+      if (inBase && lh === b) { delLocal.push({ name }); }           // local UNCHANGED since base, cloud deleted it -> delete local
+      else { pushes.push({ name, content: L }); newBase[name]=lh; }  // brand-new local, OR local edited after cloud delete (edit wins) -> push
     } else if (L===undefined && C!==undefined){
-      pulls.push({name,content:C}); newBase[name]=ch;
+      // absent local, present cloud: delete-propagation (V2.1, base-driven).
+      if (inBase && ch === b) { delCloud.push({ name }); }           // cloud UNCHANGED since base, local deleted it -> delete cloud
+      else { pulls.push({ name, content: C }); newBase[name]=ch; }   // brand-new cloud, OR cloud edited after local delete (edit wins) -> pull
     }
     // both undefined: only in base -> drop from newBase (skip)
   }
-  return { pushes, pulls, conflicts, newBase };
+  return { pushes, pulls, conflicts, delLocal, delCloud, newBase };
 }
 
 if (typeof module!=='undefined'&&module.exports) module.exports={hashContent,planSync};

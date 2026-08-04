@@ -34,7 +34,7 @@ async function syncNow() {
     const baseState = JSON.parse(localStorage.getItem('syncBase:'+vaultId) || '{}');
     const plan = window.CoreSync.planSync(baseState, local, cloud);
     // 5) apply
-    let pushed=0, pulled=0, conflicts=0;
+    let pushed=0, pulled=0, conflicts=0, deletedLocal=0, deletedCloud=0;
     for (const p of plan.pushes) { await fetch(base + '/notes', { method:'PUT', headers:VH(), body: JSON.stringify({ name:p.name, content:p.content }) }); pushed++; }
     for (const p of plan.pulls)  { await window.api.saveNote(p.name, p.content); pulled++; }
     for (const c of plan.conflicts) {
@@ -46,12 +46,14 @@ async function syncNow() {
       plan.newBase[cname] = window.CoreSync.hashContent(c.cloudContent);
       conflicts++;
     }
+    for (const d of plan.delCloud)  { await fetch(base + '/notes?name=' + encodeURIComponent(d.name), { method:'DELETE', headers:VH() }); deletedCloud++; }
+    for (const d of plan.delLocal)  { await window.api.deleteNote(d.name); deletedLocal++; }
     localStorage.setItem('syncBase:'+vaultId, JSON.stringify(plan.newBase));
-    return { ok:true, pushed, pulled, conflicts };
+    return { ok:true, pushed, pulled, conflicts, deletedLocal, deletedCloud };
   } catch (e) { return { ok:false, error:String(e && e.message || e) }; }
 }
 window.syncNow = syncNow;
 // auto-sync ~2s after load if logged in (desktop only), then refresh the note list
 if (typeof window.KUMIKO_WEB === 'undefined') {
-  setTimeout(async () => { try { const r = await syncNow(); if (r.ok && (r.pulled||r.conflicts) && typeof refreshList==='function') await refreshList(); } catch(_){} }, 2000);
+  setTimeout(async () => { try { const r = await syncNow(); if (r.ok && (r.pulled||r.conflicts||r.deletedLocal) && typeof refreshList==='function') await refreshList(); } catch(_){} }, 2000);
 }
