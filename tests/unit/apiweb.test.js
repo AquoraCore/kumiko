@@ -355,4 +355,51 @@ describe('web api shim', () => {
       await s.close();
     }
   }, 20000);
+
+  it('aiSetKey/aiGetConfig round-trip', async () => {
+    const api = createWebApi({ baseUrl: 'http://x', getToken: () => null, store: memStore() });
+    await api.aiSetKey('zai', 'k');
+    expect((await api.aiGetConfig()).hasKey.zai).toBe(true);
+    await api.aiSetKey('zai', '');
+    expect((await api.aiGetConfig()).hasKey.zai).toBe(false);
+  });
+
+  it('runEngine sends the user API key when set', async () => {
+    let seen = null;
+    const s = await startServer({
+      port: 0, dataDir: tmpDir(),
+      streamChat: async function* (prompt, creds) { seen = creds; yield 'ok'; },
+    });
+    const base = 'http://127.0.0.1:' + s.port;
+
+    let r = await fetch(base + '/auth/signup', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'userkey@b.com', password: 'password123' }),
+    });
+    expect(r.status).toBe(200);
+    let token = (await r.json()).token;
+
+    const api = createWebApi({ baseUrl: base, getToken: () => token });
+    try {
+      await api.aiSetKey('zai', 'sk-user');
+      await api.aiSetConfig({ provider: 'zai', model: 'glm-5.2' });
+
+      const parts = [];
+      let done = false;
+      api.onEngineOutput((m) => { parts.push(m.data); });
+      api.onEngineDone(() => { done = true; });
+      await api.runEngine({ runId: 'r', prompt: 'hi' });
+      const ok = await new Promise((resolve) => {
+        const start = Date.now();
+        const tick = () => { if (done) return resolve(true); if (Date.now() - start > 5000) return resolve(false); setTimeout(tick, 20); };
+        tick();
+      });
+      expect(ok).toBe(true);
+      expect(parts.join('')).toBe('ok');
+      expect(seen).toEqual({ provider: 'zai', key: 'sk-user', model: 'glm-5.2' });
+    } finally {
+      await s.close();
+    }
+  }, 20000);
 });

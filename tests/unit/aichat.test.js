@@ -80,4 +80,26 @@ describe('managed AI chat proxy', () => {
       await s2.close();
     }
   }, 20000);
+
+  it('client-provided key is forwarded to streamChat (wins over managed)', async () => {
+    let seen = null;
+    const s = await startServer({
+      port: 0, dataDir: tmpDir(),
+      streamChat: async function* (prompt, creds) { seen = creds; yield 'ok'; },
+    });
+    const base = 'http://127.0.0.1:' + s.port;
+    try {
+      const token = await signup(base, 'client@b.com');
+      const r = await fetch(base + '/ai/chat', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token },
+        body: JSON.stringify({ prompt: 'hi', provider: 'zai', key: 'sk-client', model: 'glm-5.2' }),
+      });
+      expect(r.status).toBe(200);
+      expect(await r.text()).toBe('ok');
+      expect(seen).toEqual({ provider: 'zai', key: 'sk-client', model: 'glm-5.2' });
+    } finally {
+      await s.close();
+    }
+  }, 20000);
 });

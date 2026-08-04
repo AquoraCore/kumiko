@@ -263,15 +263,41 @@ function createWebApi(opts) {
     return Promise.resolve(true);
   }
 
-  // ---- AI (web: streams the managed /ai/chat proxy; config via /ai/config) ----
+  // ---- AI (web: user supplies their OWN key, kept in store; runEngine forwards it) ----
+  // Shape under 'webAiCfg': { mode, provider, model, keys: { anthropic, zai } }.
+  function _readAiCfg() {
+    try { return JSON.parse(store.getItem('webAiCfg') || 'null') || {}; }
+    catch (_) { return {}; }
+  }
+  function _writeAiCfg(c) {
+    try { store.setItem('webAiCfg', JSON.stringify(c)); } catch (_) {}
+  }
   function aiGetConfig() {
-    return Promise.resolve({ mode: 'managed', provider: '', model: '', hasKey: { anthropic: false, zai: false } });
+    const c = _readAiCfg(); const keys = c.keys || {};
+    return Promise.resolve({
+      mode: c.mode || 'api',
+      provider: c.provider || 'zai',
+      model: c.model || '',
+      hasKey: { anthropic: !!keys.anthropic, zai: !!keys.zai },
+    });
   }
-  function aiSetConfig() {
-    return aiGetConfig();
+  function aiSetConfig(patch) {
+    const c = _readAiCfg(); const p = patch || {};
+    if (p.mode != null) c.mode = p.mode;
+    if (p.provider != null) c.provider = p.provider;
+    if (p.model != null) c.model = p.model;
+    _writeAiCfg(c); return aiGetConfig();
   }
-  function aiSetKey() { return Promise.resolve(true); }
-  function aiTestConnection() { return Promise.resolve({ ok: false, error: 'not available on web' }); }
+  function aiSetKey(provider, key) {
+    if (provider !== 'anthropic' && provider !== 'zai') return Promise.resolve(false);
+    const c = _readAiCfg(); c.keys = c.keys || {};
+    if (key == null || key === '') delete c.keys[provider]; else c.keys[provider] = String(key);
+    _writeAiCfg(c); return Promise.resolve(true);
+  }
+  function aiTestConnection() {
+    const c = _readAiCfg(); const keys = c.keys || {}; const prov = c.provider || 'zai';
+    return Promise.resolve(keys[prov] ? { ok: true } : { ok: false, error: 'no key set for ' + prov });
+  }
   // LEXICAL BM25 + wikilink expansion over the user's cloud notes — mirrors
   // main.js buildVaultContext (lexical-only branch). ponytail: no embeddings
   // on web for now; semantic fusion is a future step. Never throws — {} on error.
@@ -322,8 +348,12 @@ function createWebApi(opts) {
   async function runEngine(payload) {
     const runId = payload && payload.runId;
     const prompt = (payload && payload.prompt) || '';
+    const c = _readAiCfg(); const keys = c.keys || {};
+    const provider = c.provider || 'zai'; const key = keys[provider]; const model = c.model || '';
+    const body = { prompt };
+    if (key) { body.provider = provider; body.key = key; if (model) body.model = model; }
     try {
-      const res = await fetch(baseUrl + '/ai/chat', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ prompt }) });
+      const res = await fetch(baseUrl + '/ai/chat', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) });
       if (!res.ok || !res.body) {
         if (_engineOut) _engineOut({ runId, data: '[AI unavailable]\r\n' });
         if (_engineDone) _engineDone({ runId, code: -1 });

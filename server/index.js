@@ -65,9 +65,11 @@ async function startServer(opts = {}) {
 
   // Streaming chat over the configured provider. INJECTABLE via opts.streamChat so
   // tests run without a real LLM/key. Yields text deltas; returns early if unset.
-  const streamChat = opts.streamChat || (async function* (prompt) {
-    if (!aiProvider || !aiKey) return;
-    const req = aiCore.buildApiRequest(aiProvider, aiModel, prompt, aiKey);
+  // creds = { provider, key, model } (client-provided wins over managed defaults).
+  const streamChat = opts.streamChat || (async function* (prompt, creds) {
+    const { provider, key, model } = creds || {};
+    if (!provider || !key) return;
+    const req = aiCore.buildApiRequest(provider, model, prompt, key);
     if (!req) return;
     const res = await fetch(req.url, { method: 'POST', headers: req.headers, body: JSON.stringify(req.body) });
     if (!res.ok || !res.body) return;
@@ -79,7 +81,7 @@ async function startServer(opts = {}) {
       while ((i = buf.indexOf('\n')) >= 0) {
         const line = buf.slice(0, i); buf = buf.slice(i + 1);
         const m = line.match(/^data:\s?(.*)$/); if (!m) continue;
-        const delta = aiCore.parseSseDelta(aiProvider, m[1]);
+        const delta = aiCore.parseSseDelta(provider, m[1]);
         if (delta) yield delta;
       }
     }
@@ -309,15 +311,19 @@ async function startServer(opts = {}) {
     res.json({ ok: pdfs.saveAnnots(req.user.sub, name, data) });
   });
 
-  // POST /ai/chat (authed, streaming) — managed AI proxy using the SERVER's key.
-  // Streams text/plain deltas back to the caller. 501 when neither an injected
-  // streamChat nor provider/key is configured.
+  // POST /ai/chat (authed, streaming). Client may send its own {provider,key,model};
+  // those WIN over the server's managed config when present, else managed is used.
+  // 501 only when neither an injected streamChat nor any provider/key is available.
   app.post('/ai/chat', requireAuth, async (req, res) => {
-    const prompt = (req.body && req.body.prompt) || '';
-    if (!opts.streamChat && (!aiProvider || !aiKey)) return res.status(501).json({ error: 'managed AI not configured' });
+    const b = req.body || {};
+    const prompt = b.prompt || '';
+    const provider = b.provider || aiProvider;
+    const key = b.key || aiKey;
+    const model = b.model || aiModel;
+    if (!opts.streamChat && (!provider || !key)) return res.status(501).json({ error: 'no AI configured' });
     res.setHeader('content-type', 'text/plain; charset=utf-8');
     try {
-      for await (const delta of streamChat(prompt)) res.write(delta);
+      for await (const delta of streamChat(prompt, { provider, key, model })) res.write(delta);
       res.end();
     } catch (_) { try { res.end(); } catch (__) {} }
   });
