@@ -1375,7 +1375,7 @@ async function openVaultMenu(anchor){
       row.appendChild(main);
       if (window.KUMIKO_WEB) {
         const ren = document.createElement('button'); ren.className = 'vm-mini'; ren.title = t('เปลี่ยนชื่อ'); ren.textContent = '✎';
-        ren.onclick = async (e) => { e.stopPropagation(); const nn = await askName(t('เปลี่ยนชื่อ vault'), r.name); if (!nn) return; await window.api.vaultRename(r.path, nn); openVaultMenu(document.getElementById('vaultChip')); };
+        ren.onclick = async (e) => { e.stopPropagation(); const nn = await askName(t('เปลี่ยนชื่อ vault'), r.name); if (!nn) return; await window.api.vaultRename(r.path, nn); await window.updateVaultChipName(); openVaultMenu(document.getElementById('vaultChip')); };
         row.appendChild(ren);
         if (info.recents.length > 1) {
           const del = document.createElement('button'); del.className = 'vm-mini'; del.title = t('ลบ'); del.textContent = '🗑';
@@ -1418,11 +1418,14 @@ async function openVaultMenu(anchor){
 async function initVaultChip(){
   const chip = document.getElementById('vaultChip');
   if (!chip) return;
-  const nm = chip.querySelector('.vault-nm');
-  try { const info = await window.api.vaultList(); if (nm && info && info.current && info.current.name) nm.textContent = info.current.name; }
-  catch (_) {}
   chip.addEventListener('click', (e) => { e.stopPropagation(); openVaultMenu(chip); });
+  await window.updateVaultChipName();
 }
+window.updateVaultChipName = async () => {
+  const chip = document.getElementById('vaultChip'); if (!chip) return;
+  const nm = chip.querySelector('.vault-nm'); if (!nm) return;
+  try { const info = await window.api.vaultList(); if (info && info.current && info.current.name) nm.textContent = info.current.name; } catch (_) {}
+};
 initVaultChip();
 
 (async () => {

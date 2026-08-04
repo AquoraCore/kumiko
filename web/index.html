@@ -269,12 +269,6 @@
   <script src="/web/api-web.js?v=__ASSET_VERSION__"></script>
   <script src="/web/boot.js?v=__ASSET_VERSION__"></script>
   <script src="/renderer/vendor/crepe.bundle.js?v=__ASSET_VERSION__"></script>
-  <!-- ponytail: xterm.js + addon-fit.js live in node_modules which is NOT served
-       (constraint: do not expose node_modules). Paths below expect them vendored
-       into renderer/vendor/. Until then renderer.js will crash at `new Terminal()`.
-       See report. -->
-  <script src="/renderer/vendor/xterm.js?v=__ASSET_VERSION__"></script>
-  <script src="/renderer/vendor/addon-fit.js?v=__ASSET_VERSION__"></script>
   <script src="/renderer/vendor/pdfjs/pdf.min.js?v=__ASSET_VERSION__"></script>
   <script src="/core/markdown.js?v=__ASSET_VERSION__"></script>
   <script src="/core/frontmatter.js?v=__ASSET_VERSION__"></script>
