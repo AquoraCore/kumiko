@@ -147,18 +147,21 @@ async function loadEditor(bodyMarkdown){
   if (collabOn) {
     const tpl = stripLeadingH1(bodyMarkdown) || '';
     try {
-      collabDoc = new window.Y.Doc();
-      const room = currentNote || 'untitled';
-      try {
-        // WebSocket is native in the renderer — no polyfill needed. A ctor failure
-        // (or an unreachable relay) leaves collabProvider null; the editor keeps working
-        // offline and the provider retries in the background once it exists.
-        // Phase 7b-4: if the user logged in, pass the auth token as a WS query param so
-        // JWT-gated relays accept the connection. Standalone relays ignore the extra param.
-        let __authTok = null;
-        try { const a = await window.api.authGetToken(); if (a && a.token) __authTok = a.token; } catch (_) {}
-        collabProvider = new window.WebsocketProvider(collabRelayUrl(), room, collabDoc,
-          __authTok ? { params: { token: __authTok } } : undefined);
+        collabDoc = new window.Y.Doc();
+        // Fetch auth ONCE up front: token drives the WS param, email scopes the room name
+        // (V2.3) so different users — or the same user's two vaults — with a same-named
+        // note never share one room. Same user on web + desktop still share.
+        let __acc = null; try { __acc = await window.api.authGetToken(); } catch (_) {}
+        const __authTok = (__acc && __acc.token) || null;
+        const room = window.CoreCollabRoom.collabRoomName(__acc && __acc.email, currentNote);
+        try {
+          // WebSocket is native in the renderer — no polyfill needed. A ctor failure
+          // (or an unreachable relay) leaves collabProvider null; the editor keeps working
+          // offline and the provider retries in the background once it exists.
+          // Phase 7b-4: if the user logged in, pass the auth token as a WS query param so
+          // JWT-gated relays accept the connection. Standalone relays ignore the extra param.
+          collabProvider = new window.WebsocketProvider(collabRelayUrl(), room, collabDoc,
+            __authTok ? { params: { token: __authTok } } : undefined);
         const me = collabIdentity();
         collabProvider.awareness.setLocalStateField('user', { name: me.name, color: me.color });
         collabProvider.on('status', (e) => {
