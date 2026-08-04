@@ -1247,6 +1247,20 @@ async function openAiSettings(){
       const lo=document.createElement('button'); lo.type='button'; lo.id='aiAuthLogout'; lo.className='ghost'; lo.textContent=t('ออกจากระบบ');
       lo.onclick=async ()=>{ await window.api.authClear(); setAuthMsg(''); await renderAuthArea(); };
       authInner.appendChild(line); authInner.appendChild(lo);
+      // SYNC-NOW (phase 8.3b) — desktop only. Reconciles local vault with cloud.
+      if (typeof window.KUMIKO_WEB === 'undefined') {
+        const syncBtn=document.createElement('button'); syncBtn.type='button'; syncBtn.id='aiSyncNow'; syncBtn.className='ghost'; syncBtn.textContent='⟳ '+t('ซิงก์กับคลาวด์ตอนนี้');
+        const syncMsg=document.createElement('span'); syncMsg.className='ai-auth-line';
+        syncBtn.onclick=async ()=>{
+          syncBtn.disabled=true;
+          let r;
+          try { r=await window.syncNow(); } catch(e){ r={ok:false,error:String(e&&e.message||e)}; }
+          syncBtn.disabled=false;
+          syncMsg.textContent = r.ok ? (t('ซิงก์แล้ว: ส่งขึ้น ')+r.pushed+t(' ดึงลง ')+r.pulled+(r.conflicts?(' · '+r.conflicts+t(' ชนกัน (เก็บสำเนาไว้)')):'')) : (t('ซิงก์ไม่สำเร็จ: ')+r.error);
+          if (r.ok && (r.pulled||r.conflicts) && typeof refreshList==='function') await refreshList();
+        };
+        authInner.appendChild(syncBtn); authInner.appendChild(syncMsg);
+      }
     } else {
       const wrap=document.createElement('div'); wrap.className='ai-auth-fields';
       const em=document.createElement('input'); em.type='text'; em.id='aiAuthEmail'; em.placeholder='email'; em.autocomplete='off'; em.spellcheck=false;
