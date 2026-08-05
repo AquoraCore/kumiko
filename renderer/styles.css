@@ -1692,5 +1692,7 @@ table.db tr:hover .db-delrow { opacity: 1; }
 .drag-ghost { position: fixed; z-index: 9999; pointer-events: none; padding: 4px 10px; border-radius: 7px;
   background: var(--accent, #d99a83); color: #fff; font-size: 12px; box-shadow: 0 4px 14px rgba(60,45,25,.35);
   max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-body.dragging-active { cursor: grabbing; -webkit-user-select: none; user-select: none; }
-[data-drag-kind] { touch-action: pan-y; }   /* allow vertical scroll to start; our long-press arms the drag */
+/* While a drag is ARMED, kill all native scrolling so a vertical drag doesn't get
+   hijacked by the browser as a pan (added in begin(), i.e. only after the long-press). */
+body.dragging-active { cursor: grabbing; -webkit-user-select: none; user-select: none; touch-action: none; overscroll-behavior: contain; }
+[data-drag-kind] { touch-action: pan-y; }   /* before arming: a quick swipe still scrolls the list */

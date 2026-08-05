@@ -5,7 +5,7 @@
 //   mouse/pen: drag starts after a small move threshold.
 //   touch:     drag starts after a long-press (~350ms) so a quick swipe still scrolls.
 (function(){
-  const THRESH = 6, HOLD_MS = 350;
+  const THRESH = 6, HOLD_MS = 300, TOUCH_CANCEL = 16;
   const noteList = () => document.getElementById('noteList');
   let st = null, holdT = null;
 
@@ -24,6 +24,7 @@
     if (!st || st.active) return;
     st.active = true; st.moved = true;
     try { st.el.setPointerCapture(st.pid); } catch(_){}
+    if (st.touch) { try { navigator.vibrate && navigator.vibrate(15); } catch(_){} }  // haptic "picked up" cue
     st.el.classList.add('dragging');
     const g = document.createElement('div'); g.className = 'drag-ghost';
     g.textContent = (st.rel || '').split('/').pop().replace(/\.(md|pdf)$/i,'');
@@ -43,7 +44,7 @@
     if (!st) return;
     const dx = e.clientX - st.x0, dy = e.clientY - st.y0;
     if (!st.active){
-      if (st.touch){ if (Math.abs(dx) + Math.abs(dy) > THRESH){ clearTimeout(holdT); if (!st.active) { st = null; return; } } return; } // moved before hold fired -> scroll, abort
+      if (st.touch){ if (Math.abs(dx) + Math.abs(dy) > TOUCH_CANCEL){ clearTimeout(holdT); if (!st.active) { st = null; return; } } return; } // moved a lot before the hold armed -> it's a scroll, abort (finger jitter under TOUCH_CANCEL is tolerated)
       if (Math.abs(dx) + Math.abs(dy) < THRESH) return;              // mouse/pen: start on threshold
       begin();
     }
