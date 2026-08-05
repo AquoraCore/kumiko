@@ -1461,8 +1461,11 @@ initVaultChip();
   const lastNote = vsGet('lastNote', 'ระบบไต.md');
   await refreshList(lastOpen && lastOpen.type === 'note' && lastOpen.name ? lastOpen.name : lastNote);
   if (lastOpen && lastOpen.type === 'pdf' && lastOpen.name) {
-    const exists = Array.from(document.querySelectorAll('.pdf-item')).some((el) => el.dataset.pdf === lastOpen.name);
-    if (exists) await openPdf(lastOpen.name);
+    // Check the DATA, not the DOM — a PDF inside a COLLAPSED folder has no rendered .pdf-item,
+    // which used to make the restore silently fall back to a note.
+    let pdfs = [];
+    try { const _r = await window.api.listNotes(); pdfs = (_r && _r.pdfs) || []; } catch (_) {}
+    if (pdfs.includes(lastOpen.name)) await openPdf(lastOpen.name);
   } else if (lastOpen && lastOpen.type === 'view' && lastOpen.view) {
     // restore the last standalone view (graph/table/dash/trash/crate)
     if (lastOpen.view === 'crate' && typeof openCrate === 'function') openCrate(lastOpen.path || '');
