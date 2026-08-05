@@ -36,6 +36,7 @@ window.addEventListener('DOMContentLoaded', () => {
   if (!webAuthed()) {
     box.style.display = 'flex';
     setupGoogle(); // fire-and-forget; button stays hidden if no client id
+    if (window.__hideSplash) window.__hideSplash(); // login is ready → drop the splash now (don't wait for heavy assets)
   }
   document.getElementById('webLoginBtn').onclick = () => webAuth('login');
   document.getElementById('webSignupBtn').onclick = () => webAuth('signup');

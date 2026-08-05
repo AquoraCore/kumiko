@@ -35,6 +35,36 @@
 </head>
 <body>
   <script>window.KUMIKO_BUILD="__BUILD__";window.KUMIKO_ASSETV="__ASSET_VERSION__";</script>
+
+  <!-- BOOT SPLASH: covers the flash of empty panels between CSS-ready and JS-populated.
+       Removed by window.__hideSplash() — on login-shown (boot.js) or on window 'load'. -->
+  <div id="bootSplash" aria-hidden="true">
+    <div class="bs-inner">
+      <img src="/web/kumiko-icon.png" alt="" class="bs-logo" />
+      <div class="bs-word">Kumiko</div>
+      <div class="bs-spin"></div>
+    </div>
+  </div>
+  <style>
+    #bootSplash { position: fixed; inset: 0; z-index: 100000; display: flex; align-items: center; justify-content: center; background: #f1efe7; transition: opacity .32s ease; }
+    #bootSplash .bs-inner { display: flex; flex-direction: column; align-items: center; gap: 15px; }
+    #bootSplash .bs-logo { width: 58px; height: 58px; border-radius: 15px; box-shadow: 0 8px 24px rgba(60,45,25,.20); animation: bsPulse 1.6s ease-in-out infinite; }
+    #bootSplash .bs-word { font: 600 17px/1 system-ui, -apple-system, sans-serif; color: #6b5f4e; letter-spacing: .02em; }
+    #bootSplash .bs-spin { width: 22px; height: 22px; border-radius: 50%; border: 2.5px solid rgba(120,90,50,.16); border-top-color: #d99a83; animation: bsSpin .8s linear infinite; }
+    @keyframes bsSpin { to { transform: rotate(360deg); } }
+    @keyframes bsPulse { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.06); opacity: .84; } }
+    @media (prefers-color-scheme: dark) {
+      #bootSplash { background: #201d19; }
+      #bootSplash .bs-word { color: #b9ac97; }
+      #bootSplash .bs-spin { border-color: rgba(255,255,255,.12); border-top-color: #dea184; }
+    }
+    @media (prefers-reduced-motion: reduce) { #bootSplash .bs-logo, #bootSplash .bs-spin { animation: none; } }
+  </style>
+  <script>
+    window.__hideSplash = function () { var s = document.getElementById('bootSplash'); if (s) { s.style.opacity = '0'; s.style.pointerEvents = 'none'; setTimeout(function () { if (s) s.remove(); }, 340); } };
+    window.addEventListener('load', function () { setTimeout(function () { window.__hideSplash && window.__hideSplash(); }, 200); });
+  </script>
+
   <!-- WEB LOGIN OVERLAY (web-only chrome; hidden until boot.js shows it) -->
   <div id="webLogin">
     <div class="card">
