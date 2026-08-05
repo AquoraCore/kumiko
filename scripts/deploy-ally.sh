@@ -21,20 +21,23 @@ if [ ${#FILES[@]} -eq 0 ]; then
   exit 1
 fi
 
-NEED_RESTART=0
 for f in "${FILES[@]}"; do
   if [ ! -f "$f" ]; then echo "ERROR: no such file: $f" >&2; exit 1; fi
   scp -o ConnectTimeout=25 "$f" "$HOST:C:/kumiko/$f"
   echo "  ✓ sent $f"
-  case "$f" in
-    server/*) NEED_RESTART=1 ;;
-  esac
 done
 
-if [ "$NEED_RESTART" = "1" ]; then
-  echo "server code changed → restarting KumikoServer…"
-  ssh -o ConnectTimeout=30 "$HOST" "powershell -NoProfile -Command \"Stop-ScheduledTask -TaskName KumikoServer; Start-Sleep 2; Start-ScheduledTask -TaskName KumikoServer; Start-Sleep 4\""
-fi
+# Stamp a build id (git short SHA + local time) so the app can show which code is live,
+# and ship it to the server. Shown in the AI settings modal ("รุ่น <build>").
+BUILD="$(git rev-parse --short HEAD 2>/dev/null || echo nogit) $(date '+%Y-%m-%d %H:%M')"
+printf '%s' "$BUILD" > BUILD.txt
+scp -o ConnectTimeout=25 BUILD.txt "$HOST:C:/kumiko/BUILD.txt"
+echo "  ✓ build = $BUILD"
+
+# ALWAYS restart: bumps the per-boot assetVersion so every asset's ?v= changes → browsers
+# are FORCED to refetch (no-store alone isn't always honored; a stale ?v= let old JS stick).
+echo "restarting KumikoServer (bumps ?v= cache-bust)…"
+ssh -o ConnectTimeout=30 "$HOST" "powershell -NoProfile -Command \"Stop-ScheduledTask -TaskName KumikoServer; Start-Sleep 2; Start-ScheduledTask -TaskName KumikoServer; Start-Sleep 4\""
 
 echo "health check:"
 ssh -o ConnectTimeout=30 "$HOST" "powershell -NoProfile -Command \"try { 'http=' + (Invoke-WebRequest -UseBasicParsing http://127.0.0.1:4321/ -TimeoutSec 8).StatusCode } catch { \$_.Exception.Message }\""

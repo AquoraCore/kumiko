@@ -132,7 +132,14 @@ async function startServer(opts = {}) {
     let html;
     try { html = fs.readFileSync(path.join(ROOT, 'web', 'index.html'), 'utf8'); }
     catch (_) { return res.status(500).end(); }
-    res.type('html').send(html.replace(/__ASSET_VERSION__/g, assetVersion));
+    // BUILD.txt is written by the deploy script (git short SHA). Missing → fall
+    // back to assetVersion so the line always shows something.
+    let build = '';
+    try { build = fs.readFileSync(path.join(ROOT, 'BUILD.txt'), 'utf8').trim(); } catch (_) {}
+    if (!build) build = assetVersion;
+    res.type('html').send(
+      html.replace(/__ASSET_VERSION__/g, assetVersion).replace(/__BUILD__/g, build)
+    );
   });
 
   // POST /auth/signup {email,password}

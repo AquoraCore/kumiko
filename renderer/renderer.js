@@ -1285,6 +1285,14 @@ async function openAiSettings(){
   };
   foot.appendChild(testBtn); foot.appendChild(testRes); foot.appendChild(cancelBtn); foot.appendChild(saveBtn); card.appendChild(foot);
 
+  // BUILD/ASSET version line — stale-cache diagnostic. Placeholders stay literal
+  // on desktop (file://), so sanitize to 'desktop'/'local' there.
+  const ver=document.createElement('div'); ver.className='ai-settings-ver';
+  const _b=(window.KUMIKO_BUILD && window.KUMIKO_BUILD.indexOf('__')!==0) ? window.KUMIKO_BUILD : 'desktop';
+  const _a=(window.KUMIKO_ASSETV && window.KUMIKO_ASSETV.indexOf('__')!==0) ? window.KUMIKO_ASSETV : 'local';
+  ver.textContent=t('รุ่น')+' '+_b+' · assets '+_a;
+  card.appendChild(ver);
+
   ov.appendChild(card); ov.hidden=false;
 }
 

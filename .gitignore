@@ -20,3 +20,4 @@ notes/.seeded
 
 # local self-hosted backend data (users, persisted rooms)
 .server-data/
+BUILD.txt

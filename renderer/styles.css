@@ -1696,3 +1696,5 @@ table.db tr:hover .db-delrow { opacity: 1; }
    hijacked by the browser as a pan (added in begin(), i.e. only after the long-press). */
 body.dragging-active { cursor: grabbing; -webkit-user-select: none; user-select: none; touch-action: none; overscroll-behavior: contain; }
 [data-drag-kind] { touch-action: pan-y; }   /* before arming: a quick swipe still scrolls the list */
+
+.ai-settings-ver { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); text-align: center; -webkit-user-select: text; user-select: text; font-family: var(--mono, monospace); }
