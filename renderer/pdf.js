@@ -617,6 +617,10 @@ function toggleTextMode(){
 function pdfTextMousedown(e){
   if (!pdfTextMode || e.button !== 0) return;
   if (e.target.closest && e.target.closest('.pdf-tbox')) return; // edit existing, don't create
+  // If a text box is being edited, a click off it just FINISHES the edit (blur → renders
+  // its markdown) — don't spawn a new box. A later click on blank page then creates one.
+  const _ae = document.activeElement;
+  if (_ae && _ae.classList && _ae.classList.contains('pdf-tbox-body')) { e.preventDefault(); _ae.blur(); return; }
   const wrap = e.target.closest && e.target.closest('.pdf-page-wrap');
   if (!wrap) return;
   e.preventDefault();
