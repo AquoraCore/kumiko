@@ -1486,8 +1486,7 @@ table.db tr:hover .db-delrow { opacity: 1; }
 .pdf-tbox.editing .pdf-tbox-body { color: var(--muted); font-family: var(--mono, monospace); font-size: 12px; }
 .pdf-tbox.editing .pdf-tbox-preview { border-top: 1px dashed var(--line); }
 :root[data-theme="dark"] .pdf-tbox { background: #f3efe7; border-color: #45423d; color: #2c2c2a; }
-.pdf-tbox-head { height: 8px; flex: none; cursor: move; border-radius: 6px 6px 0 0; background: linear-gradient(rgba(0,0,0,.05), transparent); }
-:root[data-theme="dark"] .pdf-tbox-head { background: linear-gradient(rgba(0,0,0,.06), transparent); }
+.pdf-tbox-head { height: 8px; flex: none; cursor: move; border-radius: 4px 4px 0 0; background: transparent; }   /* flat: no gradient (read as a shadow) */
 .pdf-tbox-body { font: 13px var(--font); padding: 4px 8px 6px; outline: none; min-height: 14px; line-height: 1.35; white-space: pre-wrap; word-break: break-word; background: transparent; color: inherit; }
 .pdf-tbox-body:empty::before { content: attr(data-ph); color: var(--muted); font-style: italic; }
 .pdf-tbox-del { position: absolute; top: -9px; right: -9px; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line-strong); background: var(--surface); color: var(--muted); cursor: pointer; padding: 0; display: none; align-items: center; justify-content: center; }

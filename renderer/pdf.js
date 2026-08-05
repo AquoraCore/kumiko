@@ -634,7 +634,7 @@ function pdfTextMousedown(e){
   const layer = wrap.querySelector('.pdf-tboxlayer');
   if (layer) drawPageTextboxes(page, layer, wrap.clientWidth, wrap.clientHeight);
   const el = layer && layer.querySelector('.pdf-tbox[data-tid="' + b.id + '"]');
-  if (el){ const body = el.querySelector('.pdf-tbox-body'); if (body) setTimeout(() => { body.focus(); }, 0); }
+  if (el){ el.classList.add('editing'); const body = el.querySelector('.pdf-tbox-body'); if (body) setTimeout(() => { body.focus(); }, 0); }   // editing FIRST — a display:none body can't be focused
 }
 
 function drawPageTextboxes(pageNum, layer, cssW, cssH){
@@ -663,7 +663,7 @@ function makeTboxEl(b, cssW, cssH){
   const _mdRender = (s) => { try { return (window.CoreMarkdown && window.CoreMarkdown.mdToHtml) ? window.CoreMarkdown.mdToHtml(String(s || '')) : String(s || ''); } catch (_) { return String(s || ''); } };
   const renderPreview = () => { preview.innerHTML = _mdRender(b.text); };
   renderPreview();
-  preview.addEventListener('mousedown', (ev) => { if (ev.button === 0) { ev.stopPropagation(); setTimeout(() => body.focus(), 0); } });
+  preview.addEventListener('mousedown', (ev) => { if (ev.button === 0) { ev.stopPropagation(); el.classList.add('editing'); setTimeout(() => body.focus(), 0); } });   // show the body BEFORE focusing (display:none can't focus)
 
   const del = document.createElement('button'); del.type = 'button';
   del.className = 'pdf-tbox-del'; del.title = t('ลบกล่อง');
