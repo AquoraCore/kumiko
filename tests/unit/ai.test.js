@@ -119,6 +119,15 @@ describe('buildApiRequest', () => {
     expect(r.body.messages[0].content).toBe('hi');
   });
 
+  it('builds the zai-coding (Coding Plan) request against the coding endpoint (happy)', () => {
+    const r = buildApiRequest('zai-coding', 'glm-5.2', 'hi', KEY);
+    expect(r.url).toBe('https://api.z.ai/api/coding/paas/v4/chat/completions');   // NOT /paas/v4 (that 1113s on a coding-plan key)
+    expect(r.headers.authorization).toBe('Bearer ' + KEY);
+    expect(r.body.stream).toBe(true);
+    // parseSseDelta treats any non-anthropic provider as OpenAI-compatible → zai-coding streams parse fine
+    expect(parseSseDelta('zai-coding', JSON.stringify({ choices: [{ delta: { content: 'ok' } }] }))).toBe('ok');
+  });
+
   it('returns null for an unknown provider (edge)', () => {
     expect(buildApiRequest('openai', 'm', 'p', KEY)).toBeNull();
   });

@@ -1190,7 +1190,7 @@ async function openAiSettings(){
     if (acc && acc.token) {
       const line=document.createElement('span'); line.className='ai-auth-line'; line.textContent=t('เข้าสู่ระบบเป็น') + ' ' + acc.email;
       const lo=document.createElement('button'); lo.type='button'; lo.id='aiAuthLogout'; lo.className='ghost'; lo.textContent=t('ออกจากระบบ');
-      lo.onclick=async ()=>{ await window.api.authClear(); setAuthMsg(''); await renderAuthArea(); };
+      lo.onclick=async ()=>{ await window.api.authClear(); if (typeof window.KUMIKO_WEB !== 'undefined') { location.reload(); return; } setAuthMsg(''); await renderAuthArea(); };
       authInner.appendChild(line); authInner.appendChild(lo);
       // SYNC-NOW (phase 8.3b) — desktop only. Reconciles local vault with cloud.
       if (typeof window.KUMIKO_WEB === 'undefined') {

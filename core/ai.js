@@ -51,6 +51,13 @@ function buildApiRequest(provider, model, prompt, key){
     headers: { 'content-type': 'application/json', 'authorization': 'Bearer ' + key },
     body: { model, stream: true, messages: [{ role: 'user', content: prompt }] },
   };
+  // Z.ai CODING PLAN (subscription) — same OpenAI-compatible shape as zai, but the
+  // coding endpoint (a pay-as-you-go zai key hits /paas/v4 and 1113s on no balance).
+  if (provider === 'zai-coding') return {
+    url: 'https://api.z.ai/api/coding/paas/v4/chat/completions',
+    headers: { 'content-type': 'application/json', 'authorization': 'Bearer ' + key },
+    body: { model, stream: true, messages: [{ role: 'user', content: prompt }] },
+  };
   return null;
 }
 
