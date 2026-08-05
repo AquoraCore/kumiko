@@ -40,6 +40,11 @@ function vsSaveDebounced(){
 }
 function vsGet(k, dflt){ return (VS && VS[k] !== undefined && VS[k] !== null) ? VS[k] : dflt; }
 function vsSet(k, v){ if (!VS) VS = {}; VS[k] = v; vsSaveDebounced(); }
+// Flush the debounced state on unload so a quick reload doesn't lose the last-open page
+// (web's vaultConfigWrite is a synchronous localStorage write, so this lands in time).
+if (typeof window !== 'undefined' && window.addEventListener) {
+  window.addEventListener('beforeunload', () => { try { if (_vsTimer) { clearTimeout(_vsTimer); _vsTimer = null; } window.api.vaultConfigWrite('state', VS); } catch (_) {} });
+}
 function vsPdfPageGet(rel){ return (VS && VS.pdfPages) ? VS.pdfPages[rel] : undefined; }
 function vsPdfPageSet(rel, v){ if (!VS) VS = {}; if (!VS.pdfPages) VS.pdfPages = {}; VS.pdfPages[rel] = v; vsSaveDebounced(); }
 function vsPdfPageRename(oldRel, newRel){ if (!VS || !VS.pdfPages || VS.pdfPages[oldRel] == null) return; VS.pdfPages[newRel] = VS.pdfPages[oldRel]; delete VS.pdfPages[oldRel]; vsSaveDebounced(); }

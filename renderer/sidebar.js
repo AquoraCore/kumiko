@@ -106,6 +106,7 @@ function openCrate(folderPath){
   mainView = 'crate';
   document.querySelectorAll('.sb-views .sbv').forEach((b) => b.classList.remove('active'));
   try { const c = document.getElementById('crumb'); if (c){ const nm = currentCrate ? currentCrate.split('/').pop() : t('โน้ต'); c.innerHTML = '<b>' + nm + '</b>'; } } catch (_) {}
+  try { if (typeof vsSet === 'function') vsSet('lastOpen', { type: 'view', view: 'crate', path: currentCrate }); } catch (_) {}
   renderCrateView();
 }
 

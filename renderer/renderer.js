@@ -947,6 +947,11 @@ function setMainView(v){
   else if(v==='dash') renderDash();
   else if(v==='trash') renderTrashView();
   if (typeof renderSidebar === 'function') renderSidebar();
+  // Remember the last-open PAGE so a reload restores it (note/pdf/crate are saved by
+  // openNote/openPdf/openCrate; here we cover the standalone views).
+  try {
+    if (v==='graph' || v==='table' || v==='dash' || v==='trash') vsSet('lastOpen', { type:'view', view:v });
+  } catch (_) {}
 }
 document.querySelectorAll('.sb-views .sbv').forEach((b) => { b.onclick = () => setMainView(b.dataset.view); });
 
@@ -1458,6 +1463,10 @@ initVaultChip();
   if (lastOpen && lastOpen.type === 'pdf' && lastOpen.name) {
     const exists = Array.from(document.querySelectorAll('.pdf-item')).some((el) => el.dataset.pdf === lastOpen.name);
     if (exists) await openPdf(lastOpen.name);
+  } else if (lastOpen && lastOpen.type === 'view' && lastOpen.view) {
+    // restore the last standalone view (graph/table/dash/trash/crate)
+    if (lastOpen.view === 'crate' && typeof openCrate === 'function') openCrate(lastOpen.path || '');
+    else if (typeof setMainView === 'function') setMainView(lastOpen.view);
   }
 })();
 
