@@ -77,10 +77,21 @@ function createVaultFs(rootDir) {
     try {
       fs.mkdirSync(path.dirname(toP), { recursive: true });
       fs.renameSync(fromP, toP);
-      return { name: relTo };
     } catch (_) {
       return { error: 'failed' };
     }
+    // PDFs live in a PARALLEL pdfs/ subtree (pdfstore), not inside the note-folder dir.
+    // Move that subtree with the folder too — else the folder's PDFs orphan under the
+    // OLD path and the folder appears in two places. (Desktop is fine: one shared tree.)
+    try {
+      const pdfFrom = path.join(vaultDir(userId, vaultId), 'pdfs', relFrom);
+      const pdfTo = path.join(vaultDir(userId, vaultId), 'pdfs', relTo);
+      if (fs.existsSync(pdfFrom) && !fs.existsSync(pdfTo)) {
+        fs.mkdirSync(path.dirname(pdfTo), { recursive: true });
+        fs.renameSync(pdfFrom, pdfTo);
+      }
+    } catch (_) { /* best-effort: the note folder already moved */ }
+    return { name: relTo };
   }
 
   function folderDelete(userId, vaultId, name) {

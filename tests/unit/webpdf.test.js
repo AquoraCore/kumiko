@@ -93,4 +93,22 @@ describe('web pdfs (per-user cloud PDF storage + annot sidecars)', () => {
       expect(await api.readPdf('m.pdf')).toBe(null);                          // old flat path gone
     } finally { await s.close(); }
   }, 20000);
+
+  it('FOLDER MOVE: renaming a folder carries its PDFs too (not just its notes)', async () => {
+    const s = await startServer({ port: 0, dataDir: tmpDir() });
+    const base = 'http://127.0.0.1:' + s.port;
+    const token = await signup(base, 'foldpdf@b.com');
+    const api = createWebApi({ baseUrl: base, getToken: () => token });
+    try {
+      await api.folderCreate('Fold');
+      await api.uploadPdf('Fold/doc.pdf', PDF_BYTES);          // a PDF that lives inside folder "Fold"
+      expect((await api.listNotes()).pdfs).toContain('Fold/doc.pdf');
+      const rn = await api.folderRename('Fold', 'Dest/Fold');  // move the whole folder
+      expect(rn.error).toBeUndefined();
+      const pdfs = (await api.listNotes()).pdfs;
+      expect(pdfs).toContain('Dest/Fold/doc.pdf');             // PDF moved WITH the folder
+      expect(pdfs).not.toContain('Fold/doc.pdf');              // was: orphaned at old path -> folder showed twice
+      expect(Buffer.from(await api.readPdf('Dest/Fold/doc.pdf')).equals(PDF_BYTES)).toBe(true);
+    } finally { await s.close(); }
+  }, 20000);
 });

@@ -1153,7 +1153,8 @@ table.db tr:hover .db-delrow { opacity: 1; }
 .sb-actions .rail-sp { flex: 1; }
 .sb-actions button { flex: 0 0 auto; padding: 6px; min-width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: var(--muted); }
 .sb-actions button:hover { background: var(--accent-bg); color: var(--accent); }
-.sb-actions #newMenuBtn { padding: 0 10px; display: inline-flex; align-items: center; gap: 4px; font: 600 12.5px var(--font); color: var(--accent); }
+.sb-actions #newMenuBtn { padding: 0 10px; display: inline-flex; align-items: center; gap: 4px; font: 600 12.5px var(--font); color: var(--accent); background: var(--accent-bg); border: 1px solid var(--line); }
+.sb-actions #newMenuBtn:hover { background: var(--accent-bg); filter: brightness(1.04); }
 
 /* ---- main top bar: breadcrumb + icon actions ---- */
 #left > .bar { gap: 8px; }
@@ -1471,7 +1472,13 @@ table.db tr:hover .db-delrow { opacity: 1; }
 .pdf-tboxlayer { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
 .pdf-body.text-mode .pdf-textlayer, .pdf-body.text-mode .pdf-hl { pointer-events: none !important; }
 .pdf-body.text-mode .pdf-page-wrap { cursor: text; }
-.pdf-tbox { position: absolute; background: #fff; border: 1px solid var(--line-strong); border-radius: 6px; box-shadow: 0 2px 8px rgba(60,45,25,.18); pointer-events: auto; display: flex; flex-direction: column; min-width: 48px; color: var(--text); }
+.pdf-tbox { position: absolute; background: #fff; border: none; border-radius: 6px; box-shadow: 0 2px 8px rgba(60,45,25,.18); pointer-events: auto; display: flex; flex-direction: column; min-width: 48px; color: var(--text); }
+/* rendered markdown inside the text box (shown when not editing) */
+.pdf-tbox-body h1, .pdf-tbox-body h2, .pdf-tbox-body h3 { font-size: 1.05em; font-weight: 700; margin: 2px 0; }
+.pdf-tbox-body p { margin: 2px 0; }
+.pdf-tbox-body ul, .pdf-tbox-body ol { margin: 2px 0; padding-left: 18px; }
+.pdf-tbox-body code { font-family: var(--mono, monospace); background: rgba(0,0,0,.06); padding: 0 3px; border-radius: 3px; }
+.pdf-tbox-body a { color: var(--accent); }
 :root[data-theme="dark"] .pdf-tbox { background: #f3efe7; border-color: #45423d; color: #2c2c2a; }
 .pdf-tbox-head { height: 8px; flex: none; cursor: move; border-radius: 6px 6px 0 0; background: linear-gradient(rgba(0,0,0,.05), transparent); }
 :root[data-theme="dark"] .pdf-tbox-head { background: linear-gradient(rgba(0,0,0,.06), transparent); }

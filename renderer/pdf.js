@@ -652,7 +652,11 @@ function makeTboxEl(b, cssW, cssH){
   const body = document.createElement('div'); body.className = 'pdf-tbox-body';
   body.contentEditable = 'true'; body.spellcheck = false;
   body.dataset.ph = t('พิมพ์ที่นี่…');
-  body.textContent = b.text || '';
+  // Show RENDERED markdown when not editing; RAW text on focus so it's editable.
+  const _mdRender = (s) => { try { return (window.CoreMarkdown && window.CoreMarkdown.mdToHtml) ? window.CoreMarkdown.mdToHtml(String(s || '')) : String(s || ''); } catch (_) { return String(s || ''); } };
+  const showRendered = () => { body.classList.remove('editing'); body.innerHTML = _mdRender(b.text); };
+  const showRaw = () => { body.classList.add('editing'); body.textContent = b.text || ''; };
+  showRendered();
 
   const del = document.createElement('button'); del.type = 'button';
   del.className = 'pdf-tbox-del'; del.title = t('ลบกล่อง');
@@ -691,11 +695,12 @@ function makeTboxEl(b, cssW, cssH){
   });
 
   let saveT = null;
+  body.addEventListener('focus', showRaw);
   body.addEventListener('input', () => {
     b.text = body.innerText;
     clearTimeout(saveT); saveT = setTimeout(savePdfAnnots, 400);
   });
-  body.addEventListener('blur', () => { b.text = body.innerText; clearTimeout(saveT); savePdfAnnots(); });
+  body.addEventListener('blur', () => { b.text = body.innerText; clearTimeout(saveT); savePdfAnnots(); showRendered(); });
 
   const rz = document.createElement('div'); rz.className = 'pdf-tbox-resize'; rz.title = t('ลากเพื่อปรับขนาด');
   rz.addEventListener('mousedown', (ev) => {
