@@ -36,8 +36,10 @@ echo "  ✓ build = $BUILD"
 
 # ALWAYS restart: bumps the per-boot assetVersion so every asset's ?v= changes → browsers
 # are FORCED to refetch (no-store alone isn't always honored; a stale ?v= let old JS stick).
-echo "restarting KumikoServer (bumps ?v= cache-bust)…"
-ssh -o ConnectTimeout=30 "$HOST" "powershell -NoProfile -Command \"Stop-ScheduledTask -TaskName KumikoServer; Start-Sleep 2; Start-ScheduledTask -TaskName KumikoServer; Start-Sleep 4\""
+# CRITICAL: Stop/Start-ScheduledTask does NOT kill the node the task spawned (it's an orphaned
+# grandchild of cmd/start.bat) — a stale node kept serving Aug-4 code for days. Force-kill node.
+echo "restarting KumikoServer (force-kill node + bump ?v= cache-bust)…"
+ssh -o ConnectTimeout=30 "$HOST" "powershell -NoProfile -Command \"Stop-ScheduledTask -TaskName KumikoServer; Start-Sleep 1; Get-Process node -EA SilentlyContinue | Stop-Process -Force; Start-Sleep 2; Start-ScheduledTask -TaskName KumikoServer; Start-Sleep 5\""
 
 echo "health check:"
 ssh -o ConnectTimeout=30 "$HOST" "powershell -NoProfile -Command \"try { 'http=' + (Invoke-WebRequest -UseBasicParsing http://127.0.0.1:4321/ -TimeoutSec 8).StatusCode } catch { \$_.Exception.Message }\""
