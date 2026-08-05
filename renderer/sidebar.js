@@ -55,11 +55,9 @@ function makeNoteItem(rel, depth, opts){
   item.querySelector('.note-nm').textContent = o.label != null ? o.label : rel.replace(/\.md$/i, '').split('/').pop();
   item.style.paddingLeft = (8 + depth * 22) + 'px';        // root notes line up with folders; nested notes step in
   if (depth > 0) item.classList.add('nested');
-  item.draggable = true;
+  item.dataset.dragKind = 'note'; item.dataset.dragRel = rel;
   item.onclick = () => openNote(rel);
   item.oncontextmenu = (e) => { e.preventDefault(); openNoteMenu(e.clientX, e.clientY, rel); };
-  item.addEventListener('dragstart', (e) => { noteDragSrc = rel; e.dataTransfer.effectAllowed = 'move'; item.classList.add('dragging'); });
-  item.addEventListener('dragend', () => { noteDragSrc = null; item.classList.remove('dragging'); });
   return item;
 }
 function makeFolderRow(node, depth){
@@ -73,12 +71,7 @@ function makeFolderRow(node, depth){
   tri.onclick = (e) => { e.stopPropagation(); if (collapsed) collapsedFolders.delete(node.path); else collapsedFolders.add(node.path); persistCollapsed(); renderTree(); };
   row.onclick = () => openCrate(node.path);
   row.oncontextmenu = (e) => { e.preventDefault(); openFolderMenu(row, node); };
-  row.draggable = true;
-  row.addEventListener('dragstart', (e) => { folderDragSrc = node.path; e.dataTransfer.effectAllowed = 'move'; row.classList.add('dragging'); e.stopPropagation(); });
-  row.addEventListener('dragend', () => { folderDragSrc = null; row.classList.remove('dragging'); });
-  row.addEventListener('dragover', (e) => { if (noteDragSrc || pdfDragSrc) { e.preventDefault(); row.classList.add('drop-hi'); } else if (folderDragSrc && folderCanMoveTo(folderDragSrc, node.path)) { e.preventDefault(); row.classList.add('drop-hi'); } });
-  row.addEventListener('dragleave', () => row.classList.remove('drop-hi'));
-  row.addEventListener('drop', (e) => { e.preventDefault(); row.classList.remove('drop-hi'); if (pdfDragSrc) movePdf(pdfDragSrc, node.path); else if (noteDragSrc) moveNote(noteDragSrc, node.path); else if (folderDragSrc) moveFolder(folderDragSrc, node.path); });
+  row.dataset.dragKind = 'folder'; row.dataset.dragRel = node.path; row.dataset.dropPath = node.path;
   return row;
 }
 function renderFolderNode(node, container, depth){
@@ -219,10 +212,7 @@ function highlightActiveNote(name){
   document.querySelectorAll('#noteList .note-item').forEach((el) => { el.classList.toggle('active', el.dataset.name === name); });
 }
 
-// root of the list = drop target to move a note to the top level
-noteList.addEventListener('dragover', (e) => { if ((noteDragSrc || pdfDragSrc || (folderDragSrc && folderDragSrc.includes('/'))) && e.target === noteList) { e.preventDefault(); noteList.classList.add('drop-hi-root'); } });
-noteList.addEventListener('dragleave', (e) => { if (e.target === noteList) noteList.classList.remove('drop-hi-root'); });
-noteList.addEventListener('drop', (e) => { if ((noteDragSrc || pdfDragSrc || folderDragSrc) && e.target === noteList) { e.preventDefault(); noteList.classList.remove('drop-hi-root'); if (pdfDragSrc) movePdf(pdfDragSrc, ''); else if (noteDragSrc) moveNote(noteDragSrc, ''); else if (folderDragSrc) moveFolder(folderDragSrc, ''); } });
+// root of the list = drop target to move a note to the top level (handled by dragdrop.js)
 
 // ---- folder actions ----
 async function createFolderAt(parentPath){

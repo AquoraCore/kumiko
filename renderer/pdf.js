@@ -120,11 +120,9 @@ function makePdfItem(rel, depth){
   item.querySelector('.pdf-nm').textContent = label;
   item.style.paddingLeft = (8 + depth * 22) + 'px';
   if (depth > 0) item.classList.add('nested');
-  item.draggable = true;
+  item.dataset.dragKind = 'pdf'; item.dataset.dragRel = rel;
   item.onclick = () => openPdf(rel);
   item.oncontextmenu = (e) => { e.preventDefault(); openPdfMenu(e.clientX, e.clientY, rel); };
-  item.addEventListener('dragstart', (e) => { pdfDragSrc = rel; e.dataTransfer.effectAllowed = 'move'; item.classList.add('dragging'); });
-  item.addEventListener('dragend', () => { pdfDragSrc = null; item.classList.remove('dragging'); });
   return item;
 }
 

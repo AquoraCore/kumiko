@@ -1687,3 +1687,10 @@ table.db tr:hover .db-delrow { opacity: 1; }
 :root[data-theme="dark"] .sync-chip.ok { color:#7fc99a; border-color:#2f4636; }
 :root[data-theme="dark"] .sync-chip.warn { color:#d3a566; border-color:#463a2f; }
 :root[data-theme="dark"] .sync-chip.err { color:#e08a76; border-color:#4a352f; }
+
+/* ---- unified pointer drag-and-drop (renderer/dragdrop.js) ---- */
+.drag-ghost { position: fixed; z-index: 9999; pointer-events: none; padding: 4px 10px; border-radius: 7px;
+  background: var(--accent, #d99a83); color: #fff; font-size: 12px; box-shadow: 0 4px 14px rgba(60,45,25,.35);
+  max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body.dragging-active { cursor: grabbing; -webkit-user-select: none; user-select: none; }
+[data-drag-kind] { touch-action: pan-y; }   /* allow vertical scroll to start; our long-press arms the drag */
