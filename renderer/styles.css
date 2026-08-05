@@ -1475,20 +1475,22 @@ table.db tr:hover .db-delrow { opacity: 1; }
 .pdf-tbox { position: absolute; background: #fff; border: 1px solid var(--line-strong); border-radius: 4px; box-shadow: none; pointer-events: auto; display: flex; flex-direction: column; min-width: 48px; color: var(--text); }
 /* rendered markdown inside the text box (shown when not editing) */
 /* LIVE rendered preview (always visible). Raw editable body shows only while editing. */
-.pdf-tbox-preview { font: 13px var(--font); padding: 4px 8px 6px; line-height: 1.35; overflow-y: auto; flex: 1 1 auto; word-break: break-word; cursor: text; min-height: 14px; color: inherit; }
-.pdf-tbox-preview h1, .pdf-tbox-preview h2, .pdf-tbox-preview h3 { font-size: 1.05em; font-weight: 700; margin: 2px 0; }
-.pdf-tbox-preview p { margin: 2px 0; }
-.pdf-tbox-preview ul, .pdf-tbox-preview ol { margin: 2px 0; padding-left: 18px; }
-.pdf-tbox-preview code { font-family: var(--mono, monospace); background: rgba(0,0,0,.06); padding: 0 3px; border-radius: 3px; }
-.pdf-tbox-preview a { color: var(--accent); }
-.pdf-tbox-body { display: none; }                                   /* raw source hidden unless editing */
-.pdf-tbox.editing .pdf-tbox-body { display: block; }
-.pdf-tbox.editing .pdf-tbox-body { color: var(--muted); font-family: var(--mono, monospace); font-size: 12px; }
-.pdf-tbox.editing .pdf-tbox-preview { border-top: 1px dashed var(--line); }
+/* content: rendered markdown (preview) OR a compact embedded Milkdown editor while editing */
+.pdf-tbox-content { font: 13px var(--font); padding: 4px 8px 6px; line-height: 1.35; overflow-y: auto; flex: 1 1 auto; word-break: break-word; cursor: text; min-height: 16px; color: inherit; }
+.pdf-tbox-ph { color: var(--muted); font-style: italic; }
+.pdf-tbox-content h1, .pdf-tbox-content h2, .pdf-tbox-content h3 { font-size: 1.05em; font-weight: 700; margin: 2px 0; }
+.pdf-tbox-content p { margin: 2px 0; }
+.pdf-tbox-content ul, .pdf-tbox-content ol { margin: 2px 0; padding-left: 18px; }
+.pdf-tbox-content code { font-family: var(--mono, monospace); background: rgba(0,0,0,.06); padding: 0 3px; border-radius: 3px; }
+.pdf-tbox-content a { color: var(--accent); }
+/* shrink the embedded Milkdown to fit the box (its defaults are sized for a full page) */
+.pdf-tbox-content.editing { padding: 0; }
+.pdf-tbox-content .milkdown { background: transparent; box-shadow: none; }
+.pdf-tbox-content .milkdown .ProseMirror { padding: 4px 8px 6px; margin: 0; min-height: 20px; outline: none; font-size: 13px; }
+.pdf-tbox-content .milkdown .ProseMirror > * { margin: 2px 0; }
+.pdf-tbox-content .milkdown .ProseMirror h1, .pdf-tbox-content .milkdown .ProseMirror h2, .pdf-tbox-content .milkdown .ProseMirror h3 { font-size: 1.05em; font-weight: 700; }
 :root[data-theme="dark"] .pdf-tbox { background: #f3efe7; border-color: #45423d; color: #2c2c2a; }
 .pdf-tbox-head { height: 8px; flex: none; cursor: move; border-radius: 4px 4px 0 0; background: transparent; }   /* flat: no gradient (read as a shadow) */
-.pdf-tbox-body { font: 13px var(--font); padding: 4px 8px 6px; outline: none; min-height: 14px; line-height: 1.35; white-space: pre-wrap; word-break: break-word; background: transparent; color: inherit; }
-.pdf-tbox-body:empty::before { content: attr(data-ph); color: var(--muted); font-style: italic; }
 .pdf-tbox-del { position: absolute; top: -9px; right: -9px; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line-strong); background: var(--surface); color: var(--muted); cursor: pointer; padding: 0; display: none; align-items: center; justify-content: center; }
 .pdf-tbox:hover .pdf-tbox-del, .pdf-tbox:focus-within .pdf-tbox-del { display: flex; }
 .pdf-tbox-del:hover { color: #bd5540; border-color: #bd5540; }
@@ -1498,7 +1500,6 @@ table.db tr:hover .db-delrow { opacity: 1; }
 .pdf-tbox:hover .pdf-tbox-palette, .pdf-tbox:focus-within .pdf-tbox-palette { display: flex; }
 .pdf-tbox-sw { width: 13px; height: 13px; border-radius: 3px; border: 1px solid var(--line-strong); cursor: pointer; padding: 0; }
 .pdf-tbox-sw.none { background: linear-gradient(135deg, #fff 45%, #e0655a 46%, #e0655a 54%, #fff 55%); }   /* transparent = white with a slash */
-.pdf-tbox-body { flex: 1 1 auto; overflow-y: auto; }
 .pdf-tbox-resize { position: absolute; right: -2px; bottom: -2px; width: 15px; height: 15px; cursor: nwse-resize; z-index: 6; display: none; }
 .pdf-tbox:hover .pdf-tbox-resize, .pdf-tbox:focus-within .pdf-tbox-resize { display: block; }
 .pdf-tbox-resize::after { content: ''; position: absolute; right: 3px; bottom: 3px; width: 8px; height: 8px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); border-radius: 0 0 4px 0; }

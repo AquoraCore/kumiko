@@ -605,6 +605,7 @@ function toggleCropMode(){
 
 /* ========= PDF text-box annotation (plain bordered box) ========= */
 let pdfTextMode = false;
+let _pdfTboxEditing = null;   // the text-box <div> whose Milkdown editor is currently open (only one at a time)
 
 function toggleTextMode(){
   pdfTextMode = !pdfTextMode;
@@ -617,10 +618,9 @@ function toggleTextMode(){
 function pdfTextMousedown(e){
   if (!pdfTextMode || e.button !== 0) return;
   if (e.target.closest && e.target.closest('.pdf-tbox')) return; // edit existing, don't create
-  // If a text box is being edited, a click off it just FINISHES the edit (blur → renders
-  // its markdown) — don't spawn a new box. A later click on blank page then creates one.
-  const _ae = document.activeElement;
-  if (_ae && _ae.classList && _ae.classList.contains('pdf-tbox-body')) { e.preventDefault(); _ae.blur(); return; }
+  // If a box's editor is open, a click off it just FINISHES that edit (its own doc listener
+  // ends it) — don't ALSO spawn a new box here.
+  if (_pdfTboxEditing) return;
   const wrap = e.target.closest && e.target.closest('.pdf-page-wrap');
   if (!wrap) return;
   e.preventDefault();
@@ -634,10 +634,11 @@ function pdfTextMousedown(e){
   const layer = wrap.querySelector('.pdf-tboxlayer');
   if (layer) drawPageTextboxes(page, layer, wrap.clientWidth, wrap.clientHeight);
   const el = layer && layer.querySelector('.pdf-tbox[data-tid="' + b.id + '"]');
-  if (el){ el.classList.add('editing'); const body = el.querySelector('.pdf-tbox-body'); if (body) setTimeout(() => { body.focus(); }, 0); }   // editing FIRST — a display:none body can't be focused
+  if (el && el._startEdit) setTimeout(() => el._startEdit(), 0);   // a brand-new box opens straight into the editor
 }
 
 function drawPageTextboxes(pageNum, layer, cssW, cssH){
+  layer.querySelectorAll('.pdf-tbox').forEach((el) => { if (el._crepe) { try { el._crepe.destroy(); } catch (_) {} el._crepe = null; if (_pdfTboxEditing === el) _pdfTboxEditing = null; } });
   layer.innerHTML = '';
   pdfAnnots.textboxes.filter((b) => b.page === pageNum).forEach((b) => {
     layer.appendChild(makeTboxEl(b, cssW, cssH));
@@ -654,16 +655,45 @@ function makeTboxEl(b, cssW, cssH){
   if (b.bg) el.style.background = (b.bg === 'transparent' ? 'transparent' : b.bg);   // chosen background colour
 
   const head = document.createElement('div'); head.className = 'pdf-tbox-head'; head.title = t('ลากเพื่อย้าย');
-  const body = document.createElement('div'); body.className = 'pdf-tbox-body';
-  body.contentEditable = 'true'; body.spellcheck = false;
-  body.dataset.ph = t('พิมพ์ที่นี่…');
-  body.textContent = b.text || '';   // RAW markdown source (editable; only shown while editing)
-  // LIVE rendered preview — always visible, re-renders as you type. Click it to edit the raw source.
-  const preview = document.createElement('div'); preview.className = 'pdf-tbox-preview';
+  // Content shows RENDERED markdown (cheap); on click it becomes a full Milkdown editor
+  // (WYSIWYG, exactly like a note). Created LAZILY so N boxes don't each carry a live editor —
+  // only the box you're editing has one at a time.
+  const content = document.createElement('div'); content.className = 'pdf-tbox-content';
   const _mdRender = (s) => { try { return (window.CoreMarkdown && window.CoreMarkdown.mdToHtml) ? window.CoreMarkdown.mdToHtml(String(s || '')) : String(s || ''); } catch (_) { return String(s || ''); } };
-  const renderPreview = () => { preview.innerHTML = _mdRender(b.text); };
+  const renderPreview = () => { content.classList.remove('editing'); const h = _mdRender(b.text); content.innerHTML = h || ('<div class="pdf-tbox-ph">' + t('พิมพ์ที่นี่…') + '</div>'); };
   renderPreview();
-  preview.addEventListener('mousedown', (ev) => { if (ev.button === 0) { ev.stopPropagation(); el.classList.add('editing'); setTimeout(() => body.focus(), 0); } });   // show the body BEFORE focusing (display:none can't focus)
+  let saveT = null, crepe = null, creating = false;
+  function _onDocDown(e){ if (!el.contains(e.target)) endEdit(); }
+  async function startEdit(){
+    if (crepe || creating) return;
+    if (_pdfTboxEditing && _pdfTboxEditing !== el && _pdfTboxEditing._endEdit) { try { await _pdfTboxEditing._endEdit(); } catch (_) {} }
+    creating = true; _pdfTboxEditing = el;
+    content.classList.add('editing'); content.innerHTML = '';
+    try {
+      const F = (window.Crepe && window.Crepe.Feature) || {};
+      const feats = {};
+      [F.Toolbar, F.BlockEdit, F.ImageBlock, F.Table, F.LinkTooltip, F.Latex, F.CodeMirror, F.TopBar].forEach((k) => { if (k) feats[k] = false; });
+      const c = new window.Crepe({ root: content, defaultValue: b.text || '', features: feats });
+      await c.create();
+      crepe = c; el._crepe = c;
+      c.on((l) => l.markdownUpdated(() => { b.text = c.getMarkdown(); clearTimeout(saveT); saveT = setTimeout(savePdfAnnots, 500); }));
+      try { const ce = content.querySelector('[contenteditable="true"]'); if (ce) ce.focus(); } catch (_) {}
+      document.addEventListener('mousedown', _onDocDown, true);
+    } catch (_) { creating = false; if (_pdfTboxEditing === el) _pdfTboxEditing = null; renderPreview(); return; }
+    creating = false;
+  }
+  async function endEdit(){
+    document.removeEventListener('mousedown', _onDocDown, true);
+    if (_pdfTboxEditing === el) _pdfTboxEditing = null;
+    if (!crepe) return;
+    try { b.text = crepe.getMarkdown(); } catch (_) {}
+    try { await crepe.destroy(); } catch (_) {}
+    crepe = null; el._crepe = null;
+    clearTimeout(saveT); savePdfAnnots();
+    renderPreview();
+  }
+  el._startEdit = startEdit; el._endEdit = endEdit;
+  content.addEventListener('mousedown', (ev) => { if (ev.button === 0 && !crepe && !creating) { ev.stopPropagation(); startEdit(); } });
 
   const del = document.createElement('button'); del.type = 'button';
   del.className = 'pdf-tbox-del'; del.title = t('ลบกล่อง');
@@ -716,15 +746,6 @@ function makeTboxEl(b, cssW, cssH){
     }
   });
 
-  let saveT = null;
-  body.addEventListener('focus', () => el.classList.add('editing'));
-  body.addEventListener('input', () => {
-    b.text = body.innerText;
-    renderPreview();                                   // render markdown LIVE as you type
-    clearTimeout(saveT); saveT = setTimeout(savePdfAnnots, 400);
-  });
-  body.addEventListener('blur', () => { b.text = body.innerText; renderPreview(); el.classList.remove('editing'); clearTimeout(saveT); savePdfAnnots(); });
-
   const rz = document.createElement('div'); rz.className = 'pdf-tbox-resize'; rz.title = t('ลากเพื่อปรับขนาด');
   rz.addEventListener('mousedown', (ev) => {
     if (ev.button !== 0) return;
@@ -752,7 +773,7 @@ function makeTboxEl(b, cssW, cssH){
   });
   el.appendChild(rz);
 
-  el.appendChild(head); el.appendChild(body); el.appendChild(preview); el.appendChild(del); el.appendChild(palette);
+  el.appendChild(head); el.appendChild(content); el.appendChild(del); el.appendChild(palette);
   return el;
 }
 
