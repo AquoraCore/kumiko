@@ -651,22 +651,40 @@ function makeTboxEl(b, cssW, cssH){
   el.style.top = (b.y * cssH) + 'px';
   el.style.width = (b.w * cssW) + 'px';
   if (b.h) el.style.height = (b.h * cssH) + 'px';
+  if (b.bg) el.style.background = (b.bg === 'transparent' ? 'transparent' : b.bg);   // chosen background colour
 
   const head = document.createElement('div'); head.className = 'pdf-tbox-head'; head.title = t('ลากเพื่อย้าย');
   const body = document.createElement('div'); body.className = 'pdf-tbox-body';
   body.contentEditable = 'true'; body.spellcheck = false;
   body.dataset.ph = t('พิมพ์ที่นี่…');
-  // Show RENDERED markdown when not editing; RAW text on focus so it's editable.
+  body.textContent = b.text || '';   // RAW markdown source (editable; only shown while editing)
+  // LIVE rendered preview — always visible, re-renders as you type. Click it to edit the raw source.
+  const preview = document.createElement('div'); preview.className = 'pdf-tbox-preview';
   const _mdRender = (s) => { try { return (window.CoreMarkdown && window.CoreMarkdown.mdToHtml) ? window.CoreMarkdown.mdToHtml(String(s || '')) : String(s || ''); } catch (_) { return String(s || ''); } };
-  const showRendered = () => { body.classList.remove('editing'); body.innerHTML = _mdRender(b.text); };
-  const showRaw = () => { body.classList.add('editing'); body.textContent = b.text || ''; };
-  showRendered();
+  const renderPreview = () => { preview.innerHTML = _mdRender(b.text); };
+  renderPreview();
+  preview.addEventListener('mousedown', (ev) => { if (ev.button === 0) { ev.stopPropagation(); setTimeout(() => body.focus(), 0); } });
 
   const del = document.createElement('button'); del.type = 'button';
   del.className = 'pdf-tbox-del'; del.title = t('ลบกล่อง');
   del.innerHTML = icoSvg('x', 'xs');
   del.addEventListener('mousedown', (ev) => { ev.stopPropagation(); ev.preventDefault(); });
   del.addEventListener('click', (ev) => { ev.stopPropagation(); ev.preventDefault(); removeTbox(b.id); });
+
+  // Background-colour palette (shown on hover/focus). '' swatch = transparent.
+  const palette = document.createElement('div'); palette.className = 'pdf-tbox-palette';
+  ['#ffffff', '#fff7c0', '#ffe0ea', '#d9ecff', '#dff2df', 'transparent'].forEach((col) => {
+    const sw = document.createElement('button'); sw.type = 'button';
+    sw.className = 'pdf-tbox-sw' + (col === 'transparent' ? ' none' : '');
+    if (col !== 'transparent') sw.style.background = col;
+    sw.title = col === 'transparent' ? t('โปร่งใส') : col;
+    sw.addEventListener('mousedown', (ev) => { ev.stopPropagation(); ev.preventDefault(); });
+    sw.addEventListener('click', (ev) => {
+      ev.stopPropagation(); ev.preventDefault();
+      b.bg = col; el.style.background = (col === 'transparent' ? 'transparent' : col); savePdfAnnots();
+    });
+    palette.appendChild(sw);
+  });
 
   let drag = null;
   head.addEventListener('mousedown', (ev) => {
@@ -699,12 +717,13 @@ function makeTboxEl(b, cssW, cssH){
   });
 
   let saveT = null;
-  body.addEventListener('focus', showRaw);
+  body.addEventListener('focus', () => el.classList.add('editing'));
   body.addEventListener('input', () => {
     b.text = body.innerText;
+    renderPreview();                                   // render markdown LIVE as you type
     clearTimeout(saveT); saveT = setTimeout(savePdfAnnots, 400);
   });
-  body.addEventListener('blur', () => { b.text = body.innerText; clearTimeout(saveT); savePdfAnnots(); showRendered(); });
+  body.addEventListener('blur', () => { b.text = body.innerText; renderPreview(); el.classList.remove('editing'); clearTimeout(saveT); savePdfAnnots(); });
 
   const rz = document.createElement('div'); rz.className = 'pdf-tbox-resize'; rz.title = t('ลากเพื่อปรับขนาด');
   rz.addEventListener('mousedown', (ev) => {
@@ -733,7 +752,7 @@ function makeTboxEl(b, cssW, cssH){
   });
   el.appendChild(rz);
 
-  el.appendChild(head); el.appendChild(body); el.appendChild(del);
+  el.appendChild(head); el.appendChild(body); el.appendChild(preview); el.appendChild(del); el.appendChild(palette);
   return el;
 }
 
