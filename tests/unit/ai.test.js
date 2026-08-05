@@ -126,6 +126,9 @@ describe('buildApiRequest', () => {
     expect(r.body.stream).toBe(true);
     // parseSseDelta treats any non-anthropic provider as OpenAI-compatible → zai-coding streams parse fine
     expect(parseSseDelta('zai-coding', JSON.stringify({ choices: [{ delta: { content: 'ok' } }] }))).toBe('ok');
+    // THINKING MODE: GLM-5 streams reasoning_content before the answer — it must be surfaced too
+    expect(parseSseDelta('zai-coding', JSON.stringify({ choices: [{ delta: { reasoning_content: 'hmm' } }] }))).toBe('hmm');
+    expect(parseSseDelta('zai', JSON.stringify({ choices: [{ delta: { reasoning_content: 'think' } }] }))).toBe('think');
   });
 
   it('returns null for an unknown provider (edge)', () => {

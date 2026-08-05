@@ -384,6 +384,7 @@ function createWebApi(opts) {
   // Streams the managed /ai/chat reply: each chunk -> onEngineOutput, then
   // onEngineDone({code:0}). Unreachable/non-ok -> [AI unavailable] + code:-1.
   // ponytail: stopEngine stays a no-op; a fetch AbortController is a future nicety.
+  const _aborters = new Map();   // runId -> AbortController, so stopEngine() can cancel a live stream
   async function runEngine(payload) {
     const runId = payload && payload.runId;
     const prompt = (payload && payload.prompt) || '';
@@ -391,8 +392,10 @@ function createWebApi(opts) {
     const provider = c.provider || 'zai'; const key = keys[provider]; const model = c.model || '';
     const body = { prompt };
     if (key) { body.provider = provider; body.key = key; if (model) body.model = model; }
+    const ctrl = new AbortController();
+    if (runId != null) _aborters.set(runId, ctrl);
     try {
-      const res = await fetch(baseUrl + '/ai/chat', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) });
+      const res = await fetch(baseUrl + '/ai/chat', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body), signal: ctrl.signal });
       if (!res.ok || !res.body) {
         if (_engineOut) _engineOut({ runId, data: '[AI unavailable]\r\n' });
         if (_engineDone) _engineDone({ runId, code: -1 });
@@ -405,11 +408,19 @@ function createWebApi(opts) {
         if (chunk && _engineOut) _engineOut({ runId, data: chunk });
       }
       if (_engineDone) _engineDone({ runId, code: 0 });
-    } catch (_) {
-      if (_engineDone) _engineDone({ runId, code: -1 });
+    } catch (e) {
+      // AbortError = the user hit Stop; end quietly (code 0), else it's a real failure (-1).
+      const aborted = e && (e.name === 'AbortError');
+      if (_engineDone) _engineDone({ runId, code: aborted ? 0 : -1 });
+    } finally {
+      if (runId != null) _aborters.delete(runId);
     }
   }
-  function stopEngine() { return Promise.resolve(true); }
+  function stopEngine(runId) {
+    const c = _aborters.get(runId);
+    if (c) { try { c.abort(); } catch (_) {} _aborters.delete(runId); }
+    return Promise.resolve(true);
+  }
 
   // ---- pty / terminal (none on web) ----
   function startPty() {}

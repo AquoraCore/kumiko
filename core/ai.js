@@ -46,6 +46,10 @@ function buildApiRequest(provider, model, prompt, key){
     headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
     body: { model, max_tokens: 4096, stream: true, messages: [{ role: 'user', content: prompt }] },
   };
+  // THINKING MODE (GLM-5 reasoning) is ON by default (omit the `thinking` field). To turn it
+  // OFF for direct answers, set `thinking: { type: 'disabled' }` in the body below. Kept ON so
+  // the model's reasoning streams — parseSseDelta surfaces `reasoning_content` too, else the
+  // thinking phase would look blank until the final `content` answer arrives.
   if (provider === 'zai') return {
     url: 'https://api.z.ai/api/paas/v4/chat/completions',
     headers: { 'content-type': 'application/json', 'authorization': 'Bearer ' + key },
@@ -73,8 +77,10 @@ function parseSseDelta(provider, dataStr){
     if (obj.type === 'content_block_delta' && obj.delta && obj.delta.type === 'text_delta') return obj.delta.text || '';
     return '';
   }
-  // zai / openai-compatible
-  if (obj.choices && obj.choices[0] && obj.choices[0].delta && obj.choices[0].delta.content) return obj.choices[0].delta.content;
+  // zai / openai-compatible. GLM-5 reasoning models stream `reasoning_content` (the thinking)
+  // BEFORE the final `content` answer — surface both so thinking mode isn't a blank stream.
+  const d = obj.choices && obj.choices[0] && obj.choices[0].delta;
+  if (d) return d.content || d.reasoning_content || '';
   return '';
 }
 
