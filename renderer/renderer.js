@@ -1579,25 +1579,47 @@ applyChatHidden();
 // ---------- Chat send + mode toggle ----------
 const chatInput = document.getElementById('chatInput');
 const chatSend = document.getElementById('chatSend');
+// PRIORITY CONTEXT INJECTION (replaces the old scope dropdown). Every send auto-assembles
+// ONE context block ranked by priority — no mode to pick:
+//   P1  the OPEN note (primary focus, always first)
+//   P2  RAG-related notes for the question (supporting; opt-in ragAmbient, deduped vs P1)
+// The model is told to prioritise the open note but answer normally if the question is
+// unrelated to any note. Retrieval errors never block the send.
+async function buildPriorityContext(question){
+  const parts = [], sources = [], seen = new Set();
+  if (currentNote) {
+    let body = ''; try { body = (typeof getFullMarkdown === 'function') ? getFullMarkdown() : ''; } catch (_) {}
+    if (body && body.trim()) {
+      const nm = currentNote.replace(/\.md$/i, '');
+      parts.push('[ความสำคัญสูงสุด — โน้ตที่กำลังเปิด] [source: ' + nm + ']\n' + body);
+      sources.push(nm); seen.add(nm.toLowerCase());
+    }
+  }
+  if (vsGet('ragAmbient', true)) {
+    try {
+      const r = await window.api.ragContext(question);
+      const ctx = (r && r.context) || '';
+      if (ctx.trim()) {
+        parts.push('[บริบทเกี่ยวข้องเพิ่มเติม]\n' + ctx);
+        ((r && r.sources) || []).forEach((nm) => { const k = String(nm).toLowerCase(); if (!seen.has(k)) { seen.add(k); sources.push(nm); } });
+      }
+    } catch (_) {}
+  }
+  return { context: parts.join('\n\n'), sources };
+}
 async function sendChat(){
   const msg = chatInput.value.trim(); if (!msg) return;
   const s = activeSession();
   if (isRunning(s.id)) return;
   chatInput.value = ''; chatInput.style.height = 'auto';
-  const fullPrompt = buildSessionPrompt(s, msg);
-  // Context resolution by scope:
-  //  • 'note'  → reference-THIS-note: the open note (already in fullPrompt via
-  //     buildSessionPrompt) IS the source. SKIP ambient RAG so retrieval of OTHER notes
-  //     can't override/dilute it — this is what "อ้างอิงโน้ตนี้" means. Chip shows the open note.
-  //  • else    → AMBIENT RAG (opt-in per vault, default ON): retrieve the most relevant notes.
-  // Never let a retrieval error block the send.
-  let context = '', sources = [];
-  if (s.scope === 'note' && currentNote) {
-    sources = [currentNote.replace(/\.md$/i, '')];
-  } else if (vsGet('ragAmbient', true)) {
-    try { const r = await window.api.ragContext(msg); if (r) { context = r.context || ''; sources = r.sources || []; } } catch (_) {}
-  }
-  const finalPrompt = composeRagPrompt(fullPrompt, context);
+  const { context, sources } = await buildPriorityContext(msg);
+  const history = s.messages.slice(-10).map((m) => (m.role === 'user' ? 'ผู้ใช้: ' : 'ผู้ช่วย: ') + m.text).join('\n');
+  const base = (history ? history + '\n' : '') + 'ผู้ใช้: ' + msg;
+  const finalPrompt = context
+    ? ('คุณมีบริบทจากโน้ตของผู้ใช้ด้านล่าง เรียงตามความสำคัญ (บนสุด = โน้ตที่ผู้ใช้กำลังเปิดอยู่ — ให้ยึดเป็นหลัก)\n' +
+       'ใช้โน้ตที่เหลือเป็นข้อมูลเสริม อ้างอิงแหล่งด้วย [source: …] เมื่อใช้ หากคำถามไม่เกี่ยวกับโน้ต ให้ตอบตามปกติได้เลย\n\n' +
+       context + '\n\n' + base)
+    : base;
   beginAiTurn(msg, sources);
   const model = 'zai-coding-plan/' + s.model;
   window.api.runEngine({ engine: s.engine, model: (s.engine === 'glm' ? model : ''), prompt: finalPrompt, runId: s.id });

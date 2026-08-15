@@ -80,10 +80,8 @@ function renderHead(){
   const s = activeSession(); head.innerHTML = '';
   const nm = document.createElement('span'); nm.className = 'sh-nm'; nm.innerHTML = icoSvg(s.icon || 'note', 'sm'); nm.appendChild(document.createTextNode(' ' + s.name));
   head.appendChild(nm);
-  const scope = document.createElement('select'); scope.className = 'sh-scope'; scope.title = t('ขอบเขตบริบท');
-  ['note','vault','free'].forEach((v) => { const o = document.createElement('option'); o.value = v; o.textContent = t(SCOPE_LABEL[v]); if (s.scope === v) o.selected = true; scope.appendChild(o); });
-  scope.onchange = () => { s.scope = scope.value; persistSessions(); };
-  head.appendChild(scope);
+  // Scope dropdown removed — context is now injected automatically by PRIORITY
+  // (open note first, then RAG-related notes). See buildPriorityContext in renderer.js.
   const sp = document.createElement('span'); sp.className = 'sh-sp'; head.appendChild(sp);
   const eng = document.createElement('select'); eng.className = 'sh-eng'; eng.title = 'engine';
   [['glm','GLM'],['claude','Claude']].forEach(([v,l]) => { const o = document.createElement('option'); o.value = v; o.textContent = l; if (s.engine === v) o.selected = true; eng.appendChild(o); });
