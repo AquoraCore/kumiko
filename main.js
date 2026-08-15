@@ -4,7 +4,8 @@ const fs = require('fs');
 const chokidar = require('chokidar');
 const { wikiTargets, linksTo, rewriteLinkTargets } = require('./core/wikilinks');
 const { safeRel, baseName, vaultName } = require('./core/pathutil');
-const { aiConfigView, setConfigKey, buildApiRequest, parseSseDelta, buildEmbedRequest, parseEmbedResponse, resolveThinking } = require('./core/ai');
+const { aiConfigView, setConfigKey, buildApiRequest, parseSseDelta, buildEmbedRequest, parseEmbedResponse, resolveThinking, buildEngineInvocation } = require('./core/ai');
+const { spawn } = require('child_process');   // CLI (subscription) engine path — claude / opencode
 const CoreRag = require('./core/rag');
 
 // In dev, notes live beside the source. When packaged, __dirname is inside the
@@ -58,6 +59,8 @@ ipcMain.handle('ai:setConfig', (e, patch) => {
     if (patch.provider) cfg.provider = patch.provider;
     if ('model' in patch) cfg.model = patch.model;
     if ('thinking' in patch) cfg.thinking = patch.thinking;   // true/false/null (provider default)
+    if ('cliEngine' in patch) cfg.cliEngine = patch.cliEngine;   // 'claude' | 'glm' (CLI/subscription mode)
+    if ('cliModel' in patch) cfg.cliModel = patch.cliModel;
   }
   writeAiConfig(cfg);
   return aiConfigView(cfg);
@@ -424,6 +427,24 @@ async function runApiProvider({ provider, model, prompt, key, rid, emit, thinkin
   }
 }
 
+// ---- CLI (subscription) engine — spawns `claude`/`opencode` so AI runs on the user's
+// logged-in SUBSCRIPTION, NO API key. Desktop only (a browser can't spawn a process).
+// buildEngineInvocation (core/ai.js) maps engine+model+prompt -> {cmd,args,stdin}. The child
+// is stored in engineProcs so the existing engine:stop (SIGINT→SIGKILL) aborts it too.
+function runCliEngine({ engine, model, prompt, rid, emit }){
+  const inv = buildEngineInvocation(engine, model, prompt);
+  if (!inv) { emit('\r\n[ไม่รู้จัก engine: ' + engine + ']\r\n'); win.webContents.send('engine:done', { runId: rid, code: -1 }); return; }
+  let child;
+  try { child = spawn(inv.cmd, inv.args, { stdio: ['pipe', 'pipe', 'pipe'] }); }
+  catch (err) { emit('\r\n[เรียก ' + inv.cmd + ' ไม่ได้ — ติดตั้ง/ล็อกอิน CLI แล้วหรือยัง?] ' + (err && err.message || '') + '\r\n'); win.webContents.send('engine:done', { runId: rid, code: -1 }); return; }
+  engineProcs.set(rid, child);   // child.kill(signal) satisfies engine:stop
+  child.on('error', (err) => { emit('\r\n[' + inv.cmd + ' error: ' + (err && err.message || err) + ' — ติดตั้ง CLI แล้วหรือยัง?]\r\n'); });
+  if (child.stdin) { if (inv.stdin != null) { try { child.stdin.write(inv.stdin); } catch (_) {} } try { child.stdin.end(); } catch (_) {} }
+  if (child.stdout) child.stdout.on('data', (d) => emit(d.toString()));
+  if (child.stderr) child.stderr.on('data', (d) => emit(d.toString()));
+  child.on('close', (code) => { engineProcs.delete(rid); win.webContents.send('engine:done', { runId: rid, code: (code == null ? 0 : code) }); });
+}
+
 // ---- One-shot engine runner (no shell, argv array) ----
 ipcMain.handle('engine:run', (e, { engine, model, prompt, runId }) => {
   const rid = runId || 'default';
@@ -458,11 +479,15 @@ ipcMain.handle('engine:run', (e, { engine, model, prompt, runId }) => {
     win.webContents.send('engine:done', { runId: rid, code: -1 });
     return;
   }
-  // AI runs exclusively via the API-key path now (the raw CLI/terminal was removed
-  // in phase 8.5). Sits after the cap check + WASHI_TEST_ENGINE stub so E2E never
-  // hits the network. If no key/api config is set, runApiProvider emits a graceful
-  // error below.
   const aicfg = readAiConfig();
+  // CLI (subscription) mode — spawn the logged-in `claude`/`opencode` CLI, no API key.
+  if (aicfg.mode === 'cli') {
+    const eng = aicfg.cliEngine || 'claude';
+    const mdl = (eng === 'glm') ? (aicfg.cliModel || 'zai-coding-plan/glm-5.2') : '';
+    runCliEngine({ engine: eng, model: mdl, prompt, rid, emit });
+    return;
+  }
+  // Otherwise the API-key path. If no key/api config is set, emit a graceful error.
   const key = getDecryptedKey(aicfg.provider);
   if (!key) { emit('\r\n[ยังไม่ได้ตั้งค่า API key — ไปที่ ⚙ ตั้งค่า AI]\r\n'); win.webContents.send('engine:done', { runId: rid, code: -1 }); return; }
   runApiProvider({ provider: aicfg.provider, model: aicfg.model || model, prompt, key, rid, emit, thinking: aicfg.thinking });

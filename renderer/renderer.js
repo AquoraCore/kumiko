@@ -1240,16 +1240,19 @@ async function openAiSettings(){
   xBtn.onclick=dismiss;
   head.appendChild(title); head.appendChild(xBtn); card.appendChild(head);
 
-  let selectedMode = (cfg.mode === 'cli') ? 'api' : cfg.mode;
+  // CLI (subscription) mode is DESKTOP-only — a browser can't spawn a process. On web,
+  // a stale 'cli' config falls back to 'api'.
+  const isDesktop = (typeof window.KUMIKO_WEB === 'undefined');
+  let selectedMode = cfg.mode;
+  if (selectedMode === 'cli' && !isDesktop) selectedMode = 'api';
+  if (selectedMode !== 'cli' && selectedMode !== 'managed') selectedMode = 'api';
 
-  // MODE segmented control — api / managed(disabled). The raw CLI mode was removed
-  // in phase 8.5; a stale 'cli' config is normalized to 'api' (above) so the API
-  // section renders by default.
+  // MODE segmented control — cli(desktop) / api / managed(disabled).
   const modeSeg=document.createElement('div'); modeSeg.className='ai-mode-seg';
-  const MODES=[
-    ['api', t('API key'), t('ใส่คีย์เอง')],
-    ['managed', t('Managed'), t('เร็ว ๆ นี้')],
-  ];
+  const MODES=[];
+  if (isDesktop) MODES.push(['cli', t('CLI (subscription)'), t('ใช้ subscription — ไม่ต้องมีคีย์')]);
+  MODES.push(['api', t('API key'), t('ใส่คีย์เอง')]);
+  MODES.push(['managed', t('Managed'), t('เร็ว ๆ นี้')]);
   MODES.forEach(([m, label, sub])=>{
     const b=document.createElement('button'); b.type='button'; b.className='ai-mode-btn'+(selectedMode===m?' on':''); b.dataset.mode=m;
     const l=document.createElement('span'); l.className='ai-mode-lab'; l.textContent=label;
@@ -1307,6 +1310,31 @@ async function openAiSettings(){
   const note=document.createElement('p'); note.className='ai-note'; note.textContent=t('🔒 กุญแจถูกเข้ารหัสเก็บในเครื่อง — ไม่ถูกส่งไปที่ไหนนอกจากผู้ให้บริการที่เลือก');
   apiSection.appendChild(note);
   card.appendChild(apiSection);
+
+  // CLI (subscription) SECTION — desktop only. Runs the logged-in `claude` / `opencode`
+  // CLI so AI uses your SUBSCRIPTION (no API key). Visible only when mode === 'cli'.
+  let ceSel=null, cmInput=null, cmRow=null;
+  const cliSection=document.createElement('div'); cliSection.id='aiCliSection'; cliSection.className='ai-api-section';
+  if (isDesktop){
+    const ceRow=document.createElement('div'); ceRow.className='settings-field';
+    const ceLab=document.createElement('label'); ceLab.textContent=t('เครื่องมือ (CLI)');
+    ceSel=document.createElement('select'); ceSel.id='aiCliEngine'; ceSel.className='ai-sel';
+    [['claude','Claude — claude CLI (Pro/Max subscription)'],['glm','GLM — opencode (Coding Plan)']].forEach(([v,l])=>{ const o=document.createElement('option'); o.value=v; o.textContent=l; ceSel.appendChild(o); });
+    ceSel.value = (cfg.cliEngine==='glm') ? 'glm' : 'claude';
+    ceRow.appendChild(ceLab); ceRow.appendChild(ceSel); cliSection.appendChild(ceRow);
+
+    cmRow=document.createElement('div'); cmRow.className='settings-field';
+    const cmLab=document.createElement('label'); cmLab.textContent=t('โมเดล (opencode)');
+    cmInput=document.createElement('input'); cmInput.id='aiCliModel'; cmInput.type='text'; cmInput.className='ai-sel'; cmInput.placeholder='zai-coding-plan/glm-5.2';
+    cmInput.value = cfg.cliModel || 'zai-coding-plan/glm-5.2';
+    cmRow.appendChild(cmLab); cmRow.appendChild(cmInput); cliSection.appendChild(cmRow);
+
+    const cliNote=document.createElement('p'); cliNote.className='ai-note';
+    cliNote.textContent=t('ใช้ subscription ที่ล็อกอินไว้ในเครื่องผ่าน CLI — ต้องติดตั้ง `claude` / `opencode` และล็อกอินแล้ว (ไม่ต้องใช้ API key)');
+    cliSection.appendChild(cliNote);
+    ceSel.onchange=()=>{ cmRow.style.display = (ceSel.value==='glm') ? '' : 'none'; };
+  }
+  card.appendChild(cliSection);
 
   // AMBIENT RAG toggle — per-vault on/off (default ON). Applies to CLI + API chat alike.
   const ragRow=document.createElement('div'); ragRow.className='ai-rag-row';
@@ -1450,7 +1478,11 @@ async function openAiSettings(){
     const set=!!(cfg.hasKey && cfg.hasKey[pSel.value]);
     kInput.placeholder = set ? t('••• ตั้งค่าไว้แล้ว (ใส่ใหม่เพื่อเปลี่ยน)') : t('วางคีย์ที่นี่');
   }
-  function syncApiSection(){ apiSection.style.display=(selectedMode==='api') ? '' : 'none'; }
+  function syncApiSection(){
+    apiSection.style.display=(selectedMode==='api') ? '' : 'none';
+    cliSection.style.display=(selectedMode==='cli') ? '' : 'none';
+    if (selectedMode==='cli' && ceSel && cmRow) cmRow.style.display = (ceSel.value==='glm') ? '' : 'none';
+  }
   rebuildModels(); syncKeyPlaceholder(); syncApiSection();
   pSel.onchange=()=>{ rebuildModels(); syncKeyPlaceholder(); };
 
@@ -1468,7 +1500,9 @@ async function openAiSettings(){
   const cancelBtn=document.createElement('button'); cancelBtn.type='button'; cancelBtn.className='ghost'; cancelBtn.textContent=t('ยกเลิก'); cancelBtn.onclick=dismiss;
   const saveBtn=document.createElement('button'); saveBtn.type='button'; saveBtn.id='aiSettingsSave'; saveBtn.className='solid'; saveBtn.textContent=t('บันทึก');
   saveBtn.onclick=async ()=>{
-    await window.api.aiSetConfig({ mode:selectedMode, provider:pSel.value, model:mSel.value, thinking: (tChk.disabled ? null : tChk.checked) });
+    const cfgPatch = { mode:selectedMode, provider:pSel.value, model:mSel.value, thinking: (tChk.disabled ? null : tChk.checked) };
+    if (selectedMode==='cli' && ceSel){ cfgPatch.cliEngine = ceSel.value; cfgPatch.cliModel = (cmInput && cmInput.value.trim()) || ''; }
+    await window.api.aiSetConfig(cfgPatch);
     const kv=kInput.value;
     if (kv && kv.length) await window.api.aiSetKey(pSel.value, kv);
     vsSet('ragAmbient', document.getElementById('aiRagToggle').checked);

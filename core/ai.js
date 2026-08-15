@@ -22,7 +22,10 @@ function aiConfigView(cfg){
   const has = (p) => !!(keys[p] && typeof keys[p] === 'string' && keys[p].length > 0);
   // thinking: true/false = explicit user choice; null = "use the provider/model default".
   const thinking = (c.thinking === true || c.thinking === false) ? c.thinking : null;
-  return { mode, provider, model, thinking, hasKey: { anthropic: has('anthropic'), zai: has('zai') } };
+  // CLI (subscription) mode fields — which local CLI to spawn + its model (glm/opencode only).
+  const cliEngine = (c.cliEngine === 'glm' || c.cliEngine === 'claude') ? c.cliEngine : 'claude';
+  const cliModel = (typeof c.cliModel === 'string') ? c.cliModel : '';
+  return { mode, provider, model, thinking, cliEngine, cliModel, hasKey: { anthropic: has('anthropic'), zai: has('zai') } };
 }
 
 // Return a NEW config with keys[provider] set to `encrypted`, or DELETED when

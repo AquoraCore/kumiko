@@ -38,18 +38,18 @@ describe('buildEngineInvocation', () => {
 describe('aiConfigView', () => {
   it('maps a populated config to a safe view, hiding raw keys (happy)', () => {
     const v = aiConfigView({ mode: 'api', provider: 'zai', model: 'm', keys: { anthropic: 'x' } });
-    expect(v).toEqual({ mode: 'api', provider: 'zai', model: 'm', thinking: null, hasKey: { anthropic: true, zai: false } });
+    expect(v).toEqual({ mode: 'api', provider: 'zai', model: 'm', thinking: null, cliEngine: 'claude', cliModel: '', hasKey: { anthropic: true, zai: false } });
   });
 
   it('defaults to cli/anthropic/empty when given null (edge)', () => {
     expect(aiConfigView(null)).toEqual({
-      mode: 'cli', provider: 'anthropic', model: '', thinking: null, hasKey: { anthropic: false, zai: false },
+      mode: 'cli', provider: 'anthropic', model: '', thinking: null, cliEngine: 'claude', cliModel: '', hasKey: { anthropic: false, zai: false },
     });
   });
 
   it('defaults to cli/anthropic/empty when given an empty object (edge)', () => {
     expect(aiConfigView({})).toEqual({
-      mode: 'cli', provider: 'anthropic', model: '', thinking: null, hasKey: { anthropic: false, zai: false },
+      mode: 'cli', provider: 'anthropic', model: '', thinking: null, cliEngine: 'claude', cliModel: '', hasKey: { anthropic: false, zai: false },
     });
   });
 
