@@ -399,6 +399,13 @@ function createWebApi(opts) {
     if (runId != null) _aborters.set(runId, ctrl);
     try {
       const res = await fetch(baseUrl + '/ai/chat', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body), signal: ctrl.signal });
+      if (res.status === 429) {   // daily managed-AI quota reached
+        let msg = 'ถึงโควตา AI รายวันแล้ว — ใส่ API key ของคุณเองที่ ⚙ ตั้งค่า AI เพื่อใช้ต่อ';
+        try { const j = await res.json(); if (j && j.error) msg = j.error + (j.limit ? ' (' + j.used + '/' + j.limit + ')' : ''); } catch (_) {}
+        if (_engineOut) _engineOut({ runId, data: '[' + msg + ']\r\n' });
+        if (_engineDone) _engineDone({ runId, code: -1 });
+        return;
+      }
       if (!res.ok || !res.body) {
         if (_engineOut) _engineOut({ runId, data: '[AI unavailable]\r\n' });
         if (_engineDone) _engineDone({ runId, code: -1 });

@@ -12,6 +12,7 @@ const { createDbStore } = require('./dbstore');
 const { createPdfStore } = require('./pdfstore');
 const { createVaultFs } = require('./vaultfs');
 const { createVaultReg } = require('./vaultreg');
+const { createAiQuota } = require('./aiquota');
 const aiCore = require('../core/ai');
 
 // Real verifier: validates a Google ID token against this app's client id.
@@ -72,6 +73,11 @@ async function startServer(opts = {}) {
   const aiProvider = opts.aiProvider || process.env.MANAGED_AI_PROVIDER || '';
   const aiKey = opts.aiKey || process.env.MANAGED_AI_KEY || '';
   const aiModel = opts.aiModel || process.env.MANAGED_AI_MODEL || (aiProvider === 'anthropic' ? 'claude-opus-4-8' : 'glm-5.2');
+  // Per-user daily cap on MANAGED-key AI requests (the owner's cost). Default 100/day; set
+  // MANAGED_AI_DAILY_LIMIT=0 (or negative) to disable. Users with their own key are exempt.
+  const _dailyLimit = (opts.managedAiDailyLimit != null) ? opts.managedAiDailyLimit
+    : (process.env.MANAGED_AI_DAILY_LIMIT != null && process.env.MANAGED_AI_DAILY_LIMIT !== '' ? parseInt(process.env.MANAGED_AI_DAILY_LIMIT, 10) : 100);
+  const aiQuota = createAiQuota(path.join(dataDir, 'ai-quota.json'), _dailyLimit);
 
   // Streaming chat over the configured provider. INJECTABLE via opts.streamChat so
   // tests run without a real LLM/key. Yields text deltas; returns early if unset.
@@ -392,11 +398,25 @@ async function startServer(opts = {}) {
     const model = b.model || aiModel;
     const thinking = (b.thinking === true || b.thinking === false) ? b.thinking : null;   // client's choice; null = provider default
     if (!opts.streamChat && (!provider || !key)) return res.status(501).json({ error: 'no AI configured' });
+    // Quota only bites when the request falls back to the MANAGED key (no client key of its
+    // own) — that's the owner's cost. Count the request up front so retries can't dodge it.
+    const usingManaged = !b.key;
+    if (usingManaged && !aiQuota.unlimited) {
+      const q = aiQuota.check(req.user.sub);
+      if (!q.allowed) return res.status(429).json({ error: 'ถึงโควตา AI รายวันแล้ว — ใส่ API key ของคุณเองที่ตั้งค่า AI เพื่อใช้ต่อโดยไม่จำกัด', used: q.used, limit: q.limit });
+      aiQuota.record(req.user.sub);
+    }
     res.setHeader('content-type', 'text/plain; charset=utf-8');
     try {
       for await (const delta of streamChat(prompt, { provider, key, model, thinking })) res.write(delta);
       res.end();
     } catch (_) { try { res.end(); } catch (__) {} }
+  });
+
+  // GET /ai/quota -> the caller's managed-AI usage today (so the UI can show remaining).
+  app.get('/ai/quota', requireAuth, (req, res) => {
+    const q = aiQuota.check(req.user.sub);
+    res.json({ used: q.used, limit: aiQuota.unlimited ? null : q.limit, remaining: aiQuota.unlimited ? null : q.remaining, unlimited: aiQuota.unlimited });
   });
 
   // GET /ai/config -> { available }. PUBLIC (mirrors /auth/config) so the web UI
