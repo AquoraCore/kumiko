@@ -1170,12 +1170,10 @@ function openSettingsMenu(anchor){
 
   const sep = document.createElement('div'); sep.className = 'set-sep'; menu.appendChild(sep);
 
-  const ai = document.createElement('div'); ai.className = 'db-mi'; ai.innerHTML = icoSvg('settings', 'sm'); ai.appendChild(document.createTextNode(' ' + t('ตั้งค่าคำสั่ง AI…')));
-  ai.onclick = () => { closeSettingsMenu(); openSettings(); };
-  menu.appendChild(ai);
-
+  // ONE AI-settings entry point — provider/mode/RAG + prompt templates all live in
+  // openAiSettings now (the old separate "prompt settings" modal was merged in).
   const aip = document.createElement('div'); aip.className = 'db-mi'; aip.id = 'aiSettingsMenuItem';
-  aip.innerHTML = icoSvg('sparkle','sm'); aip.appendChild(document.createTextNode(' ' + t('ตั้งค่า AI provider…')));
+  aip.innerHTML = icoSvg('sparkle','sm'); aip.appendChild(document.createTextNode(' ' + t('ตั้งค่า AI…')));
   aip.onclick = () => { closeSettingsMenu(); openAiSettings(); };
   menu.appendChild(aip);
 
@@ -1369,6 +1367,23 @@ async function openAiSettings(){
   semCk.onchange=refreshSemWarn;
   refreshSemWarn();
 
+  // AI PROMPT TEMPLATES — merged in from the old separate "prompt settings" modal so there's
+  // ONE settings entry point. Collapsed by default (advanced). {term}=selection, {file}=note.
+  const ptDetails=document.createElement('details'); ptDetails.className='ai-prompt-details';
+  const ptSum=document.createElement('summary'); ptSum.className='ai-prompt-sum'; ptSum.textContent=t('คำสั่งปุ่มลัด AI (TL;DR / Quiz / อธิบาย …)'); ptDetails.appendChild(ptSum);
+  const ptHint=document.createElement('p'); ptHint.className='ai-note'; ptHint.textContent=t('แก้ข้อความคำสั่งของปุ่ม action ได้ · {term} = คำที่เลือก, {file} = ชื่อไฟล์โน้ต'); ptDetails.appendChild(ptHint);
+  const ptFields={};
+  Object.keys(DEFAULT_PROMPTS).forEach((key)=>{
+    const w=document.createElement('div'); w.className='settings-field';
+    const l=document.createElement('label'); l.textContent=t(PROMPT_LABELS[key]||key);
+    const ta=document.createElement('textarea'); ta.value=promptTemplates[key]||DEFAULT_PROMPTS[key]; ta.rows=2; ta.className='ai-prompt-ta';
+    w.appendChild(l); w.appendChild(ta); ptDetails.appendChild(w); ptFields[key]=ta;
+  });
+  const ptReset=document.createElement('button'); ptReset.type='button'; ptReset.className='ghost sm'; ptReset.textContent=t('คืนค่าคำสั่งเริ่มต้น');
+  ptReset.onclick=()=>{ Object.keys(DEFAULT_PROMPTS).forEach(k=>{ ptFields[k].value=DEFAULT_PROMPTS[k]; }); };
+  ptDetails.appendChild(ptReset);
+  card.appendChild(ptDetails);
+
   // PROFILE section (phase 7b-1) — local name + color for collab identity.
   // Sits above the collab toggle. Selection is held in selectedColor and only
   // persisted on Save (Cancel/close changes nothing). Reuses ai-rag-row so it
@@ -1525,6 +1540,10 @@ async function openAiSettings(){
     if (kv && kv.length) await window.api.aiSetKey(pSel.value, kv);
     vsSet('ragAmbient', document.getElementById('aiRagToggle').checked);
     vsSet('ragSemantic', document.getElementById('aiSemanticToggle').checked);
+    // AI prompt templates (merged section) — persist alongside provider config.
+    const ptObj={}; Object.keys(DEFAULT_PROMPTS).forEach((k)=>{ ptObj[k]=(ptFields[k].value.trim())||DEFAULT_PROMPTS[k]; });
+    promptTemplates=Object.assign({}, DEFAULT_PROMPTS, ptObj);
+    try { localStorage.setItem('prompts', JSON.stringify(promptTemplates)); } catch (_) {}
     const collabOn = document.getElementById('aiCollabToggle').checked;
     vsSet('collab', collabOn);
     const relay = (document.getElementById('aiCollabRelay').value || '').trim();

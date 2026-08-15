@@ -163,6 +163,11 @@ kbd { font: inherit; font-size: 10px; color: var(--muted); border: 1px solid var
 .ai-think-wrap { display: flex; align-items: center; gap: 8px; }
 .ai-think-hint { color: var(--muted); font-size: 12px; }
 .ai-think-row.disabled { opacity: .5; }
+/* Merged AI prompt-templates section (collapsible) inside the AI settings modal */
+.ai-prompt-details { margin: 8px 0 4px; border-top: 1px solid var(--line); padding-top: 8px; }
+.ai-prompt-sum { cursor: pointer; font-weight: 600; font-size: 13px; padding: 4px 0; list-style: revert; }
+.ai-prompt-ta { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; padding: 6px 8px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--card, #fff); color: var(--text); }
 /* Tag chips (Obsidian-style) — user-defined tags with autocomplete */
 .tags-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; flex: 1; min-width: 120px; cursor: text; padding: 2px 0; }
 .tag-chip { display: inline-flex; align-items: center; gap: 2px; padding: 1px 4px 1px 7px; border-radius: 11px;

@@ -348,6 +348,10 @@ const I18N_EN = {
   'สร้าง vault ใหม่…': 'New vault…',
   // ---- AI provider settings panel (step 3a-2) ----
   'ตั้งค่า AI provider…': 'AI provider settings…',
+  'ตั้งค่า AI…': 'AI settings…',
+  'คำสั่งปุ่มลัด AI (TL;DR / Quiz / อธิบาย …)': 'AI shortcut prompts (TL;DR / Quiz / Explain …)',
+  'แก้ข้อความคำสั่งของปุ่ม action ได้ · {term} = คำที่เลือก, {file} = ชื่อไฟล์โน้ต': 'Edit the action-button prompts · {term} = selection, {file} = note filename',
+  'คืนค่าคำสั่งเริ่มต้น': 'Reset prompts',
   'ตั้งค่า AI / AI Settings': 'AI Settings',
   'CLI (บนเครื่อง)': 'CLI (local)',
   'API key': 'API key',
