@@ -34,6 +34,43 @@ applyEngineUI();
 
 // ---------- Editor / notes ----------
 const editorHost = document.getElementById('editorHost');
+
+// Crepe top-aligns its ＋/⠿ block-drag handle (fixed ~32px, positioned at the block's
+// TOP). We want the 6-dot grip centered in the block. Crepe repositions the handle via
+// an inline `top` on hover, and has no block-height to work with, so pure CSS can't do
+// it — instead observe the handle and re-apply a translateY that centers it in whatever
+// block it's currently pointing at. The -8px X keeps the existing horizontal nudge.
+function installBlockHandleCentering(root){
+  let selfMutating = false, handleEl = null, handleObs = null;
+  const XSHIFT = -8;
+  // Use offsetTop/offsetHeight (layout metrics, transform-agnostic) — NOT getBoundingClientRect,
+  // which reads mid-transition values (Crepe animates the handle's transform over 0.2s). Crepe
+  // sets the handle's inline `top` to the target block's offsetTop within .milkdown, so we match
+  // the block by offsetTop and translateY by half the leftover height. Idempotent → transition-safe.
+  const recenter = () => {
+    if (!handleEl || !root.contains(handleEl)) return;
+    const pm = root.querySelector('.ProseMirror'); if (!pm) return;
+    const top = parseFloat(handleEl.style.top) || 0;
+    let blk = null, best = Infinity;
+    for (const c of pm.children){ const d = Math.abs(c.offsetTop - top); if (d < best){ best = d; blk = c; } }
+    if (!blk) return;
+    const dy = Math.max(0, Math.round((blk.offsetHeight - handleEl.offsetHeight) / 2));
+    const want = 'translateX(' + XSHIFT + 'px) translateY(' + dy + 'px)';
+    if (handleEl.style.transform !== want){ selfMutating = true; handleEl.style.transform = want; selfMutating = false; }
+  };
+  const attach = () => {
+    const h = root.querySelector('.milkdown-block-handle');
+    if (h && h !== handleEl){
+      handleEl = h;
+      if (handleObs) handleObs.disconnect();
+      handleObs = new MutationObserver(() => { if (!selfMutating) requestAnimationFrame(recenter); });
+      handleObs.observe(handleEl, { attributes: true, attributeFilter: ['style'] });
+      recenter();
+    }
+  };
+  try { new MutationObserver(attach).observe(root, { childList: true, subtree: true }); attach(); } catch (_) {}
+}
+if (editorHost) installBlockHandleCentering(editorHost);
 const noteTitleEl = document.getElementById('noteTitle');   // H0: read-only page title = filename
 // The title is NOT editable inline; clicking it opens the rename dialog (renaming the file is the
 // only way to change the title — duplicates are already forbidden and [[links]] auto-update on rename).
@@ -206,6 +243,7 @@ async function loadEditor(bodyMarkdown){
     if (applying) return;
     if (crepe.getMarkdown().trim() === (loadedBody || '').trim()) return;   // spurious emit / no real change
     setDirty(true);
+    scheduleAutosave();
   }));
   applying = false;
 }
@@ -404,10 +442,28 @@ window.__wikiNav = async (name) => {
 
 async function save() {
   if (!currentNote) return;
+  if (_autosaveTimer) { clearTimeout(_autosaveTimer); _autosaveTimer = null; }
   await window.api.saveNote(currentNote, getFullMarkdown());
   setDirty(false);
   if (window.syncSoon) window.syncSoon();
 }
+// ---------- Autosave ----------
+// Debounced: every edit reschedules a save ~1s later, so notes persist without ⌘S.
+// flushAutosave() forces a pending save NOW — called before switching notes (openNote)
+// so edits never bleed into the next note or get lost on switch. ⌘S still works.
+let _autosaveTimer = null;
+function scheduleAutosave() {
+  if (_autosaveTimer) clearTimeout(_autosaveTimer);
+  _autosaveTimer = setTimeout(() => { _autosaveTimer = null; if (dirty && currentNote) save(); }, 1000);
+}
+async function flushAutosave() {
+  if (_autosaveTimer) { clearTimeout(_autosaveTimer); _autosaveTimer = null; }
+  if (dirty && currentNote) await save();
+}
+window.flushAutosave = flushAutosave;
+// Best-effort flush when the app/tab closes (async can't be awaited here, but the
+// desktop IPC / web HTTP save usually lands before teardown).
+window.addEventListener('beforeunload', () => { try { if (dirty && currentNote) window.api.saveNote(currentNote, getFullMarkdown()); } catch (_) {} });
 document.getElementById('saveBtn').onclick = save;
 window.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save(); }

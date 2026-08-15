@@ -307,6 +307,9 @@ function setNoteTitle(name){
 }
 
 async function openNote(name) {
+  // Flush any pending autosave of the CURRENT note before loading the next one,
+  // so unsaved edits are never lost or bled into the new note.
+  if (typeof window.flushAutosave === 'function') { try { await window.flushAutosave(); } catch (_) {} }
   if (typeof setMainView === 'function') setMainView('note');
   if (typeof clearAutolink === 'function') clearAutolink();
   const content = await window.api.openNote(name);
