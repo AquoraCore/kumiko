@@ -59,4 +59,18 @@ describe('mdToHtml / _mdInline (edge)', () => {
   it('escapes raw HTML in _mdInline', () => {
     expect(_mdInline('<b>')).toContain('&lt;');
   });
+
+  it('strips the {!#hex} callout-colour marker (never leaks as literal text)', () => {
+    // empty callout — the marker is the ONLY content; must not render as text
+    const empty = mdToHtml('> {!#f59e0b} ');
+    expect(empty).not.toContain('{!');
+    expect(empty).toContain('callout-colored');
+    expect(empty).toContain('--callout:#f59e0b');
+    // callout with text — marker stripped, text kept, colour applied
+    const withText = mdToHtml('> {!#3b82f6} Hello');
+    expect(withText).not.toContain('{!');
+    expect(withText).toContain('>Hello</blockquote>');
+    // a plain blockquote is untouched
+    expect(mdToHtml('> normal')).toContain('<blockquote>normal</blockquote>');
+  });
 });

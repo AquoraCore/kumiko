@@ -58,7 +58,17 @@
       if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)){ closeList(); html += '<hr>'; i++; continue; }
       if (/^\s*[-*+]\s+/.test(line)){ if (listType !== 'ul'){ closeList(); html += '<ul>'; listType = 'ul'; } html += '<li>'+_mdInline(line.replace(/^\s*[-*+]\s+/,''))+'</li>'; i++; continue; }
       if (/^\s*\d+\.\s+/.test(line)){ if (listType !== 'ol'){ closeList(); html += '<ol>'; listType = 'ol'; } html += '<li>'+_mdInline(line.replace(/^\s*\d+\.\s+/,''))+'</li>'; i++; continue; }
-      if (/^\s*>\s?/.test(line)){ closeList(); html += '<blockquote>'+_mdInline(line.replace(/^\s*>\s?/,''))+'</blockquote>'; i++; continue; }
+      if (/^\s*>\s?/.test(line)){
+        closeList();
+        // Callout colour marker `{!#hex}` (see the Milkdown callout-colour plugin): strip it
+        // from the rendered text and apply the colour — otherwise it leaks as literal text in
+        // previews / AI context, most visibly on an empty callout where it's the only content.
+        let inner = line.replace(/^\s*>\s?/, '');
+        let attr = '';
+        const cm = /^\{!(#[0-9a-fA-F]{3,8})\} ?/.exec(inner);
+        if (cm){ inner = inner.slice(cm[0].length); attr = ' class="callout-colored" style="--callout:' + cm[1] + '"'; }
+        html += '<blockquote' + attr + '>' + _mdInline(inner) + '</blockquote>'; i++; continue;
+      }
       closeList(); html += '<p>'+_mdInline(line)+'</p>'; i++;
     }
     closeList();
