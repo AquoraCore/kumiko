@@ -13,6 +13,12 @@ const { createPdfStore } = require('./pdfstore');
 const { createVaultFs } = require('./vaultfs');
 const { createVaultReg } = require('./vaultreg');
 const { createAiQuota } = require('./aiquota');
+const { createRateLimiter } = require('./ratelimit');
+// Real client IP behind the Cloudflare Tunnel: CF-Connecting-IP is the browser's IP;
+// req.ip / the socket would just be the tunnel/localhost. Falls back for local dev.
+function clientIp(req) {
+  return String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || (req.socket && req.socket.remoteAddress) || 'unknown').split(',')[0].trim();
+}
 const aiCore = require('../core/ai');
 
 // Real verifier: validates a Google ID token against this app's client id.
@@ -78,6 +84,13 @@ async function startServer(opts = {}) {
   const _dailyLimit = (opts.managedAiDailyLimit != null) ? opts.managedAiDailyLimit
     : (process.env.MANAGED_AI_DAILY_LIMIT != null && process.env.MANAGED_AI_DAILY_LIMIT !== '' ? parseInt(process.env.MANAGED_AI_DAILY_LIMIT, 10) : 100);
   const aiQuota = createAiQuota(path.join(dataDir, 'ai-quota.json'), _dailyLimit);
+  // Brute-force guard on auth: N attempts per key (client IP + targeted email) per window,
+  // then 429. Defaults: 10 / 15 min. Tunable via opts or LOGIN_RATE_MAX / LOGIN_RATE_WINDOW_MS.
+  const loginLimiter = createRateLimiter({
+    max: (opts.loginRateMax != null) ? opts.loginRateMax : (process.env.LOGIN_RATE_MAX ? parseInt(process.env.LOGIN_RATE_MAX, 10) : 10),
+    windowMs: (opts.loginRateWindowMs != null) ? opts.loginRateWindowMs : (process.env.LOGIN_RATE_WINDOW_MS ? parseInt(process.env.LOGIN_RATE_WINDOW_MS, 10) : 15 * 60 * 1000),
+    now: opts.now,
+  });
 
   // Streaming chat over the configured provider. INJECTABLE via opts.streamChat so
   // tests run without a real LLM/key. Yields text deltas; returns early if unset.
@@ -151,12 +164,22 @@ async function startServer(opts = {}) {
     );
   });
 
+  // 429 helper — sets Retry-After and returns a friendly message.
+  function tooMany(res, worstMs) {
+    const s = Math.ceil(Math.max(0, worstMs) / 1000);
+    res.set('Retry-After', String(s));
+    return res.status(429).json({ error: 'พยายามบ่อยเกินไป — ลองใหม่ในอีก ' + s + ' วินาที', retryAfter: s });
+  }
+
   // POST /auth/signup {email,password}
   app.post('/auth/signup', (req, res) => {
+    const ipKey = 'signup:ip:' + clientIp(req);
+    const c = loginLimiter.check(ipKey);
+    if (c.limited) return tooMany(res, c.retryAfterMs);
     const { email, password } = req.body || {};
     const v = auth.validateCredentials(email, password);
-    if (!v.ok) return res.status(400).json({ error: v.error });
-    if (!emailAllowed(email)) return res.status(403).json({ error: 'not_allowed' });
+    if (!v.ok) { loginLimiter.hit(ipKey); return res.status(400).json({ error: v.error }); }
+    if (!emailAllowed(email)) { loginLimiter.hit(ipKey); return res.status(403).json({ error: 'not_allowed' }); }
     const em = auth.normalizeEmail(email);
     if (store.findByEmail(em)) return res.status(409).json({ error: 'email exists' });
     const user = store.create({ email: em, passwordHash: auth.hashPassword(password) });
@@ -164,15 +187,23 @@ async function startServer(opts = {}) {
     return res.json({ token, email: em });
   });
 
-  // POST /auth/login {email,password}
+  // POST /auth/login {email,password} — brute-force limited by client IP AND targeted email
+  // (so neither one IP guessing many accounts, nor many IPs guessing one account, is cheap).
   app.post('/auth/login', (req, res) => {
     const { email, password } = req.body || {};
-    if (!emailAllowed(email)) return res.status(403).json({ error: 'not_allowed' });
-    const em = auth.normalizeEmail(email);
+    const em = auth.normalizeEmail(email || '');
+    const ipKey = 'login:ip:' + clientIp(req);
+    const emKey = em ? 'login:em:' + em : null;
+    const ci = loginLimiter.check(ipKey);
+    const ce = emKey ? loginLimiter.check(emKey) : { limited: false, retryAfterMs: 0 };
+    if (ci.limited || ce.limited) return tooMany(res, Math.max(ci.retryAfterMs, ce.retryAfterMs));
+    if (!emailAllowed(email)) { loginLimiter.hit(ipKey); if (emKey) loginLimiter.hit(emKey); return res.status(403).json({ error: 'not_allowed' }); }
     const user = store.findByEmail(em);
     if (!user || !auth.verifyPassword(password, user.passwordHash)) {
+      loginLimiter.hit(ipKey); if (emKey) loginLimiter.hit(emKey);   // only FAILURES count
       return res.status(401).json({ error: 'invalid credentials' });
     }
+    loginLimiter.reset(ipKey); if (emKey) loginLimiter.reset(emKey);  // success clears the counters
     const token = auth.signToken({ sub: user.id, email: em }, secret);
     return res.json({ token, email: em });
   });
