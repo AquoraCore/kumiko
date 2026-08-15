@@ -22,6 +22,11 @@ describe('buildEngineInvocation', () => {
     });
   });
 
+  it('appends --model for claude ONLY when a model alias is given (subscription model pick)', () => {
+    expect(buildEngineInvocation('claude', 'opus', 'hi').args).toEqual(['-p', 'hi', '--permission-mode', 'acceptEdits', '--model', 'opus']);
+    expect(buildEngineInvocation('claude', '', 'hi').args).not.toContain('--model');
+  });
+
   it('returns null for an unknown engine (edge)', () => {
     expect(buildEngineInvocation('foo', 'm', 'p')).toBeNull();
   });

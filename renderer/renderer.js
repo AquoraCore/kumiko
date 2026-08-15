@@ -1313,7 +1313,8 @@ async function openAiSettings(){
 
   // CLI (subscription) SECTION — desktop only. Runs the logged-in `claude` / `opencode`
   // CLI so AI uses your SUBSCRIPTION (no API key). Visible only when mode === 'cli'.
-  let ceSel=null, cmInput=null, cmRow=null;
+  let ceSel=null, cmInput=null, cmRow=null, claudeSel=null, claudeRow=null;
+  const CLAUDE_CLI_MODELS = [['', t('ค่าเริ่มต้นของ CLI')], ['opus','Opus'], ['sonnet','Sonnet'], ['haiku','Haiku']];
   const cliSection=document.createElement('div'); cliSection.id='aiCliSection'; cliSection.className='ai-api-section';
   if (isDesktop){
     const ceRow=document.createElement('div'); ceRow.className='settings-field';
@@ -1323,16 +1324,26 @@ async function openAiSettings(){
     ceSel.value = (cfg.cliEngine==='glm') ? 'glm' : 'claude';
     ceRow.appendChild(ceLab); ceRow.appendChild(ceSel); cliSection.appendChild(ceRow);
 
+    // Claude model picker (alias → `claude --model`); shown when engine === 'claude'
+    claudeRow=document.createElement('div'); claudeRow.className='settings-field';
+    const clLab=document.createElement('label'); clLab.textContent=t('โมเดล (Claude)');
+    claudeSel=document.createElement('select'); claudeSel.id='aiCliClaudeModel'; claudeSel.className='ai-sel';
+    CLAUDE_CLI_MODELS.forEach(([v,l])=>{ const o=document.createElement('option'); o.value=v; o.textContent=l; claudeSel.appendChild(o); });
+    claudeSel.value = (cfg.cliEngine!=='glm' && cfg.cliModel) ? cfg.cliModel : '';
+    claudeRow.appendChild(clLab); claudeRow.appendChild(claudeSel); cliSection.appendChild(claudeRow);
+
+    // opencode/GLM model (free text); shown when engine === 'glm'
     cmRow=document.createElement('div'); cmRow.className='settings-field';
     const cmLab=document.createElement('label'); cmLab.textContent=t('โมเดล (opencode)');
     cmInput=document.createElement('input'); cmInput.id='aiCliModel'; cmInput.type='text'; cmInput.className='ai-sel'; cmInput.placeholder='zai-coding-plan/glm-5.2';
-    cmInput.value = cfg.cliModel || 'zai-coding-plan/glm-5.2';
+    cmInput.value = (cfg.cliEngine==='glm' && cfg.cliModel) ? cfg.cliModel : 'zai-coding-plan/glm-5.2';
     cmRow.appendChild(cmLab); cmRow.appendChild(cmInput); cliSection.appendChild(cmRow);
 
     const cliNote=document.createElement('p'); cliNote.className='ai-note';
     cliNote.textContent=t('ใช้ subscription ที่ล็อกอินไว้ในเครื่องผ่าน CLI — ต้องติดตั้ง `claude` / `opencode` และล็อกอินแล้ว (ไม่ต้องใช้ API key)');
     cliSection.appendChild(cliNote);
-    ceSel.onchange=()=>{ cmRow.style.display = (ceSel.value==='glm') ? '' : 'none'; };
+    const syncCliEngine=()=>{ const glm = (ceSel.value==='glm'); cmRow.style.display = glm ? '' : 'none'; claudeRow.style.display = glm ? 'none' : ''; };
+    ceSel.onchange=syncCliEngine; syncCliEngine();
   }
   card.appendChild(cliSection);
 
@@ -1481,7 +1492,11 @@ async function openAiSettings(){
   function syncApiSection(){
     apiSection.style.display=(selectedMode==='api') ? '' : 'none';
     cliSection.style.display=(selectedMode==='cli') ? '' : 'none';
-    if (selectedMode==='cli' && ceSel && cmRow) cmRow.style.display = (ceSel.value==='glm') ? '' : 'none';
+    if (selectedMode==='cli' && ceSel && cmRow && claudeRow){
+      const glm = (ceSel.value==='glm');
+      cmRow.style.display = glm ? '' : 'none';
+      claudeRow.style.display = glm ? 'none' : '';
+    }
   }
   rebuildModels(); syncKeyPlaceholder(); syncApiSection();
   pSel.onchange=()=>{ rebuildModels(); syncKeyPlaceholder(); };
@@ -1501,7 +1516,10 @@ async function openAiSettings(){
   const saveBtn=document.createElement('button'); saveBtn.type='button'; saveBtn.id='aiSettingsSave'; saveBtn.className='solid'; saveBtn.textContent=t('บันทึก');
   saveBtn.onclick=async ()=>{
     const cfgPatch = { mode:selectedMode, provider:pSel.value, model:mSel.value, thinking: (tChk.disabled ? null : tChk.checked) };
-    if (selectedMode==='cli' && ceSel){ cfgPatch.cliEngine = ceSel.value; cfgPatch.cliModel = (cmInput && cmInput.value.trim()) || ''; }
+    if (selectedMode==='cli' && ceSel){
+      cfgPatch.cliEngine = ceSel.value;
+      cfgPatch.cliModel = (ceSel.value==='glm') ? ((cmInput && cmInput.value.trim()) || '') : (claudeSel ? claudeSel.value : '');
+    }
     await window.api.aiSetConfig(cfgPatch);
     const kv=kInput.value;
     if (kv && kv.length) await window.api.aiSetKey(pSel.value, kv);
@@ -1567,11 +1585,16 @@ async function sendChat(){
   if (isRunning(s.id)) return;
   chatInput.value = ''; chatInput.style.height = 'auto';
   const fullPrompt = buildSessionPrompt(s, msg);
-  // AMBIENT RAG: opt-in per vault (default ON). When off, context '' + sources []
-  // => composeRagPrompt returns fullPrompt unchanged and no chip renders, i.e. the
-  // pre-Phase-5 plain chat. Never let a retrieval error block the send.
+  // Context resolution by scope:
+  //  • 'note'  → reference-THIS-note: the open note (already in fullPrompt via
+  //     buildSessionPrompt) IS the source. SKIP ambient RAG so retrieval of OTHER notes
+  //     can't override/dilute it — this is what "อ้างอิงโน้ตนี้" means. Chip shows the open note.
+  //  • else    → AMBIENT RAG (opt-in per vault, default ON): retrieve the most relevant notes.
+  // Never let a retrieval error block the send.
   let context = '', sources = [];
-  if (vsGet('ragAmbient', true)) {
+  if (s.scope === 'note' && currentNote) {
+    sources = [currentNote.replace(/\.md$/i, '')];
+  } else if (vsGet('ragAmbient', true)) {
     try { const r = await window.api.ragContext(msg); if (r) { context = r.context || ''; sources = r.sources || []; } } catch (_) {}
   }
   const finalPrompt = composeRagPrompt(fullPrompt, context);

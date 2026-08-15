@@ -3,10 +3,15 @@
 // Captures EXACTLY how main.js spawns each engine today, so the spawn path can be
 // unit-tested without touching child_process. Unknown engine -> null.
 //   glm    = `opencode run -m <model>`, prompt on STDIN
-//   claude = `claude -p <prompt> --permission-mode acceptEdits`, no STDIN
+//   claude = `claude -p <prompt> --permission-mode acceptEdits [--model <model>]`, no STDIN
+// For claude, `model` is an OPTIONAL alias/id (opus|sonnet|haiku|full-id); empty = CLI default.
 function buildEngineInvocation(engine, model, prompt){
   if (engine === 'glm') return { cmd: 'opencode', args: ['run', '-m', model], stdin: prompt };
-  if (engine === 'claude') return { cmd: 'claude', args: ['-p', prompt, '--permission-mode', 'acceptEdits'], stdin: null };
+  if (engine === 'claude') {
+    const args = ['-p', prompt, '--permission-mode', 'acceptEdits'];
+    if (model) args.push('--model', model);
+    return { cmd: 'claude', args, stdin: null };
+  }
   return null;
 }
 

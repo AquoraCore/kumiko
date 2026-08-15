@@ -483,7 +483,9 @@ ipcMain.handle('engine:run', (e, { engine, model, prompt, runId }) => {
   // CLI (subscription) mode — spawn the logged-in `claude`/`opencode` CLI, no API key.
   if (aicfg.mode === 'cli') {
     const eng = aicfg.cliEngine || 'claude';
-    const mdl = (eng === 'glm') ? (aicfg.cliModel || 'zai-coding-plan/glm-5.2') : '';
+    // glm needs an opencode model (default the Coding-Plan one); claude's model is an
+    // OPTIONAL alias (opus/sonnet/haiku) — empty means the claude CLI's own default.
+    const mdl = (eng === 'glm') ? (aicfg.cliModel || 'zai-coding-plan/glm-5.2') : (aicfg.cliModel || '');
     runCliEngine({ engine: eng, model: mdl, prompt, rid, emit });
     return;
   }
