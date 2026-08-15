@@ -168,6 +168,21 @@ kbd { font: inherit; font-size: 10px; color: var(--muted); border: 1px solid var
 .ai-prompt-sum { cursor: pointer; font-weight: 600; font-size: 13px; padding: 4px 0; list-style: revert; }
 .ai-prompt-ta { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; padding: 6px 8px;
   border: 1px solid var(--line); border-radius: 6px; background: var(--card, #fff); color: var(--text); }
+/* AI settings — sidebar (section nav) + detail two-pane layout */
+#aiSettingsModal { width: min(680px, 94vw); max-width: 94vw; }
+.ai-settings-body { display: flex; gap: 0; align-items: stretch; min-height: 340px; max-height: 66vh; }
+.ai-settings-nav { flex: 0 0 168px; display: flex; flex-direction: column; gap: 2px; padding: 6px 8px 6px 0; border-right: 1px solid var(--line); }
+.ai-nav-item { text-align: left; border: none; background: none; color: var(--text); cursor: pointer;
+  padding: 8px 10px; border-radius: 7px; font-size: 13px; line-height: 1.3; }
+.ai-nav-item:hover { background: var(--accent-bg); }
+.ai-nav-item.on { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+.ai-settings-detail { flex: 1 1 auto; overflow-y: auto; padding: 4px 4px 4px 16px; min-width: 0; }
+.ai-panel { display: flex; flex-direction: column; gap: 8px; }
+@media (max-width: 560px){
+  .ai-settings-body { flex-direction: column; max-height: 72vh; }
+  .ai-settings-nav { flex-direction: row; flex-wrap: wrap; flex-basis: auto; border-right: none; border-bottom: 1px solid var(--line); padding: 0 0 8px; }
+  .ai-settings-detail { padding: 12px 2px 2px; }
+}
 /* Tag chips (Obsidian-style) — user-defined tags with autocomplete */
 .tags-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; flex: 1; min-width: 120px; cursor: text; padding: 2px 0; }
 .tag-chip { display: inline-flex; align-items: center; gap: 2px; padding: 1px 4px 1px 7px; border-radius: 11px;

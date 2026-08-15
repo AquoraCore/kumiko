@@ -1238,6 +1238,20 @@ async function openAiSettings(){
   xBtn.onclick=dismiss;
   head.appendChild(title); head.appendChild(xBtn); card.appendChild(head);
 
+  // SIDEBAR layout: left nav (section titles) + right detail pane. Each section appends
+  // into its panel; the nav toggles which panel is visible. The footer stays global.
+  const sbody=document.createElement('div'); sbody.className='ai-settings-body';
+  const snav=document.createElement('div'); snav.className='ai-settings-nav';
+  const sdetail=document.createElement('div'); sdetail.className='ai-settings-detail';
+  sbody.appendChild(snav); sbody.appendChild(sdetail); card.appendChild(sbody);
+  const _panels={};
+  const _panel=(key)=>{ const p=document.createElement('div'); p.className='ai-panel'; sdetail.appendChild(p); _panels[key]=p; return p; };
+  const panelProvider=_panel('provider'), panelRag=_panel('rag'), panelPrompts=_panel('prompts'), panelCollab=_panel('collab'), panelAbout=_panel('about');
+  const _showPanel=(key)=>{ Object.keys(_panels).forEach(k=>{ _panels[k].style.display=(k===key)?'':'none'; }); snav.querySelectorAll('.ai-nav-item').forEach(n=>n.classList.toggle('on', n.dataset.k===key)); };
+  [['provider',t('ผู้ให้บริการ & โมเดล')],['rag',t('อ้างอิงโน้ต (RAG)')],['prompts',t('คำสั่งปุ่มลัด')],['collab',t('Collab & บัญชี')],['about',t('เกี่ยวกับ')]].forEach(([k,label])=>{
+    const n=document.createElement('button'); n.type='button'; n.className='ai-nav-item'; n.dataset.k=k; n.textContent=label; n.onclick=()=>_showPanel(k); snav.appendChild(n);
+  });
+
   // CLI (subscription) mode is DESKTOP-only — a browser can't spawn a process. On web,
   // a stale 'cli' config falls back to 'api'.
   const isDesktop = (typeof window.KUMIKO_WEB === 'undefined');
@@ -1260,7 +1274,7 @@ async function openAiSettings(){
     b.onclick=()=>{ if (b.disabled) return; selectedMode=m; modeSeg.querySelectorAll('.ai-mode-btn').forEach((x)=>x.classList.remove('on')); b.classList.add('on'); syncApiSection(); };
     modeSeg.appendChild(b);
   });
-  card.appendChild(modeSeg);
+  panelProvider.appendChild(modeSeg);
 
   // API SECTION — visible only when selected mode === 'api'
   const apiSection=document.createElement('div'); apiSection.id='aiApiSection'; apiSection.className='ai-api-section';
@@ -1307,7 +1321,7 @@ async function openAiSettings(){
 
   const note=document.createElement('p'); note.className='ai-note'; note.textContent=t('🔒 กุญแจถูกเข้ารหัสเก็บในเครื่อง — ไม่ถูกส่งไปที่ไหนนอกจากผู้ให้บริการที่เลือก');
   apiSection.appendChild(note);
-  card.appendChild(apiSection);
+  panelProvider.appendChild(apiSection);
 
   // CLI (subscription) SECTION — desktop only. Runs the logged-in `claude` / `opencode`
   // CLI so AI uses your SUBSCRIPTION (no API key). Visible only when mode === 'cli'.
@@ -1343,26 +1357,26 @@ async function openAiSettings(){
     const syncCliEngine=()=>{ const glm = (ceSel.value==='glm'); cmRow.style.display = glm ? '' : 'none'; claudeRow.style.display = glm ? 'none' : ''; };
     ceSel.onchange=syncCliEngine; syncCliEngine();
   }
-  card.appendChild(cliSection);
+  panelProvider.appendChild(cliSection);
 
   // AMBIENT RAG toggle — per-vault on/off (default ON). Applies to CLI + API chat alike.
   const ragRow=document.createElement('div'); ragRow.className='ai-rag-row';
   const ragCk=document.createElement('input'); ragCk.type='checkbox'; ragCk.id='aiRagToggle'; ragCk.checked=vsGet('ragAmbient', true);
   const ragLab=document.createElement('label'); ragLab.setAttribute('for','aiRagToggle'); ragLab.className='ai-rag-lab'; ragLab.textContent=t('ให้ AI อ้างอิงโน้ตของฉันอัตโนมัติ');
-  ragRow.appendChild(ragCk); ragRow.appendChild(ragLab); card.appendChild(ragRow);
+  ragRow.appendChild(ragCk); ragRow.appendChild(ragLab); panelRag.appendChild(ragRow);
   const ragHint=document.createElement('p'); ragHint.className='ai-rag-hint'; ragHint.textContent=t('ใช้เนื้อหาโน้ตที่เกี่ยวข้องเป็นบริบทให้ AI โดยอัตโนมัติ (เฉพาะ vault นี้)');
-  card.appendChild(ragHint);
+  panelRag.appendChild(ragHint);
 
   // SEMANTIC search toggle — per-vault on/off (default OFF). Requires a Z.ai key +
   // network calls; the main-side pipeline gates on this flag and degrades with no key.
   const semRow=document.createElement('div'); semRow.className='ai-rag-row';
   const semCk=document.createElement('input'); semCk.type='checkbox'; semCk.id='aiSemanticToggle'; semCk.checked=vsGet('ragSemantic', false);
   const semLab=document.createElement('label'); semLab.setAttribute('for','aiSemanticToggle'); semLab.className='ai-rag-lab'; semLab.textContent=t('ใช้การค้นหาเชิงความหมาย (semantic)');
-  semRow.appendChild(semCk); semRow.appendChild(semLab); card.appendChild(semRow);
+  semRow.appendChild(semCk); semRow.appendChild(semLab); panelRag.appendChild(semRow);
   const semHint=document.createElement('p'); semHint.className='ai-rag-hint'; semHint.textContent=t('ค้นเจอโน้ตที่เกี่ยวข้องแม้ใช้คำไม่ตรง — ต้องมี API key ของ Z.ai และมีการเรียกเครือข่าย (เฉพาะ vault นี้)');
-  card.appendChild(semHint);
+  panelRag.appendChild(semHint);
   const semWarn=document.createElement('p'); semWarn.id='aiSemanticWarn'; semWarn.className='ai-sem-warn'; semWarn.textContent=t('เปิด semantic ไว้แต่ยังไม่มี API key ของ Z.ai — จะยังไม่ทำงานจนกว่าจะใส่คีย์ที่โหมด API key ด้านบน');
-  card.appendChild(semWarn);
+  panelRag.appendChild(semWarn);
   function refreshSemWarn(){ semWarn.hidden = !(semCk.checked && cfg.hasKey && !cfg.hasKey.zai); }
   semCk.onchange=refreshSemWarn;
   refreshSemWarn();
@@ -1382,7 +1396,7 @@ async function openAiSettings(){
   const ptReset=document.createElement('button'); ptReset.type='button'; ptReset.className='ghost sm'; ptReset.textContent=t('คืนค่าคำสั่งเริ่มต้น');
   ptReset.onclick=()=>{ Object.keys(DEFAULT_PROMPTS).forEach(k=>{ ptFields[k].value=DEFAULT_PROMPTS[k]; }); };
   ptDetails.appendChild(ptReset);
-  card.appendChild(ptDetails);
+  panelPrompts.appendChild(ptDetails);
 
   // PROFILE section (phase 7b-1) — local name + color for collab identity.
   // Sits above the collab toggle. Selection is held in selectedColor and only
@@ -1392,48 +1406,48 @@ async function openAiSettings(){
   let selectedColor = localStorage.getItem('collabColor') || COLLAB_PALETTE[0];
   const profHeadRow=document.createElement('div'); profHeadRow.className='ai-rag-row';
   const profHead=document.createElement('span'); profHead.className='ai-rag-lab'; profHead.textContent=t('โปรไฟล์ของฉัน (สำหรับ collab)');
-  profHeadRow.appendChild(profHead); card.appendChild(profHeadRow);
+  profHeadRow.appendChild(profHead); panelCollab.appendChild(profHeadRow);
   const profNameRow=document.createElement('div'); profNameRow.className='ai-rag-row';
   const profNameLab=document.createElement('label'); profNameLab.setAttribute('for','aiProfileName'); profNameLab.className='ai-rag-lab'; profNameLab.textContent=t('ชื่อที่แสดง');
   const profNameInput=document.createElement('input'); profNameInput.type='text'; profNameInput.id='aiProfileName'; profNameInput.className='ai-collab-relay'; profNameInput.value=localStorage.getItem('collabName') || ''; profNameInput.placeholder=t('ชื่อที่จะแสดงตอนแก้ร่วมกัน');
-  profNameRow.appendChild(profNameLab); profNameRow.appendChild(profNameInput); card.appendChild(profNameRow);
+  profNameRow.appendChild(profNameLab); profNameRow.appendChild(profNameInput); panelCollab.appendChild(profNameRow);
   const profColorRow=document.createElement('div'); profColorRow.id='aiProfileColors'; profColorRow.className='profile-sw-row';
   COLLAB_PALETTE.forEach((c)=>{
     const sw=document.createElement('span'); sw.className='profile-sw'+(c===selectedColor?' sel':''); sw.style.background=c; sw.dataset.color=c;
     sw.onclick=()=>{ selectedColor=c; profColorRow.querySelectorAll('.profile-sw').forEach((x)=>x.classList.toggle('sel', x.dataset.color===c)); };
     profColorRow.appendChild(sw);
   });
-  card.appendChild(profColorRow);
+  panelCollab.appendChild(profColorRow);
   const profHint=document.createElement('p'); profHint.className='ai-rag-hint'; profHint.textContent=t('ใช้แสดงชื่อ/สีของคุณให้คนอื่นเห็นตอนแก้โน้ตร่วมกัน (เก็บในเครื่องนี้)');
-  card.appendChild(profHint);
+  panelCollab.appendChild(profHint);
 
   // COLLAB toggle — per-vault opt-in (default OFF). Real-time co-editing via a
   // relay; experimental. Reads the same vsGet('collab') the editor gates on.
   const collabHeadRow=document.createElement('div'); collabHeadRow.className='ai-rag-row';
   const collabHead=document.createElement('span'); collabHead.className='ai-rag-lab'; collabHead.textContent=t('การทำงานร่วมกัน (ทดลอง)');
-  collabHeadRow.appendChild(collabHead); card.appendChild(collabHeadRow);
+  collabHeadRow.appendChild(collabHead); panelCollab.appendChild(collabHeadRow);
   const collabRow=document.createElement('div'); collabRow.className='ai-rag-row';
   const collabCk=document.createElement('input'); collabCk.type='checkbox'; collabCk.id='aiCollabToggle'; collabCk.checked=vsGet('collab', false);
   const collabLab=document.createElement('label'); collabLab.setAttribute('for','aiCollabToggle'); collabLab.className='ai-rag-lab'; collabLab.textContent=t('เปิดการแก้ไขร่วมกันแบบเรียลไทม์ (collab)');
-  collabRow.appendChild(collabCk); collabRow.appendChild(collabLab); card.appendChild(collabRow);
+  collabRow.appendChild(collabCk); collabRow.appendChild(collabLab); panelCollab.appendChild(collabRow);
   const collabHint=document.createElement('p'); collabHint.className='ai-rag-hint'; collabHint.textContent=t('แก้โน้ตพร้อมกันหลายเครื่องผ่านเซิร์ฟเวอร์ relay — ทดลอง, เฉพาะ vault นี้ (ต้องรีโหลดหลังเปลี่ยน)');
-  card.appendChild(collabHint);
+  panelCollab.appendChild(collabHint);
   // relay URL — app-wide (localStorage). Default matches collabRelayUrl()'s fallback.
   const relayRow=document.createElement('div'); relayRow.className='ai-rag-row';
   const relayLab=document.createElement('label'); relayLab.setAttribute('for','aiCollabRelay'); relayLab.className='ai-rag-lab'; relayLab.textContent=t('ที่อยู่ relay');
   const relayInput=document.createElement('input'); relayInput.type='text'; relayInput.id='aiCollabRelay'; relayInput.className='ai-collab-relay'; relayInput.placeholder='ws://127.0.0.1:1234'; relayInput.value=localStorage.getItem('collabRelay') || 'ws://127.0.0.1:1234';
-  relayRow.appendChild(relayLab); relayRow.appendChild(relayInput); card.appendChild(relayRow);
+  relayRow.appendChild(relayLab); relayRow.appendChild(relayInput); panelCollab.appendChild(relayRow);
 
   // ACCOUNT area (phase 7b-4) — OPTIONAL login/signup for authed collab relays.
   // Token stored encrypted via safeStorage; only used to build the WS url. Login is
   // OPTIONAL — without it the app works fully offline (provider connects with no token).
   const authHeadRow=document.createElement('div'); authHeadRow.className='ai-rag-row';
   const authHead=document.createElement('span'); authHead.className='ai-rag-lab'; authHead.textContent=t('บัญชี (ไม่บังคับ — สำหรับ collab)');
-  authHeadRow.appendChild(authHead); card.appendChild(authHeadRow);
+  authHeadRow.appendChild(authHead); panelCollab.appendChild(authHeadRow);
   const authArea=document.createElement('div'); authArea.id='aiAuthArea'; authArea.className='ai-auth-area';
   const authInner=document.createElement('div'); authInner.id='aiAuthInner';
   const authMsg=document.createElement('p'); authMsg.id='aiAuthMsg'; authMsg.className='ai-auth-msg';
-  authArea.appendChild(authInner); authArea.appendChild(authMsg); card.appendChild(authArea);
+  authArea.appendChild(authInner); authArea.appendChild(authMsg); panelCollab.appendChild(authArea);
   function setAuthMsg(s){ authMsg.textContent = s || ''; }
   async function renderAuthArea(){
     let acc = null;
@@ -1564,8 +1578,9 @@ async function openAiSettings(){
   const _a=(window.KUMIKO_ASSETV && window.KUMIKO_ASSETV.indexOf('__')!==0) ? window.KUMIKO_ASSETV : 'local';
   const _v=(window.KUMIKO_VERSION && window.KUMIKO_VERSION.indexOf('__')!==0) ? window.KUMIKO_VERSION : '';
   ver.textContent=(_v?'v'+_v+' · ':'')+t('รุ่น')+' '+_b+' · assets '+_a;
-  card.appendChild(ver);
+  panelAbout.appendChild(ver);
 
+  _showPanel('provider');   // open the first section by default
   ov.appendChild(card); ov.hidden=false;
 }
 
