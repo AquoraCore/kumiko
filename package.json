@@ -14,7 +14,8 @@
     "predeploy": "vitest run",
     "deploy": "bash scripts/deploy-ally.sh",
     "relay": "node server/relay.js",
-    "server": "node server/index.js"
+    "server": "node server/index.js",
+    "build:crepe": "esbuild build/crepe-entry.js --bundle --format=iife --loader:.ttf=dataurl --loader:.woff=dataurl --loader:.woff2=dataurl --loader:.eot=dataurl --loader:.svg=dataurl --outfile=renderer/vendor/crepe.bundle.js"
   },
   "author": "",
   "license": "MIT",

@@ -126,9 +126,76 @@ const wikiLink = $prose(() => new Plugin({
   },
 }));
 
+// Callout colour — a blockquote whose first line starts with `[!#hex]` is a coloured
+// callout. Decoration-only (like wikiLink): the marker is literal markdown text, so it
+// round-trips for free; we just (a) paint the blockquote via a --callout CSS var + class
+// and (b) hide the marker span from view. window.__calloutSetColor(hex) inserts/updates
+// the marker on the blockquote at the cursor (''/null clears it).
+// `{!#hex}` (curly braces — NOT markdown-special, so the serializer won't backslash-escape
+// them the way it would `[`). Keeps raw markdown clean: `> {!#f59e0b} text`.
+const CALLOUT_RE = /^\{!(#[0-9a-fA-F]{3,8})\} ?/;
+function calloutMarkerLen(text){ const m = CALLOUT_RE.exec(text || ''); return m ? m[0].length : 0; }
+function calloutColorOf(text){ const m = CALLOUT_RE.exec(text || ''); return m ? m[1] : null; }
+
+const calloutColor = $prose(() => new Plugin({
+  key: new PluginKey('md-callout-color'),
+  props: {
+    decorations(state) {
+      const decos = [];
+      state.doc.descendants((node, pos) => {
+        if (node.type.name !== 'blockquote') return;
+        const first = node.firstChild;
+        if (!first || !first.isTextblock) return;
+        const color = calloutColorOf(first.textContent);
+        if (!color) return;
+        decos.push(Decoration.node(pos, pos + node.nodeSize, { class: 'callout-colored', style: '--callout:' + color }));
+        const from = pos + 2;   // inline content start of the first paragraph (bq open + para open)
+        const to = from + calloutMarkerLen(first.textContent);
+        decos.push(Decoration.inline(from, to, { class: 'callout-marker-hidden' }));
+      });
+      return DecorationSet.create(state.doc, decos);
+    },
+  },
+  view(editorView) {
+    const findBq = (stateSel) => {
+      const $from = stateSel.$from;
+      for (let i = $from.depth; i >= 0; i--) {
+        const n = $from.node(i);
+        if (n.type.name === 'blockquote') return { node: n, pos: $from.before(i) };
+      }
+      return null;
+    };
+    window.__calloutSetColor = (color) => {
+      const { state, dispatch } = editorView;
+      const hit = findBq(state.selection);
+      if (!hit) return false;
+      const first = hit.node.firstChild;
+      if (!first || !first.isTextblock) return false;
+      const paraStart = hit.pos + 2;
+      const len = calloutMarkerLen(first.textContent);
+      const marker = color ? ('{!' + color + '} ') : '';
+      const tr = state.tr;
+      if (len) tr.replaceWith(paraStart, paraStart + len, marker ? state.schema.text(marker) : []);
+      else if (marker) tr.insert(paraStart, state.schema.text(marker));
+      else return false;
+      dispatch(tr);
+      editorView.focus();
+      return true;
+    };
+    window.__calloutCurrent = () => {
+      const hit = findBq(editorView.state.selection);
+      if (!hit) return { inCallout: false, color: null };
+      const first = hit.node.firstChild;
+      return { inCallout: true, color: first ? calloutColorOf(first.textContent) : null };
+    };
+    return { destroy() { window.__calloutSetColor = null; window.__calloutCurrent = null; } };
+  },
+}));
+
 window.Crepe = Crepe;
 window.MDHeadingFold = headingFold;
 window.MDWikiLink = wikiLink;
+window.MDCalloutColor = calloutColor;
 window.Y = Y;                                   // the ONE yjs instance for the whole app
 window.WebsocketProvider = WebsocketProvider;   // client provider (connects to the relay)
 window.MilkdownCollab = { collab, collabServiceCtx };   // the Milkdown collab plugin + its service ctx

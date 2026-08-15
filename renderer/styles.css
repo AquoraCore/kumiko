@@ -148,6 +148,21 @@ kbd { font: inherit; font-size: 10px; color: var(--muted); border: 1px solid var
 /* Callout box — filled box with a dark (accent) left bar */
 .milkdown blockquote { background: var(--accent-bg); border-radius: 8px; margin: 10px 0; color: var(--text); }
 .milkdown blockquote::before { background-color: var(--accent) !important; }
+/* Coloured callout — a `[!#hex]` marker sets --callout; tint the box + recolour the bar.
+   The marker text itself is decorated away (callout-marker-hidden). */
+.milkdown blockquote.callout-colored { background: color-mix(in srgb, var(--callout) 12%, transparent); }
+.milkdown blockquote.callout-colored::before { background-color: var(--callout) !important; }
+.callout-marker-hidden { display: none; }
+/* Floating colour palette shown when the caret is inside a callout */
+.callout-palette { position: fixed; z-index: 60; display: flex; gap: 4px; padding: 4px; border-radius: 8px;
+  background: var(--card, #fff); border: 1px solid var(--line); box-shadow: 0 4px 14px rgba(0,0,0,.14); }
+.callout-sw { width: 18px; height: 18px; border-radius: 50%; border: 1px solid rgba(0,0,0,.15); cursor: pointer; padding: 0; line-height: 1; }
+.callout-sw.active { outline: 2px solid var(--text); outline-offset: 1px; }
+.callout-sw.none { background: transparent; color: var(--muted); font-size: 13px; display: flex; align-items: center; justify-content: center; }
+/* AI settings — thinking-mode row */
+.ai-think-wrap { display: flex; align-items: center; gap: 8px; }
+.ai-think-hint { color: var(--muted); font-size: 12px; }
+.ai-think-row.disabled { opacity: .5; }
 
 /* Toggle = fold a heading's section by its level (larger triangle) */
 .md-fold-tri { display: inline-block; width: 24px; margin-left: -30px; margin-right: 6px; text-align: center; cursor: pointer; color: var(--muted); user-select: none; font-size: 19px; line-height: 1; vertical-align: middle; }

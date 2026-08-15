@@ -146336,9 +146336,76 @@ ${reason}`);
       }
     }
   }));
+  var CALLOUT_RE = /^\{!(#[0-9a-fA-F]{3,8})\} ?/;
+  function calloutMarkerLen(text13) {
+    const m = CALLOUT_RE.exec(text13 || "");
+    return m ? m[0].length : 0;
+  }
+  function calloutColorOf(text13) {
+    const m = CALLOUT_RE.exec(text13 || "");
+    return m ? m[1] : null;
+  }
+  var calloutColor = $prose(() => new Plugin({
+    key: new PluginKey("md-callout-color"),
+    props: {
+      decorations(state) {
+        const decos = [];
+        state.doc.descendants((node2, pos) => {
+          if (node2.type.name !== "blockquote") return;
+          const first = node2.firstChild;
+          if (!first || !first.isTextblock) return;
+          const color2 = calloutColorOf(first.textContent);
+          if (!color2) return;
+          decos.push(Decoration2.node(pos, pos + node2.nodeSize, { class: "callout-colored", style: "--callout:" + color2 }));
+          const from5 = pos + 2;
+          const to = from5 + calloutMarkerLen(first.textContent);
+          decos.push(Decoration2.inline(from5, to, { class: "callout-marker-hidden" }));
+        });
+        return DecorationSet.create(state.doc, decos);
+      }
+    },
+    view(editorView2) {
+      const findBq = (stateSel) => {
+        const $from = stateSel.$from;
+        for (let i4 = $from.depth; i4 >= 0; i4--) {
+          const n = $from.node(i4);
+          if (n.type.name === "blockquote") return { node: n, pos: $from.before(i4) };
+        }
+        return null;
+      };
+      window.__calloutSetColor = (color2) => {
+        const { state, dispatch } = editorView2;
+        const hit = findBq(state.selection);
+        if (!hit) return false;
+        const first = hit.node.firstChild;
+        if (!first || !first.isTextblock) return false;
+        const paraStart = hit.pos + 2;
+        const len2 = calloutMarkerLen(first.textContent);
+        const marker = color2 ? "{!" + color2 + "} " : "";
+        const tr = state.tr;
+        if (len2) tr.replaceWith(paraStart, paraStart + len2, marker ? state.schema.text(marker) : []);
+        else if (marker) tr.insert(paraStart, state.schema.text(marker));
+        else return false;
+        dispatch(tr);
+        editorView2.focus();
+        return true;
+      };
+      window.__calloutCurrent = () => {
+        const hit = findBq(editorView2.state.selection);
+        if (!hit) return { inCallout: false, color: null };
+        const first = hit.node.firstChild;
+        return { inCallout: true, color: first ? calloutColorOf(first.textContent) : null };
+      };
+      return { destroy() {
+        window.__calloutSetColor = null;
+        window.__calloutCurrent = null;
+      } };
+    }
+  }));
   window.Crepe = Crepe;
   window.MDHeadingFold = headingFold;
   window.MDWikiLink = wikiLink;
+  window.MDCalloutColor = calloutColor;
   window.Y = yjs_exports;
   window.WebsocketProvider = WebsocketProvider;
   window.MilkdownCollab = { collab, collabServiceCtx };

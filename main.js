@@ -4,7 +4,7 @@ const fs = require('fs');
 const chokidar = require('chokidar');
 const { wikiTargets, linksTo, rewriteLinkTargets } = require('./core/wikilinks');
 const { safeRel, baseName, vaultName } = require('./core/pathutil');
-const { aiConfigView, setConfigKey, buildApiRequest, parseSseDelta, buildEmbedRequest, parseEmbedResponse } = require('./core/ai');
+const { aiConfigView, setConfigKey, buildApiRequest, parseSseDelta, buildEmbedRequest, parseEmbedResponse, resolveThinking } = require('./core/ai');
 const CoreRag = require('./core/rag');
 
 // In dev, notes live beside the source. When packaged, __dirname is inside the
@@ -57,6 +57,7 @@ ipcMain.handle('ai:setConfig', (e, patch) => {
     if (patch.mode) cfg.mode = patch.mode;
     if (patch.provider) cfg.provider = patch.provider;
     if ('model' in patch) cfg.model = patch.model;
+    if ('thinking' in patch) cfg.thinking = patch.thinking;   // true/false/null (provider default)
   }
   writeAiConfig(cfg);
   return aiConfigView(cfg);
@@ -384,7 +385,7 @@ app.on('window-all-closed', () => {
 // Pure request/parse logic lives in core/ai.js; only the fetch+stream plumbing
 // is here. engineProcs[rid] holds { kill() -> ctrl.abort() } so SIGINT/SIGKILL
 // calls from engine:stop become a no-op abort on the AbortController.
-async function runApiProvider({ provider, model, prompt, key, rid, emit }){
+async function runApiProvider({ provider, model, prompt, key, rid, emit, thinking }){
   const ctrl = new AbortController();
   engineProcs.set(rid, { kill(){ try { ctrl.abort(); } catch (_) {} } });
   const killer = setTimeout(() => {
@@ -399,7 +400,7 @@ async function runApiProvider({ provider, model, prompt, key, rid, emit }){
     const delta = parseSseDelta(provider, rest);
     if (delta) emit(delta);
   };
-  const built = buildApiRequest(provider, model, prompt, key);
+  const built = buildApiRequest(provider, model, prompt, key, { thinking: resolveThinking(provider, model, thinking) });
   if (!built) { finish(-1); return; }
   try {
     const res = await fetch(built.url, { method: 'POST', headers: built.headers, body: JSON.stringify(built.body), signal: ctrl.signal });
@@ -464,7 +465,7 @@ ipcMain.handle('engine:run', (e, { engine, model, prompt, runId }) => {
   const aicfg = readAiConfig();
   const key = getDecryptedKey(aicfg.provider);
   if (!key) { emit('\r\n[ยังไม่ได้ตั้งค่า API key — ไปที่ ⚙ ตั้งค่า AI]\r\n'); win.webContents.send('engine:done', { runId: rid, code: -1 }); return; }
-  runApiProvider({ provider: aicfg.provider, model: aicfg.model || model, prompt, key, rid, emit });
+  runApiProvider({ provider: aicfg.provider, model: aicfg.model || model, prompt, key, rid, emit, thinking: aicfg.thinking });
 });
 
 // ---- Stop a running engine for ONE runId (other concurrent runs untouched) ----

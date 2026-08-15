@@ -97,7 +97,7 @@ describe('managed AI chat proxy', () => {
       });
       expect(r.status).toBe(200);
       expect(await r.text()).toBe('ok');
-      expect(seen).toEqual({ provider: 'zai', key: 'sk-client', model: 'glm-5.2' });
+      expect(seen).toEqual({ provider: 'zai', key: 'sk-client', model: 'glm-5.2', thinking: null });
     } finally {
       await s.close();
     }

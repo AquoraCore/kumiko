@@ -71,6 +71,44 @@ function installBlockHandleCentering(root){
   try { new MutationObserver(attach).observe(root, { childList: true, subtree: true }); attach(); } catch (_) {}
 }
 if (editorHost) installBlockHandleCentering(editorHost);
+
+// Callout colour palette — a floating swatch bar that appears when the caret is inside a
+// blockquote (callout). Swatches call the bundle's window.__calloutSetColor(hex), which
+// writes a `[!#hex]` marker into the callout's first line (persists in markdown); '' clears.
+function installCalloutPalette(root){
+  const COLORS = ['#ef4444','#f59e0b','#22c55e','#3b82f6','#a855f7','#94a3b8'];
+  const bar = document.createElement('div'); bar.className = 'callout-palette'; bar.hidden = true;
+  COLORS.forEach((c) => {
+    const b = document.createElement('button'); b.type='button'; b.className='callout-sw'; b.style.background=c; b.dataset.c=c; b.title=c;
+    b.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); if (window.__calloutSetColor) window.__calloutSetColor(c); requestAnimationFrame(reposition); });
+    bar.appendChild(b);
+  });
+  const clr = document.createElement('button'); clr.type='button'; clr.className='callout-sw none'; clr.title=t('ไม่มีสี'); clr.textContent='×';
+  clr.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); if (window.__calloutSetColor) window.__calloutSetColor(''); bar.hidden = true; });
+  bar.appendChild(clr);
+  document.body.appendChild(bar);
+  function currentBq(){
+    const sel = window.getSelection && window.getSelection();
+    if (!sel || !sel.anchorNode) return null;
+    const el = sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement;
+    const bq = el && el.closest && el.closest('blockquote');
+    return (bq && root.contains(bq)) ? bq : null;
+  }
+  function reposition(){
+    const bq = currentBq();
+    const info = (bq && window.__calloutCurrent) ? window.__calloutCurrent() : { inCallout: false, color: null };
+    if (!bq || !info.inCallout){ bar.hidden = true; return; }
+    bar.hidden = false;
+    const r = bq.getBoundingClientRect();
+    bar.style.left = Math.round(r.right - bar.offsetWidth - 6) + 'px';
+    bar.style.top = Math.round(r.top + 6) + 'px';
+    bar.querySelectorAll('.callout-sw').forEach((s) => s.classList.toggle('active', !!(info.color && s.dataset.c && s.dataset.c.toLowerCase() === String(info.color).toLowerCase())));
+  }
+  document.addEventListener('selectionchange', () => requestAnimationFrame(reposition));
+  root.addEventListener('keyup', () => requestAnimationFrame(reposition));
+  window.addEventListener('scroll', () => requestAnimationFrame(reposition), true);
+}
+if (editorHost) installCalloutPalette(editorHost);
 const noteTitleEl = document.getElementById('noteTitle');   // H0: read-only page title = filename
 // The title is NOT editable inline; clicking it opens the rename dialog (renaming the file is the
 // only way to change the title — duplicates are already forbidden and [[links]] auto-update on rename).
@@ -179,6 +217,7 @@ async function loadEditor(bodyMarkdown){
   crepe = new window.Crepe({ root: editorHost, defaultValue: collabOn ? '' : stripLeadingH1(bodyMarkdown), features: { [feat]: false } });
   if (window.MDHeadingFold) { try { crepe.editor.use(window.MDHeadingFold); } catch (_) {} }
   if (window.MDWikiLink) { try { crepe.editor.use(window.MDWikiLink); } catch (_) {} }
+  if (window.MDCalloutColor) { try { crepe.editor.use(window.MDCalloutColor); } catch (_) {} }
   if (collabOn) { try { crepe.editor.use(window.MilkdownCollab.collab); } catch (_) {} }
   await crepe.create();
   if (collabOn) {
@@ -1167,6 +1206,26 @@ async function openAiSettings(){
   const mSel=document.createElement('select'); mSel.id='aiModelSel'; mSel.className='ai-sel';
   mRow.appendChild(mLab); mRow.appendChild(mSel); apiSection.appendChild(mRow);
 
+  // Thinking / reasoning mode — enabled only for models that actually support it
+  // (per the AICaps capability table). Off for others.
+  const tRow=document.createElement('div'); tRow.className='settings-field ai-think-row';
+  const tLab=document.createElement('label'); tLab.textContent=t('โหมดคิด (thinking)');
+  const tWrap=document.createElement('div'); tWrap.className='ai-think-wrap';
+  const tChk=document.createElement('input'); tChk.type='checkbox'; tChk.id='aiThinkToggle';
+  const tHint=document.createElement('span'); tHint.className='ai-think-hint';
+  tWrap.appendChild(tChk); tWrap.appendChild(tHint); tRow.appendChild(tLab); tRow.appendChild(tWrap); apiSection.appendChild(tRow);
+  function syncThinking(){
+    const caps = window.AICaps;
+    const supported = caps ? caps.modelSupportsThinking(pSel.value, mSel.value) : false;
+    tChk.disabled = !supported;
+    tRow.classList.toggle('disabled', !supported);
+    if (!supported){ tChk.checked = false; tHint.textContent = t('โมเดลนี้ไม่รองรับ'); return; }
+    const userChoice = (cfg.provider === pSel.value && cfg.model === mSel.value) ? cfg.thinking : null;
+    tChk.checked = caps.resolveThinking(pSel.value, mSel.value, userChoice);
+    tHint.textContent = t('ค่าเริ่มต้น: ') + (caps.thinkingDefault(pSel.value) ? t('เปิด') : t('ปิด'));
+  }
+  mSel.onchange = syncThinking;
+
   const note=document.createElement('p'); note.className='ai-note'; note.textContent=t('🔒 กุญแจถูกเข้ารหัสเก็บในเครื่อง — ไม่ถูกส่งไปที่ไหนนอกจากผู้ให้บริการที่เลือก');
   apiSection.appendChild(note);
   card.appendChild(apiSection);
@@ -1300,11 +1359,14 @@ async function openAiSettings(){
   renderAuthArea();
 
   function rebuildModels(){
-    const list=AI_MODELS[pSel.value]||[];
+    const caps = window.AICaps;
+    const list = caps ? caps.modelsForProvider(pSel.value) : (AI_MODELS[pSel.value]||[]).map((id)=>({ id, label:id, thinking:false }));
     mSel.innerHTML='';
-    list.forEach((id)=>{ const o=document.createElement('option'); o.value=id; o.textContent=id; mSel.appendChild(o); });
-    const want=(pSel.value===cfg.provider && list.includes(cfg.model)) ? cfg.model : (list[0]||'');
+    list.forEach((m)=>{ const o=document.createElement('option'); o.value=m.id; o.textContent=m.label + (m.thinking?'  🧠':''); mSel.appendChild(o); });
+    const ids = list.map((m)=>m.id);
+    const want=(pSel.value===cfg.provider && ids.includes(cfg.model)) ? cfg.model : (ids[0]||'');
     if (want) mSel.value=want;
+    syncThinking();
   }
   function syncKeyPlaceholder(){
     const set=!!(cfg.hasKey && cfg.hasKey[pSel.value]);
@@ -1328,7 +1390,7 @@ async function openAiSettings(){
   const cancelBtn=document.createElement('button'); cancelBtn.type='button'; cancelBtn.className='ghost'; cancelBtn.textContent=t('ยกเลิก'); cancelBtn.onclick=dismiss;
   const saveBtn=document.createElement('button'); saveBtn.type='button'; saveBtn.id='aiSettingsSave'; saveBtn.className='solid'; saveBtn.textContent=t('บันทึก');
   saveBtn.onclick=async ()=>{
-    await window.api.aiSetConfig({ mode:selectedMode, provider:pSel.value, model:mSel.value });
+    await window.api.aiSetConfig({ mode:selectedMode, provider:pSel.value, model:mSel.value, thinking: (tChk.disabled ? null : tChk.checked) });
     const kv=kInput.value;
     if (kv && kv.length) await window.api.aiSetKey(pSel.value, kv);
     vsSet('ragAmbient', document.getElementById('aiRagToggle').checked);

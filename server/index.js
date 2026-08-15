@@ -77,9 +77,9 @@ async function startServer(opts = {}) {
   // tests run without a real LLM/key. Yields text deltas; returns early if unset.
   // creds = { provider, key, model } (client-provided wins over managed defaults).
   const streamChat = opts.streamChat || (async function* (prompt, creds) {
-    const { provider, key, model } = creds || {};
+    const { provider, key, model, thinking } = creds || {};
     if (!provider || !key) return;
-    const req = aiCore.buildApiRequest(provider, model, prompt, key);
+    const req = aiCore.buildApiRequest(provider, model, prompt, key, { thinking: aiCore.resolveThinking(provider, model, thinking) });
     if (!req) return;
     const res = await fetch(req.url, { method: 'POST', headers: req.headers, body: JSON.stringify(req.body) });
     if (!res.ok || !res.body) return;
@@ -390,10 +390,11 @@ async function startServer(opts = {}) {
     const provider = b.provider || aiProvider;
     const key = b.key || aiKey;
     const model = b.model || aiModel;
+    const thinking = (b.thinking === true || b.thinking === false) ? b.thinking : null;   // client's choice; null = provider default
     if (!opts.streamChat && (!provider || !key)) return res.status(501).json({ error: 'no AI configured' });
     res.setHeader('content-type', 'text/plain; charset=utf-8');
     try {
-      for await (const delta of streamChat(prompt, { provider, key, model })) res.write(delta);
+      for await (const delta of streamChat(prompt, { provider, key, model, thinking })) res.write(delta);
       res.end();
     } catch (_) { try { res.end(); } catch (__) {} }
   });

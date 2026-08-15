@@ -317,6 +317,7 @@ function createWebApi(opts) {
       mode: c.mode || 'api',
       provider: c.provider || 'zai',
       model: c.model || '',
+      thinking: (c.thinking === true || c.thinking === false) ? c.thinking : null,
       hasKey: { anthropic: !!keys.anthropic, zai: !!keys.zai },
     });
   }
@@ -325,6 +326,7 @@ function createWebApi(opts) {
     if (p.mode != null) c.mode = p.mode;
     if (p.provider != null) c.provider = p.provider;
     if (p.model != null) c.model = p.model;
+    if ('thinking' in p) c.thinking = p.thinking;   // true/false/null (provider default)
     _writeAiCfg(c); return aiGetConfig();
   }
   function aiSetKey(provider, key) {
@@ -390,8 +392,9 @@ function createWebApi(opts) {
     const prompt = (payload && payload.prompt) || '';
     const c = _readAiCfg(); const keys = c.keys || {};
     const provider = c.provider || 'zai'; const key = keys[provider]; const model = c.model || '';
+    const thinking = (c.thinking === true || c.thinking === false) ? c.thinking : null;
     const body = { prompt };
-    if (key) { body.provider = provider; body.key = key; if (model) body.model = model; }
+    if (key) { body.provider = provider; body.key = key; if (model) body.model = model; if (thinking !== null) body.thinking = thinking; }
     const ctrl = new AbortController();
     if (runId != null) _aborters.set(runId, ctrl);
     try {

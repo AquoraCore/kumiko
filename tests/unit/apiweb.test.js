@@ -397,7 +397,7 @@ describe('web api shim', () => {
       });
       expect(ok).toBe(true);
       expect(parts.join('')).toBe('ok');
-      expect(seen).toEqual({ provider: 'zai', key: 'sk-user', model: 'glm-5.2' });
+      expect(seen).toEqual({ provider: 'zai', key: 'sk-user', model: 'glm-5.2', thinking: null });
     } finally {
       await s.close();
     }

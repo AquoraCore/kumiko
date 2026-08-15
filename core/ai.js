@@ -20,7 +20,9 @@ function aiConfigView(cfg){
   const model = (typeof c.model === 'string') ? c.model : '';
   const keys = (c.keys && typeof c.keys === 'object') ? c.keys : {};
   const has = (p) => !!(keys[p] && typeof keys[p] === 'string' && keys[p].length > 0);
-  return { mode, provider, model, hasKey: { anthropic: has('anthropic'), zai: has('zai') } };
+  // thinking: true/false = explicit user choice; null = "use the provider/model default".
+  const thinking = (c.thinking === true || c.thinking === false) ? c.thinking : null;
+  return { mode, provider, model, thinking, hasKey: { anthropic: has('anthropic'), zai: has('zai') } };
 }
 
 // Return a NEW config with keys[provider] set to `encrypted`, or DELETED when
@@ -40,28 +42,43 @@ function setConfigKey(cfg, provider, encrypted){
 // streaming call. `body` is a plain JS object; the caller JSON.stringifies.
 // Unknown provider -> null (mirrors buildEngineInvocation). Kept pure so main.js
 // stays free of network I/O and this is unit-testable in isolation.
-function buildApiRequest(provider, model, prompt, key){
-  if (provider === 'anthropic') return {
-    url: 'https://api.anthropic.com/v1/messages',
-    headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-    body: { model, max_tokens: 4096, stream: true, messages: [{ role: 'user', content: prompt }] },
-  };
-  // THINKING MODE (GLM-5 reasoning) is ON by default (omit the `thinking` field). To turn it
-  // OFF for direct answers, set `thinking: { type: 'disabled' }` in the body below. Kept ON so
-  // the model's reasoning streams — parseSseDelta surfaces `reasoning_content` too, else the
-  // thinking phase would look blank until the final `content` answer arrives.
-  if (provider === 'zai') return {
-    url: 'https://api.z.ai/api/paas/v4/chat/completions',
-    headers: { 'content-type': 'application/json', 'authorization': 'Bearer ' + key },
-    body: { model, stream: true, messages: [{ role: 'user', content: prompt }] },
-  };
+// opts.thinking (bool) — turn the model's thinking/reasoning mode on/off. It's mapped to
+// each provider's own shape: Anthropic extended thinking is opt-IN (add an `enabled` block +
+// room in max_tokens); GLM reasoning is ON by default, so we only add a `disabled` block when
+// the user turns it OFF. A missing/undefined thinking leaves each provider at its default.
+function buildApiRequest(provider, model, prompt, key, opts){
+  const thinking = (opts && typeof opts.thinking === 'boolean') ? opts.thinking : null;
+  if (provider === 'anthropic') {
+    const body = { model, max_tokens: 4096, stream: true, messages: [{ role: 'user', content: prompt }] };
+    if (thinking === true) { body.thinking = { type: 'enabled', budget_tokens: 2048 }; body.max_tokens = 8192; }  // max_tokens MUST exceed budget
+    return {
+      url: 'https://api.anthropic.com/v1/messages',
+      headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+      body,
+    };
+  }
+  // GLM-5 reasoning streams `reasoning_content` (surfaced by parseSseDelta) BEFORE the final
+  // `content`. ON by default; `thinking:{type:'disabled'}` forces a direct answer.
+  if (provider === 'zai') {
+    const body = { model, stream: true, messages: [{ role: 'user', content: prompt }] };
+    if (thinking === false) body.thinking = { type: 'disabled' };
+    return {
+      url: 'https://api.z.ai/api/paas/v4/chat/completions',
+      headers: { 'content-type': 'application/json', 'authorization': 'Bearer ' + key },
+      body,
+    };
+  }
   // Z.ai CODING PLAN (subscription) — same OpenAI-compatible shape as zai, but the
   // coding endpoint (a pay-as-you-go zai key hits /paas/v4 and 1113s on no balance).
-  if (provider === 'zai-coding') return {
-    url: 'https://api.z.ai/api/coding/paas/v4/chat/completions',
-    headers: { 'content-type': 'application/json', 'authorization': 'Bearer ' + key },
-    body: { model, stream: true, messages: [{ role: 'user', content: prompt }] },
-  };
+  if (provider === 'zai-coding') {
+    const body = { model, stream: true, messages: [{ role: 'user', content: prompt }] };
+    if (thinking === false) body.thinking = { type: 'disabled' };
+    return {
+      url: 'https://api.z.ai/api/coding/paas/v4/chat/completions',
+      headers: { 'content-type': 'application/json', 'authorization': 'Bearer ' + key },
+      body,
+    };
+  }
   return null;
 }
 
@@ -74,7 +91,10 @@ function parseSseDelta(provider, dataStr){
   try { obj = JSON.parse(s); } catch (_) { return ''; }
   if (!obj || typeof obj !== 'object') return '';
   if (provider === 'anthropic') {
-    if (obj.type === 'content_block_delta' && obj.delta && obj.delta.type === 'text_delta') return obj.delta.text || '';
+    if (obj.type === 'content_block_delta' && obj.delta) {
+      if (obj.delta.type === 'text_delta') return obj.delta.text || '';
+      if (obj.delta.type === 'thinking_delta') return obj.delta.thinking || '';   // extended-thinking stream
+    }
     return '';
   }
   // zai / openai-compatible. GLM-5 reasoning models stream `reasoning_content` (the thinking)
@@ -117,4 +137,6 @@ module.exports = {
   buildEngineInvocation, aiConfigView, setConfigKey,
   buildApiRequest, parseSseDelta,
   buildEmbedRequest, parseEmbedResponse,
+  // capability table (models + thinking support) — re-exported for convenience
+  ...require('./aicaps'),
 };
