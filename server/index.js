@@ -428,13 +428,24 @@ async function startServer(opts = {}) {
   const server = http.createServer(app);
   const wss = new WebSocketServer({ noServer: true });
 
-  // JWT-gated WS upgrade: a valid token in ?token= is required to join any room.
+  // JWT-gated WS upgrade: a valid token in ?token= is required to join any room, AND the
+  // room must belong to that user. Rooms are named "<email>::<note>" (see collabRoomName),
+  // so a user may only join rooms prefixed with their OWN email — otherwise any authenticated
+  // user could join someone else's room by name and read the shared CRDT doc (P0 isolation).
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, 'http://x');
     const token = url.searchParams.get('token');
     const payload = auth.verifyToken(token, secret);
     if (!payload) {
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    let room = '';
+    try { room = decodeURIComponent(url.pathname.slice(1)); } catch (_) { room = url.pathname.slice(1); }
+    const email = payload.email || '';
+    if (!email || room.indexOf(email + '::') !== 0) {   // room not owned by this user
+      socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
       socket.destroy();
       return;
     }
