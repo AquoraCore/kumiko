@@ -62,7 +62,7 @@ describe('durable relay persistence', () => {
     try {
       const token1 = await getToken(base1, email, password);
       const docA = new Y.Doc();
-      const provA = new WebsocketProvider(wsBase1, 'r1', docA, { params: { token: token1 }, WebSocketPolyfill: WS, disableBc: true });
+      const provA = new WebsocketProvider(wsBase1, 'p@t.com::r1', docA, { params: { token: token1 }, WebSocketPolyfill: WS, disableBc: true });
       try {
         await waitUntil(() => provA.wsconnected);
         docA.getText('t').insert(0, 'durable text');
@@ -81,7 +81,7 @@ describe('durable relay persistence', () => {
     try {
       const token2 = await getToken(base2, email, password);
       const docB = new Y.Doc();
-      const provB = new WebsocketProvider(wsBase2, 'r1', docB, { params: { token: token2 }, WebSocketPolyfill: WS, disableBc: true });
+      const provB = new WebsocketProvider(wsBase2, 'p@t.com::r1', docB, { params: { token: token2 }, WebSocketPolyfill: WS, disableBc: true });
       try {
         await waitUntil(() => provB.wsconnected);
         await waitUntil(() => docB.getText('t').toString() === 'durable text');
@@ -102,7 +102,7 @@ describe('durable relay persistence', () => {
       const r = await post(base, '/auth/signup', { email: 'e@t.com', password: 'password123' });
       const token = (await r.json()).token;
       const docX = new Y.Doc();
-      const provX = new WebsocketProvider(wsBase, 'empty1', docX, { params: { token }, WebSocketPolyfill: WS, disableBc: true });
+      const provX = new WebsocketProvider(wsBase, 'e@t.com::empty1', docX, { params: { token }, WebSocketPolyfill: WS, disableBc: true });
       try {
         await waitUntil(() => provX.wsconnected);
         await new Promise((res) => setTimeout(res, 500));

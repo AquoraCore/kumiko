@@ -91,9 +91,9 @@ describe('auth server', () => {
       const docA = new Y.Doc();
       // disableBc: same-room providers share a global BroadcastChannel in one node process,
       // bypassing the WS relay + auth gate. Force the WS path so the gate is actually exercised.
-      const provA = new WebsocketProvider(wsBase, 'room1', docA, { params: { token }, WebSocketPolyfill: WS, disableBc: true });
+      const provA = new WebsocketProvider(wsBase, 'sync@b.com::room1', docA, { params: { token }, WebSocketPolyfill: WS, disableBc: true });
       const docB = new Y.Doc();
-      const provB = new WebsocketProvider(wsBase, 'room1', docB, { params: { token }, WebSocketPolyfill: WS, disableBc: true });
+      const provB = new WebsocketProvider(wsBase, 'sync@b.com::room1', docB, { params: { token }, WebSocketPolyfill: WS, disableBc: true });
 
       await waitUntil(() => provA.wsconnected && provB.wsconnected);
 
@@ -103,7 +103,7 @@ describe('auth server', () => {
 
       // EDGE: an unauthorized client (garbage token) must NOT sync.
       const docBad = new Y.Doc();
-      const provBad = new WebsocketProvider(wsBase, 'room1', docBad, { params: { token: 'garbage' }, WebSocketPolyfill: WS, disableBc: true });
+      const provBad = new WebsocketProvider(wsBase, 'sync@b.com::room1', docBad, { params: { token: 'garbage' }, WebSocketPolyfill: WS, disableBc: true });
 
       // edit a separate value via an authorized client and let authorized peers converge
       docA.getText('secret').insert(0, 'should-not-leak');
