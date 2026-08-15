@@ -633,6 +633,29 @@ ipcMain.handle('pdf:read', (e, name) => {
   try { return fs.readFileSync(path.join(NOTES_DIR, rel)); } catch (_) { return null; }
 });
 
+// Apple Vision OCR for a PDF (macOS only) — spawns the bundled `pdf-ocr` Swift helper on the
+// file and returns its extracted text. Returns null off-macOS / if the binary is missing, so
+// the renderer falls back to pdf.js text. The helper is on-device (no cloud, free, Thai+Eng).
+const OCR_BIN = app.isPackaged ? path.join(process.resourcesPath, 'pdf-ocr') : path.join(__dirname, 'native', 'pdf-ocr');
+ipcMain.handle('pdf:ocr', (e, { name, maxPages } = {}) => {
+  if (process.platform !== 'darwin') return Promise.resolve(null);
+  const rel = safeRel(name); if (!rel) return Promise.resolve(null);
+  const file = path.join(NOTES_DIR, rel);
+  if (!fs.existsSync(file) || !fs.existsSync(OCR_BIN)) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const args = [file]; if (maxPages) args.push(String(maxPages));
+    let out = '', done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    let child;
+    try { child = spawn(OCR_BIN, args, { stdio: ['ignore', 'pipe', 'ignore'] }); }
+    catch (_) { return finish(null); }
+    child.stdout.on('data', (d) => { out += d.toString(); });
+    child.on('error', () => finish(null));
+    child.on('close', () => finish(out.trim() ? out : null));
+    setTimeout(() => { try { child.kill(); } catch (_) {} finish(out.trim() ? out : null); }, 180000);   // 3-min safety cap
+  });
+});
+
 ipcMain.handle('pdf:import', async () => {
   const win = BrowserWindow.getFocusedWindow();
   let r;

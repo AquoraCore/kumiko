@@ -46,13 +46,69 @@ async function extractPdfToMarkdown(name){
   }
   return md;
 }
+// The visible-body length of a pdf.js extraction (drops the # / > / ## scaffolding), so we
+// can tell a DIGITAL pdf (lots of text) from a SCANNED one (little/none → needs OCR).
+function _pdfBodyLen(md){
+  if (!md) return 0;
+  return md.replace(/^#.*$/gm, '').replace(/^>.*$/gm, '').replace(/^## หน้า.*$/gm, '').replace(/\s+/g, '').length;
+}
 async function indexPdfIntoRag(name){
-  const md = await extractPdfToMarkdown(name);
+  let md = await extractPdfToMarkdown(name);          // fast path: pdf.js text (digital PDFs)
+  // Sparse text ⇒ likely a scanned/image PDF ⇒ OCR with Apple Vision (desktop/macOS only;
+  // window.api.pdfOcr returns null off-mac, so this quietly no-ops on web/Windows).
+  if (_pdfBodyLen(md) < 40 && window.api && window.api.pdfOcr) {
+    try {
+      const ocr = await window.api.pdfOcr(name);
+      if (ocr && ocr.replace(/\s+/g, '').length > _pdfBodyLen(md)) {
+        const base = name.replace(/\.pdf$/i, '').split('/').pop();
+        md = '# ' + base + '\n\n> ดึงข้อความจาก PDF `' + name + '` ด้วย OCR (Apple Vision) — สำหรับให้ AI อ้างอิง\n\n' + ocr;
+      }
+    } catch (_) {}
+  }
   if (md == null) return { ok: false };
   const noteName = 'PDF-Text/' + name.replace(/\.pdf$/i, '').split('/').pop() + '.md';
   try { await window.api.saveNote(noteName, md); } catch (_) { return { ok: false }; }
   return { ok: true, note: noteName, chars: md.length };
 }
+
+// ---- Background PDF indexer (Cursor-style) --------------------------------------------
+// Silently OCR/extract every PDF in the vault into RAG, one at a time, throttled so it never
+// blocks the UI. A per-vault cache (by name) skips already-indexed PDFs so it only does new
+// work — like Cursor indexing a codebase. A small chip shows progress.
+let _pdfQueue = [], _pdfIndexing = false;
+function _pdfIndexStatus(remaining){
+  const el = document.getElementById('pdfIndexChip');
+  if (!el) return;
+  if (remaining > 0){ el.hidden = false; el.textContent = '📄 ' + t('อ่าน PDF…') + ' (' + remaining + ')'; }
+  else el.hidden = true;
+}
+async function _indexPdfOnce(name, force){
+  const cache = (typeof vsGet === 'function') ? (vsGet('pdfIndexed', {}) || {}) : {};
+  if (cache[name] && !force) return;
+  const r = await indexPdfIntoRag(name);
+  if (r && r.ok){ cache[name] = 1; if (typeof vsSet === 'function') vsSet('pdfIndexed', cache); }
+}
+async function _runPdfQueue(){
+  if (_pdfIndexing) return; _pdfIndexing = true;
+  while (_pdfQueue.length){
+    _pdfIndexStatus(_pdfQueue.length);
+    const name = _pdfQueue.shift();
+    try { await _indexPdfOnce(name); } catch (_) {}
+    await new Promise((r) => setTimeout(r, 400));   // throttle — stay out of the way
+  }
+  _pdfIndexing = false; _pdfIndexStatus(0);
+}
+async function backgroundIndexAllPdfs(){
+  let pdfs = []; try { const r = await window.api.listNotes(); pdfs = (r && r.pdfs) || []; } catch (_) { return; }
+  const cache = (typeof vsGet === 'function') ? (vsGet('pdfIndexed', {}) || {}) : {};
+  const todo = pdfs.filter((p) => !cache[p] && _pdfQueue.indexOf(p) < 0);
+  if (!todo.length) return;
+  _pdfQueue.push.apply(_pdfQueue, todo);
+  _runPdfQueue();
+}
+window.backgroundIndexAllPdfs = backgroundIndexAllPdfs;
+// Kick off ~5s after load (once the app has settled), and refresh when a vault syncs.
+if (typeof window !== 'undefined') setTimeout(() => { try { backgroundIndexAllPdfs(); } catch (_) {} }, 5000);
 window.extractPdfToMarkdown = extractPdfToMarkdown;
 window.indexPdfIntoRag = indexPdfIntoRag;
 const _pdfIndexed = new Set();   // don't re-extract the same PDF twice per session
@@ -60,8 +116,9 @@ const _pdfIndexed = new Set();   // don't re-extract the same PDF twice per sess
 async function openPdf(name){
   currentPdf = name;
   currentNote = null;
-  // Behind-the-scenes: extract the PDF's text into RAG the first time it's opened.
-  if (!_pdfIndexed.has(name)) { _pdfIndexed.add(name); Promise.resolve().then(() => indexPdfIntoRag(name)).catch(() => {}); }
+  // Behind-the-scenes: (re)extract the OPEN PDF's text into RAG — force a fresh pass once per
+  // session so an opened PDF is always current; the background indexer handles the rest.
+  if (!_pdfIndexed.has(name)) { _pdfIndexed.add(name); Promise.resolve().then(() => _indexPdfOnce(name, true)).catch(() => {}); }
   if (typeof clearAutolink === 'function') clearAutolink();
   const left = document.getElementById('left');
   if (left){ left.classList.remove('view-graph','view-table','view-dash','view-crate','view-trash'); left.classList.add('view-pdf'); }

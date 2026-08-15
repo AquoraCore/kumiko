@@ -16,7 +16,8 @@
     "relay": "node server/relay.js",
     "server": "node server/index.js",
     "build:crepe": "esbuild build/crepe-entry.js --bundle --format=iife --loader:.ttf=dataurl --loader:.woff=dataurl --loader:.woff2=dataurl --loader:.eot=dataurl --loader:.svg=dataurl --outfile=renderer/vendor/crepe.bundle.js",
-    "build:mermaid": "esbuild build/mermaid-entry.js --bundle --format=iife --outfile=renderer/vendor/mermaid.bundle.js"
+    "build:mermaid": "esbuild build/mermaid-entry.js --bundle --format=iife --outfile=renderer/vendor/mermaid.bundle.js",
+    "build:ocr": "swiftc -O native/pdf-ocr.swift -o native/pdf-ocr"
   },
   "author": "",
   "license": "MIT",
@@ -39,6 +40,9 @@
       "icon": "build/icon.icns",
       "identity": null
     },
+    "extraResources": [
+      { "from": "native/pdf-ocr", "to": "pdf-ocr" }
+    ],
     "directories": {
       "output": "dist"
     }

@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('__WASHI_TEST_COLLAB', !!process.env.WASHI_TEST_COLLAB);
 // App semver for the desktop build (web gets it injected by the server as __APP_VERSION__).
 try { contextBridge.exposeInMainWorld('KUMIKO_VERSION', require('./package.json').version || ''); } catch (_) {}
+// (pdfOcr is added to the `api` object below)
 // relay URL override (test / future setting); empty string = use the renderer's default
 const collabRelay = process.env.WASHI_COLLAB_RELAY || '';
 
@@ -12,6 +13,7 @@ contextBridge.exposeInMainWorld('api', {
   readNote: (name) => ipcRenderer.invoke('note:read', name),
   importPdf: () => ipcRenderer.invoke('pdf:import'),
   readPdf: (name) => ipcRenderer.invoke('pdf:read', name),
+  pdfOcr: (name, maxPages) => ipcRenderer.invoke('pdf:ocr', { name, maxPages }),   // Apple Vision OCR (macOS)
   renamePdf: (from, to) => ipcRenderer.invoke('pdf:rename', { from, to }),
   readAnnots: (name) => ipcRenderer.invoke('pdf:readAnnots', name),
   saveAnnots: (name, data) => ipcRenderer.invoke('pdf:saveAnnots', { name, data }),
