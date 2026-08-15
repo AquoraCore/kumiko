@@ -40,5 +40,7 @@ function rewriteLinkTargets(text, oldBase, newBase){
   return changed ? out : text;
 }
 
-module.exports = { wikiTargets, linksTo, rewriteLinkTargets };
+// Guard module.exports: in the browser `module` is undefined and an unguarded assignment
+// throws before window.CoreWikilinks gets set (breaking noteTable backlinks on web).
+if (typeof module !== 'undefined' && module.exports) module.exports = { wikiTargets, linksTo, rewriteLinkTargets };
 if (typeof window !== 'undefined') { window.CoreWikilinks = { wikiTargets, linksTo, rewriteLinkTargets }; }

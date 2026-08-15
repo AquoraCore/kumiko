@@ -110,8 +110,10 @@
           <span id="syncChip" class="sync-chip" hidden></span>
           <span id="dirty" class="dirty" hidden></span>
           <button id="aiMenuBtn" class="ghost" title="เครื่องมือ AI" data-i18n-title="เครื่องมือ AI"><svg class="ic"><use href="#i-sparkle"/></svg></button>
-          <button id="autolinkBtn" class="ghost" title="ร้อยเชือก — AI แนะนำลิงก์ไปโน้ตอื่น" data-i18n-title="ร้อยเชือก — AI แนะนำลิงก์ไปโน้ตอื่น"><svg class="ic"><use href="#i-thread"/></svg></button>
-          <button id="sideChatBtn" class="ghost" title="แชตลอย (⌘J)" data-i18n-title="แชตลอย (⌘J)"><svg class="ic"><use href="#i-chat"/></svg></button>
+          <!-- ร้อยเชือก + แชตลอย live ONLY in the ✨ AI menu now (kept in DOM but hidden so the
+               menu's .click() delegation still works — same pattern as tldrBtn/quizBtn). -->
+          <button id="autolinkBtn" class="ghost" title="ร้อยเชือก — AI แนะนำลิงก์ไปโน้ตอื่น" data-i18n-title="ร้อยเชือก — AI แนะนำลิงก์ไปโน้ตอื่น" hidden><svg class="ic"><use href="#i-thread"/></svg></button>
+          <button id="sideChatBtn" class="ghost" title="แชตลอย (⌘J)" data-i18n-title="แชตลอย (⌘J)" hidden><svg class="ic"><use href="#i-chat"/></svg></button>
           <button id="saveBtn" class="ghost" title="บันทึก (⌘S)" data-i18n-title="บันทึก (⌘S)"><svg class="ic"><use href="#i-save"/></svg></button>
           <span class="bar-div"></span>
           <button id="sidebarToggle" class="ghost" title="ซ่อน/แสดงแถบโน้ต" data-i18n-title="ซ่อน/แสดงแถบโน้ต"><svg class="ic"><use href="#i-sidebar"/></svg></button>
@@ -133,7 +135,7 @@
           <option value="ต้องทวน" data-i18n="ต้องทวน">ต้องทวน</option>
         </select>
         <label data-i18n="แท็ก">แท็ก</label>
-        <input id="tagsInput" type="text" placeholder="เช่น สอบกลางภาค, ต้องทวน" data-i18n-ph="เช่น สอบกลางภาค, ต้องทวน" />
+        <div id="tagsBar" class="tags-bar"></div>
       </div>
 
       <div id="reloadBanner" class="banner" hidden>
@@ -224,6 +226,7 @@
   <script>window.KUMIKO_BUILD="__BUILD__";window.KUMIKO_ASSETV="__ASSET_VERSION__";</script>
   <script src="../core/markdown.js"></script>
   <script src="../core/aicaps.js"></script>
+  <script src="../core/tags.js"></script>
   <script src="../core/frontmatter.js"></script>
   <script src="../core/textdiff.js"></script>
   <script src="../core/textsim.js"></script>

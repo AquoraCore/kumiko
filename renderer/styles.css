@@ -163,6 +163,20 @@ kbd { font: inherit; font-size: 10px; color: var(--muted); border: 1px solid var
 .ai-think-wrap { display: flex; align-items: center; gap: 8px; }
 .ai-think-hint { color: var(--muted); font-size: 12px; }
 .ai-think-row.disabled { opacity: .5; }
+/* Tag chips (Obsidian-style) — user-defined tags with autocomplete */
+.tags-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; flex: 1; min-width: 120px; cursor: text; padding: 2px 0; }
+.tag-chip { display: inline-flex; align-items: center; gap: 2px; padding: 1px 4px 1px 7px; border-radius: 11px;
+  background: var(--accent-bg); color: var(--accent); font-size: 12px; line-height: 1.7; }
+.tag-chip-lab { cursor: pointer; }
+.tag-chip-lab:hover { text-decoration: underline; }
+.tag-chip-x { border: none; background: none; color: var(--accent); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; opacity: .6; }
+.tag-chip-x:hover { opacity: 1; }
+.tags-input { border: none; background: transparent; outline: none; font: inherit; color: var(--text); min-width: 80px; flex: 1; padding: 2px; }
+.tags-ac { position: fixed; z-index: 70; max-height: 220px; overflow-y: auto; display: flex; flex-direction: column;
+  background: var(--card, #fff); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,.14); padding: 4px; }
+.tags-ac-item { text-align: left; border: none; background: none; color: var(--text); cursor: pointer; padding: 5px 9px; border-radius: 6px; font-size: 13px; }
+.tags-ac-item:hover { background: var(--accent-bg); color: var(--accent); }
+.sr-head { padding: 5px 9px; font-size: 12px; color: var(--muted); font-weight: 600; }
 
 /* Toggle = fold a heading's section by its level (larger triangle) */
 .md-fold-tri { display: inline-block; width: 24px; margin-left: -30px; margin-right: 6px; text-align: center; cursor: pointer; color: var(--muted); user-select: none; font-size: 19px; line-height: 1; vertical-align: middle; }

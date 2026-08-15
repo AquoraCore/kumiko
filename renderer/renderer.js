@@ -511,21 +511,99 @@ window.addEventListener('keydown', (e) => {
 });
 
 // ---------- Properties bar (status + tags via frontmatter) ----------
+// Obsidian-style tags: user-defined chips with autocomplete drawn from every note's tags.
+// Still stored in frontmatter as a comma string (CoreTags handles parse/serialise), so it's
+// fully back-compatible with the old plain-text field.
+const TagsUI = (function installTagsEditor(){
+  const bar = document.getElementById('tagsBar');
+  if (!bar || !window.CoreTags) return { setTags(){}, getTags(){ return []; } };
+  const CT = window.CoreTags;
+  let tags = [];
+  let pool = [];
+  let poolAt = 0;
+  let acEl = null;
+  const input = document.createElement('input');
+  input.type = 'text'; input.className = 'tags-input'; input.placeholder = t('เพิ่มแท็ก…');
+
+  async function refreshPool(force){
+    if (!force && (Date.now() - poolAt < 8000)) return;
+    try { pool = CT.tagPoolFromRows(await window.api.noteTable()); poolAt = Date.now(); } catch (_) {}
+  }
+  const hasTag = (x) => tags.some((tg) => tg.toLowerCase() === x.toLowerCase());
+  function commit(raw){
+    const v = String(raw || '').trim().replace(/^#/, '');
+    if (v && !hasTag(v)) { tags.push(v); render(); applyProps(); }
+    input.value = ''; closeAc();
+  }
+  function removeAt(i){ tags.splice(i, 1); render(); applyProps(); }
+  function render(){
+    bar.querySelectorAll('.tag-chip').forEach((c) => c.remove());
+    tags.forEach((tg, i) => {
+      const chip = document.createElement('span'); chip.className = 'tag-chip';
+      const lab = document.createElement('span'); lab.className = 'tag-chip-lab'; lab.textContent = '#' + tg;
+      lab.title = t('ดูโน้ตที่ใช้แท็กนี้'); lab.onclick = () => showNotesWithTag(tg);
+      const x = document.createElement('button'); x.type = 'button'; x.className = 'tag-chip-x'; x.textContent = '×';
+      x.onclick = (e) => { e.stopPropagation(); removeAt(i); };
+      chip.appendChild(lab); chip.appendChild(x);
+      bar.insertBefore(chip, input);
+    });
+  }
+  function closeAc(){ if (acEl){ acEl.remove(); acEl = null; } }
+  function openAc(){
+    closeAc();
+    const sugg = CT.suggestTags(pool, input.value, tags, 8);
+    if (!sugg.length) return;
+    acEl = document.createElement('div'); acEl.className = 'tags-ac';
+    sugg.forEach((s) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'tags-ac-item'; b.textContent = '#' + s; b.onmousedown = (e) => { e.preventDefault(); commit(s); }; acEl.appendChild(b); });
+    const r = bar.getBoundingClientRect();
+    acEl.style.left = r.left + 'px'; acEl.style.top = (r.bottom + 4) + 'px'; acEl.style.minWidth = r.width + 'px';
+    document.body.appendChild(acEl);
+  }
+  input.addEventListener('focus', async () => { await refreshPool(); openAc(); });
+  input.addEventListener('input', openAc);
+  input.addEventListener('blur', () => setTimeout(closeAc, 150));
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commit(input.value); }
+    else if (e.key === 'Backspace' && !input.value && tags.length) { removeAt(tags.length - 1); }
+    else if (e.key === 'Escape') { closeAc(); }
+  });
+  bar.appendChild(input);
+  bar.addEventListener('mousedown', (e) => { if (e.target === bar) { e.preventDefault(); input.focus(); } });
+
+  async function showNotesWithTag(tag){
+    let rows = []; try { rows = await window.api.noteTable(); } catch (_) {}
+    const hits = rows.filter((r) => CT.parseTags(r.tags).some((tg) => tg.toLowerCase() === tag.toLowerCase()));
+    searchResults.innerHTML = '';
+    if (!hits.length) { searchResults.hidden = true; return; }
+    const head = document.createElement('div'); head.className = 'sr-head'; head.textContent = t('แท็ก') + ' #' + tag + ' · ' + hits.length; searchResults.appendChild(head);
+    hits.forEach((h) => {
+      const row = document.createElement('div'); row.className = 'sr-item';
+      const b = document.createElement('b'); b.textContent = h.name.replace(/\.md$/i, ''); row.appendChild(b);
+      row.onclick = async () => { await openNote(h.name); searchResults.hidden = true; searchResults.innerHTML = ''; };
+      searchResults.appendChild(row);
+    });
+    searchResults.hidden = false;
+  }
+  return {
+    setTags(arr){ tags = CT.parseTags((arr || []).join(',')); render(); },
+    getTags(){ return tags.slice(); },
+  };
+})();
+
 function loadPropsBar(){
   document.getElementById('statusSelect').value = currentAttrs.status || '';
-  document.getElementById('tagsInput').value = currentAttrs.tags || '';
+  TagsUI.setTags(window.CoreTags ? window.CoreTags.parseTags(currentAttrs.tags) : []);
 }
 function applyProps(){
   if(!currentNote) return;
   const status=document.getElementById('statusSelect').value;
-  const tags=document.getElementById('tagsInput').value.trim();
+  const tags = window.CoreTags ? window.CoreTags.serializeTags(TagsUI.getTags()) : '';
   if(status) currentAttrs.status=status; else delete currentAttrs.status;
   if(tags) currentAttrs.tags=tags; else delete currentAttrs.tags;
   setDirty(true);
   save();
 }
 document.getElementById('statusSelect').onchange = applyProps;
-document.getElementById('tagsInput').addEventListener('change', applyProps);
 
 // live reload from Claude / external edits → open the rich partial-accept review (covers BOTH chat + action-bar edits)
 let _watchTimer = null, _watchLatest = null, _watchBefore = null;

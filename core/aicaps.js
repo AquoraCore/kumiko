@@ -51,6 +51,8 @@ function resolveThinking(provider, modelId, userChoice){
   return thinkingDefault(provider);
 }
 
-const _api = { AI_CAPABILITIES, aiProviders, modelsForProvider, modelSupportsThinking, thinkingDefault, resolveThinking };
-if (typeof module !== 'undefined' && module.exports) module.exports = _api;
-if (typeof window !== 'undefined') window.AICaps = _api;
+// NOTE: browser loads core/*.js as plain (non-module) scripts sharing ONE global scope,
+// so this top-level const MUST have a file-unique name (a bare `_api` collides with tags.js).
+const _aicapsApi = { AI_CAPABILITIES, aiProviders, modelsForProvider, modelSupportsThinking, thinkingDefault, resolveThinking };
+if (typeof module !== 'undefined' && module.exports) module.exports = _aicapsApi;
+if (typeof window !== 'undefined') window.AICaps = _aicapsApi;
