@@ -146402,10 +146402,62 @@ ${reason}`);
       } };
     }
   }));
+  var _mmSeq = 0;
+  function _mmHash(s) {
+    let h2 = 0;
+    for (let i4 = 0; i4 < s.length; i4++) {
+      h2 = h2 * 31 + s.charCodeAt(i4) | 0;
+    }
+    return h2;
+  }
+  function renderMermaidInto(el, code5) {
+    const mm = window.mermaid;
+    if (!mm) {
+      el.textContent = "\u26A0 mermaid \u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E1E\u0E23\u0E49\u0E2D\u0E21";
+      return;
+    }
+    if (!code5.trim()) {
+      el.textContent = "";
+      return;
+    }
+    setTimeout(() => {
+      const id5 = "mmd-" + ++_mmSeq;
+      try {
+        mm.render(id5, code5, (svg4) => {
+          el.innerHTML = svg4;
+        });
+      } catch (e) {
+        el.innerHTML = '<div class="md-mermaid-err">\u0E41\u0E1C\u0E19\u0E20\u0E32\u0E1E\u0E1C\u0E34\u0E14\u0E1E\u0E25\u0E32\u0E14: ' + String(e && e.message || e).replace(/</g, "&lt;") + "</div>";
+      }
+    }, 0);
+  }
+  var mermaidView = $prose(() => new Plugin({
+    key: new PluginKey("md-mermaid"),
+    props: {
+      decorations(state) {
+        const decos = [];
+        state.doc.descendants((node2, pos) => {
+          if (node2.type.name !== "code_block") return;
+          const lang = String(node2.attrs && (node2.attrs.language || node2.attrs.lang) || "").toLowerCase();
+          if (lang !== "mermaid") return;
+          const code5 = node2.textContent || "";
+          decos.push(Decoration2.widget(pos + node2.nodeSize, () => {
+            const d3 = document.createElement("div");
+            d3.className = "md-mermaid-render";
+            d3.contentEditable = "false";
+            renderMermaidInto(d3, code5);
+            return d3;
+          }, { side: 1, key: "mmd-" + pos + "-" + _mmHash(code5) }));
+        });
+        return DecorationSet.create(state.doc, decos);
+      }
+    }
+  }));
   window.Crepe = Crepe;
   window.MDHeadingFold = headingFold;
   window.MDWikiLink = wikiLink;
   window.MDCalloutColor = calloutColor;
+  window.MDMermaid = mermaidView;
   window.Y = yjs_exports;
   window.WebsocketProvider = WebsocketProvider;
   window.MilkdownCollab = { collab, collabServiceCtx };

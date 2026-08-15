@@ -192,10 +192,53 @@ const calloutColor = $prose(() => new Plugin({
   },
 }));
 
+// Mermaid — render a ```mermaid code block as a live diagram widget UNDER the code
+// (code stays editable; the SVG previews below). Decoration-only, like wikiLink/callout.
+// Needs window.mermaid (renderer/vendor/mermaid.bundle.js) loaded before the editor.
+let _mmSeq = 0;
+function _mmHash(s){ let h = 0; for (let i = 0; i < s.length; i++){ h = (h * 31 + s.charCodeAt(i)) | 0; } return h; }
+function renderMermaidInto(el, code){
+  const mm = window.mermaid;
+  if (!mm){ el.textContent = '⚠ mermaid ยังไม่พร้อม'; return; }
+  if (!code.trim()){ el.textContent = ''; return; }
+  // Render on the next tick (the widget div isn't in the DOM yet when the factory runs) and
+  // do NOT pass `el` as the container — mermaid measures against document.body, so it works
+  // even before the widget attaches. We just drop the returned SVG string into el.
+  setTimeout(() => {
+    const id = 'mmd-' + (++_mmSeq);
+    try {
+      mm.render(id, code, (svg) => { el.innerHTML = svg; });
+    } catch (e) {
+      el.innerHTML = '<div class="md-mermaid-err">แผนภาพผิดพลาด: ' + String(e && e.message || e).replace(/</g, '&lt;') + '</div>';
+    }
+  }, 0);
+}
+const mermaidView = $prose(() => new Plugin({
+  key: new PluginKey('md-mermaid'),
+  props: {
+    decorations(state){
+      const decos = [];
+      state.doc.descendants((node, pos) => {
+        if (node.type.name !== 'code_block') return;
+        const lang = String((node.attrs && (node.attrs.language || node.attrs.lang)) || '').toLowerCase();
+        if (lang !== 'mermaid') return;
+        const code = node.textContent || '';
+        decos.push(Decoration.widget(pos + node.nodeSize, () => {
+          const d = document.createElement('div'); d.className = 'md-mermaid-render'; d.contentEditable = 'false';
+          renderMermaidInto(d, code);
+          return d;
+        }, { side: 1, key: 'mmd-' + pos + '-' + _mmHash(code) }));
+      });
+      return DecorationSet.create(state.doc, decos);
+    },
+  },
+}));
+
 window.Crepe = Crepe;
 window.MDHeadingFold = headingFold;
 window.MDWikiLink = wikiLink;
 window.MDCalloutColor = calloutColor;
+window.MDMermaid = mermaidView;
 window.Y = Y;                                   // the ONE yjs instance for the whole app
 window.WebsocketProvider = WebsocketProvider;   // client provider (connects to the relay)
 window.MilkdownCollab = { collab, collabServiceCtx };   // the Milkdown collab plugin + its service ctx

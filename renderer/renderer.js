@@ -218,6 +218,7 @@ async function loadEditor(bodyMarkdown){
   if (window.MDHeadingFold) { try { crepe.editor.use(window.MDHeadingFold); } catch (_) {} }
   if (window.MDWikiLink) { try { crepe.editor.use(window.MDWikiLink); } catch (_) {} }
   if (window.MDCalloutColor) { try { crepe.editor.use(window.MDCalloutColor); } catch (_) {} }
+  if (window.MDMermaid) { try { crepe.editor.use(window.MDMermaid); } catch (_) {} }
   if (collabOn) { try { crepe.editor.use(window.MilkdownCollab.collab); } catch (_) {} }
   await crepe.create();
   if (collabOn) {

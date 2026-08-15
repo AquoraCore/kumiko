@@ -15,7 +15,8 @@
     "deploy": "bash scripts/deploy-ally.sh",
     "relay": "node server/relay.js",
     "server": "node server/index.js",
-    "build:crepe": "esbuild build/crepe-entry.js --bundle --format=iife --loader:.ttf=dataurl --loader:.woff=dataurl --loader:.woff2=dataurl --loader:.eot=dataurl --loader:.svg=dataurl --outfile=renderer/vendor/crepe.bundle.js"
+    "build:crepe": "esbuild build/crepe-entry.js --bundle --format=iife --loader:.ttf=dataurl --loader:.woff=dataurl --loader:.woff2=dataurl --loader:.eot=dataurl --loader:.svg=dataurl --outfile=renderer/vendor/crepe.bundle.js",
+    "build:mermaid": "esbuild build/mermaid-entry.js --bundle --format=iife --outfile=renderer/vendor/mermaid.bundle.js"
   },
   "author": "",
   "license": "MIT",

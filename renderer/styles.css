@@ -153,6 +153,10 @@ kbd { font: inherit; font-size: 10px; color: var(--muted); border: 1px solid var
 .milkdown blockquote.callout-colored { background: color-mix(in srgb, var(--callout) 12%, transparent); }
 .milkdown blockquote.callout-colored::before { background-color: var(--callout) !important; }
 .callout-marker-hidden { display: none; }
+/* Mermaid diagram rendered under a ```mermaid code block */
+.md-mermaid-render { display: flex; justify-content: center; padding: 8px; margin: 2px 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card, #fff); overflow-x: auto; }
+.md-mermaid-render svg { max-width: 100%; height: auto; }
+.md-mermaid-err { color: #c0433f; font-size: 12px; }
 /* Floating colour palette shown when the caret is inside a callout */
 .callout-palette { position: fixed; z-index: 60; display: flex; gap: 4px; padding: 4px; border-radius: 8px;
   background: var(--card, #fff); border: 1px solid var(--line); box-shadow: 0 4px 14px rgba(0,0,0,.14); }
