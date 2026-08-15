@@ -20,11 +20,11 @@ function pdfPagesEl(){ return document.getElementById('pdfPages'); }
 // it as a note under PDF-Text/, so the existing RAG index picks it up and the AI can
 // "read" the PDF. Runs behind the scenes on open (once per PDF). Scanned/image PDFs yield
 // little text — OCR (e.g. Typhoon-OCR) is the follow-up phase.
-async function extractPdfToMarkdown(name){
+async function extractPdfToMarkdown(name, preData){
   if (!window.pdfjsLib) return null;
-  let buf; try { buf = await window.api.readPdf(name); } catch (_) { return null; }
-  if (!buf) return null;
-  const data = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  let data = preData || null;
+  if (!data) { try { const buf = await window.api.readPdf(name); data = buf ? (buf instanceof Uint8Array ? buf : new Uint8Array(buf)) : null; } catch (_) { data = null; } }
+  if (!data) return null;
   let doc; try { doc = await window.pdfjsLib.getDocument({ data }).promise; } catch (_) { return null; }
   const base = name.replace(/\.pdf$/i, '').split('/').pop();
   let md = '# ' + base + '\n\n> ดึงข้อความอัตโนมัติจากไฟล์ PDF `' + name + '` (สำหรับให้ AI อ้างอิง)\n\n';
@@ -52,8 +52,15 @@ function _pdfBodyLen(md){
   if (!md) return 0;
   return md.replace(/^#.*$/gm, '').replace(/^>.*$/gm, '').replace(/^## หน้า.*$/gm, '').replace(/\s+/g, '').length;
 }
-async function indexPdfIntoRag(name){
-  let md = await extractPdfToMarkdown(name);          // fast path: pdf.js text (digital PDFs)
+// Cheap content signature (byte length + hashed head/tail) — changes whenever the PDF's
+// bytes change, so a same-named NEW VERSION is detected and re-indexed instead of skipped.
+function _djb2(bytes, start, end){ let h = 5381; for (let i = start; i < end; i++){ h = ((h << 5) + h + bytes[i]) | 0; } return h >>> 0; }
+function _pdfSignature(bytes){
+  const n = bytes.length, k = Math.min(4096, n);
+  return n.toString(36) + '.' + _djb2(bytes, 0, k).toString(36) + '.' + _djb2(bytes, n - k, n).toString(36);
+}
+async function indexPdfIntoRag(name, preData){
+  let md = await extractPdfToMarkdown(name, preData);  // fast path: pdf.js text (digital PDFs)
   // Sparse text ⇒ likely a scanned/image PDF ⇒ OCR with Apple Vision (desktop/macOS only;
   // window.api.pdfOcr returns null off-mac, so this quietly no-ops on web/Windows).
   if (_pdfBodyLen(md) < 40 && window.api && window.api.pdfOcr) {
@@ -83,10 +90,16 @@ function _pdfIndexStatus(remaining){
   else el.hidden = true;
 }
 async function _indexPdfOnce(name, force){
+  // Read bytes (cheap) to compute the content signature: skip only if the file is UNCHANGED
+  // since last index. A new version of a same-named PDF has a new signature → re-indexed.
+  let bytes = null;
+  try { const b = await window.api.readPdf(name); bytes = b ? (b instanceof Uint8Array ? b : new Uint8Array(b)) : null; } catch (_) {}
+  if (!bytes) return;
+  const sig = _pdfSignature(bytes);
   const cache = (typeof vsGet === 'function') ? (vsGet('pdfIndexed', {}) || {}) : {};
-  if (cache[name] && !force) return;
-  const r = await indexPdfIntoRag(name);
-  if (r && r.ok){ cache[name] = 1; if (typeof vsSet === 'function') vsSet('pdfIndexed', cache); }
+  if (cache[name] === sig && !force) return;               // unchanged → skip the expensive extract/OCR
+  const r = await indexPdfIntoRag(name, bytes);            // reuse the bytes we already read
+  if (r && r.ok){ cache[name] = sig; if (typeof vsSet === 'function') vsSet('pdfIndexed', cache); }
 }
 async function _runPdfQueue(){
   if (_pdfIndexing) return; _pdfIndexing = true;
@@ -100,8 +113,10 @@ async function _runPdfQueue(){
 }
 async function backgroundIndexAllPdfs(){
   let pdfs = []; try { const r = await window.api.listNotes(); pdfs = (r && r.pdfs) || []; } catch (_) { return; }
-  const cache = (typeof vsGet === 'function') ? (vsGet('pdfIndexed', {}) || {}) : {};
-  const todo = pdfs.filter((p) => !cache[p] && _pdfQueue.indexOf(p) < 0);
+  // Queue EVERY PDF (not just unseen names) — _indexPdfOnce skips unchanged ones by signature,
+  // so a re-uploaded / edited PDF is re-indexed. (Future optimisation: gate on file mtime via a
+  // stat API to avoid re-reading bytes of unchanged files each pass.)
+  const todo = pdfs.filter((p) => _pdfQueue.indexOf(p) < 0);
   if (!todo.length) return;
   _pdfQueue.push.apply(_pdfQueue, todo);
   _runPdfQueue();
