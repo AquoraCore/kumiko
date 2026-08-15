@@ -1,6 +1,6 @@
 {
   "name": "study-notes-claude",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Study short-notes app with an embedded Claude CLI terminal and real-time file sync",
   "main": "main.js",
   "scripts": {

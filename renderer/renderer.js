@@ -1295,7 +1295,8 @@ async function openAiSettings(){
   const ver=document.createElement('div'); ver.className='ai-settings-ver';
   const _b=(window.KUMIKO_BUILD && window.KUMIKO_BUILD.indexOf('__')!==0) ? window.KUMIKO_BUILD : 'desktop';
   const _a=(window.KUMIKO_ASSETV && window.KUMIKO_ASSETV.indexOf('__')!==0) ? window.KUMIKO_ASSETV : 'local';
-  ver.textContent=t('รุ่น')+' '+_b+' · assets '+_a;
+  const _v=(window.KUMIKO_VERSION && window.KUMIKO_VERSION.indexOf('__')!==0) ? window.KUMIKO_VERSION : '';
+  ver.textContent=(_v?'v'+_v+' · ':'')+t('รุ่น')+' '+_b+' · assets '+_a;
   card.appendChild(ver);
 
   ov.appendChild(card); ov.hidden=false;

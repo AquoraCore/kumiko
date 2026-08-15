@@ -670,14 +670,32 @@ function makeTboxEl(b, cssW, cssH){
     creating = true; _pdfTboxEditing = el;
     content.classList.add('editing'); content.innerHTML = '';
     try {
+      // Match the NOTE editor exactly (the user wants "เหมือน Note"): keep every markdown
+      // feature — including the CommonMark input rules that turn "# ", "**", "- " into real
+      // headings/bold/lists as you type — and disable ONLY the virtual Cursor (invisible in
+      // small boxes; the native browser caret is used instead).
       const F = (window.Crepe && window.Crepe.Feature) || {};
       const feats = {};
-      [F.Toolbar, F.BlockEdit, F.ImageBlock, F.Table, F.LinkTooltip, F.Latex, F.CodeMirror, F.TopBar].forEach((k) => { if (k) feats[k] = false; });
+      const curKey = F.Cursor || 'cursor';
+      feats[curKey] = false;
       const c = new window.Crepe({ root: content, defaultValue: b.text || '', features: feats });
       await c.create();
       crepe = c; el._crepe = c;
       c.on((l) => l.markdownUpdated(() => { b.text = c.getMarkdown(); clearTimeout(saveT); saveT = setTimeout(savePdfAnnots, 500); }));
-      try { const ce = content.querySelector('[contenteditable="true"]'); if (ce) ce.focus(); } catch (_) {}
+      // Focus the editor AND drop a real caret at the end — a bare .focus() leaves
+      // ProseMirror with no selection, so keystrokes go nowhere (box looks un-typeable).
+      // Retry across a frame because the editor DOM settles just after create().
+      const _focusEnd = () => {
+        try {
+          const ce = content.querySelector('.ProseMirror') || content.querySelector('[contenteditable="true"]');
+          if (!ce) return;
+          ce.focus({ preventScroll: true });
+          const sel = window.getSelection && window.getSelection();
+          if (sel) { const rg = document.createRange(); rg.selectNodeContents(ce); rg.collapse(false); sel.removeAllRanges(); sel.addRange(rg); }
+        } catch (_) {}
+      };
+      _focusEnd();
+      requestAnimationFrame(_focusEnd);
       document.addEventListener('mousedown', _onDocDown, true);
     } catch (_) { creating = false; if (_pdfTboxEditing === el) _pdfTboxEditing = null; renderPreview(); return; }
     creating = false;

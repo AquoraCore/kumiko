@@ -137,8 +137,11 @@ async function startServer(opts = {}) {
     let build = '';
     try { build = fs.readFileSync(path.join(ROOT, 'BUILD.txt'), 'utf8').trim(); } catch (_) {}
     if (!build) build = assetVersion;
+    // App semver from package.json (single source of truth) → shown as "v0.2.0" in settings.
+    let appVer = '';
+    try { appVer = (JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version) || ''; } catch (_) {}
     res.type('html').send(
-      html.replace(/__ASSET_VERSION__/g, assetVersion).replace(/__BUILD__/g, build)
+      html.replace(/__ASSET_VERSION__/g, assetVersion).replace(/__BUILD__/g, build).replace(/__APP_VERSION__/g, appVer)
     );
   });
 

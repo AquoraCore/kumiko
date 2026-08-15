@@ -63,4 +63,18 @@ describe('web static /vendor (pdf.js worker route)', () => {
       await s.close();
     }
   });
+
+  it('HAPPY: index.html injects the app semver from package.json (KUMIKO_VERSION)', async () => {
+    const pkgVer = require('../../package.json').version;
+    const s = await startServer({ port: 0, dataDir: tmpDir() });
+    const base = 'http://127.0.0.1:' + s.port;
+    try {
+      const r = await fetch(base + '/');
+      const html = await r.text();
+      expect(html).not.toContain('__APP_VERSION__');            // placeholder replaced
+      expect(html).toContain('window.KUMIKO_VERSION="' + pkgVer + '"'); // real semver injected
+    } finally {
+      await s.close();
+    }
+  });
 });

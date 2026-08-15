@@ -1,6 +1,8 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('__WASHI_TEST_COLLAB', !!process.env.WASHI_TEST_COLLAB);
+// App semver for the desktop build (web gets it injected by the server as __APP_VERSION__).
+try { contextBridge.exposeInMainWorld('KUMIKO_VERSION', require('./package.json').version || ''); } catch (_) {}
 // relay URL override (test / future setting); empty string = use the renderer's default
 const collabRelay = process.env.WASHI_COLLAB_RELAY || '';
 
