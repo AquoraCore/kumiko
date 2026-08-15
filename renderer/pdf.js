@@ -15,9 +15,53 @@ let pendingSel = null;
 
 function pdfPagesEl(){ return document.getElementById('pdfPages'); }
 
+// ---- PDF → markdown text pipeline (POC) --------------------------------------
+// Extract a PDF's text with pdf.js (getTextContent per page, joined into lines) and save
+// it as a note under PDF-Text/, so the existing RAG index picks it up and the AI can
+// "read" the PDF. Runs behind the scenes on open (once per PDF). Scanned/image PDFs yield
+// little text — OCR (e.g. Typhoon-OCR) is the follow-up phase.
+async function extractPdfToMarkdown(name){
+  if (!window.pdfjsLib) return null;
+  let buf; try { buf = await window.api.readPdf(name); } catch (_) { return null; }
+  if (!buf) return null;
+  const data = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  let doc; try { doc = await window.pdfjsLib.getDocument({ data }).promise; } catch (_) { return null; }
+  const base = name.replace(/\.pdf$/i, '').split('/').pop();
+  let md = '# ' + base + '\n\n> ดึงข้อความอัตโนมัติจากไฟล์ PDF `' + name + '` (สำหรับให้ AI อ้างอิง)\n\n';
+  for (let p = 1; p <= doc.numPages; p++){
+    let text = '';
+    try {
+      const page = await doc.getPage(p);
+      const tc = await page.getTextContent();
+      let line = '', lastY = null;
+      for (const it of tc.items){
+        const y = (it.transform && it.transform.length > 5) ? it.transform[5] : null;
+        if (lastY !== null && y !== null && Math.abs(y - lastY) > 3){ text += line.replace(/\s+$/, '') + '\n'; line = ''; }
+        line += (it.str || '') + (it.hasEOL ? '\n' : ' ');
+        lastY = y;
+      }
+      text += line;
+    } catch (_) {}
+    md += '## หน้า ' + p + '\n\n' + text.trim() + '\n\n';
+  }
+  return md;
+}
+async function indexPdfIntoRag(name){
+  const md = await extractPdfToMarkdown(name);
+  if (md == null) return { ok: false };
+  const noteName = 'PDF-Text/' + name.replace(/\.pdf$/i, '').split('/').pop() + '.md';
+  try { await window.api.saveNote(noteName, md); } catch (_) { return { ok: false }; }
+  return { ok: true, note: noteName, chars: md.length };
+}
+window.extractPdfToMarkdown = extractPdfToMarkdown;
+window.indexPdfIntoRag = indexPdfIntoRag;
+const _pdfIndexed = new Set();   // don't re-extract the same PDF twice per session
+
 async function openPdf(name){
   currentPdf = name;
   currentNote = null;
+  // Behind-the-scenes: extract the PDF's text into RAG the first time it's opened.
+  if (!_pdfIndexed.has(name)) { _pdfIndexed.add(name); Promise.resolve().then(() => indexPdfIntoRag(name)).catch(() => {}); }
   if (typeof clearAutolink === 'function') clearAutolink();
   const left = document.getElementById('left');
   if (left){ left.classList.remove('view-graph','view-table','view-dash','view-crate','view-trash'); left.classList.add('view-pdf'); }
