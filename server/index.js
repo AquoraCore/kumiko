@@ -74,6 +74,20 @@ async function startServer(opts = {}) {
   const allowedEmails = allowRaw.split(',').map((s) => auth.normalizeEmail(s.trim())).filter(Boolean);
   const emailAllowed = (email) => allowedEmails.length === 0 || allowedEmails.includes(auth.normalizeEmail(email || ''));
 
+  // Email verification is OPT-IN (default OFF) so the existing single-user / locked flow is
+  // unchanged. Turn it on with EMAIL_VERIFY=1 (or opts.emailVerify) when you open signup to
+  // the public — new accounts then can't log in until they click the link in their email.
+  const emailVerifyOn = (opts.emailVerify != null) ? !!opts.emailVerify : (process.env.EMAIL_VERIFY === '1');
+  const appBaseUrl = (opts.appBaseUrl || process.env.APP_BASE_URL || '').replace(/\/+$/, '');
+  // Pluggable mailer: opts.sendEmail(to, subject, text) -> Promise. No mailer configured =>
+  // links go to the server log (dev). Wire a real sender before opening signup for real.
+  const hasMailer = typeof opts.sendEmail === 'function';
+  const sendEmail = hasMailer ? opts.sendEmail
+    : (to, subject, text) => { console.log('[mail:none] to=' + to + ' subject="' + subject + '"\n' + text); return Promise.resolve(); };
+  const crypto = require('crypto');
+  const newVerifyToken = () => crypto.randomBytes(24).toString('hex');
+  const verifyUrlFor = (req, token) => (appBaseUrl || (req.protocol + '://' + req.get('host'))) + '/auth/verify?token=' + token;
+
   // Managed AI config (Phase 7e): the server holds the LLM key, the browser never
   // sees it. Empty provider/key = "not configured" -> /ai/chat returns 501.
   const aiProvider = opts.aiProvider || process.env.MANAGED_AI_PROVIDER || '';
@@ -182,9 +196,33 @@ async function startServer(opts = {}) {
     if (!emailAllowed(email)) { loginLimiter.hit(ipKey); return res.status(403).json({ error: 'not_allowed' }); }
     const em = auth.normalizeEmail(email);
     if (store.findByEmail(em)) return res.status(409).json({ error: 'email exists' });
-    const user = store.create({ email: em, passwordHash: auth.hashPassword(password) });
+    // When verification is ON: create UNVERIFIED with a one-time token, email the link, and
+    // do NOT hand back a session — the user logs in after verifying. When OFF (locked/trusted
+    // deployment): create verified and return a token immediately, as before.
+    if (emailVerifyOn) {
+      const vtok = newVerifyToken();
+      store.create({ email: em, passwordHash: auth.hashPassword(password), verified: false, verifyToken: vtok });
+      const url = verifyUrlFor(req, vtok);
+      Promise.resolve(sendEmail(em, 'ยืนยันอีเมลสำหรับ Kumiko', 'คลิกเพื่อยืนยันอีเมล: ' + url)).catch(() => {});
+      return res.json({ email: em, verifyRequired: true });
+    }
+    const user = store.create({ email: em, passwordHash: auth.hashPassword(password), verified: true });
     const token = auth.signToken({ sub: user.id, email: em }, secret);
     return res.json({ token, email: em });
+  });
+
+  // GET /auth/verify?token=... — confirm an email. Returns a tiny HTML page (this is a link
+  // click in a browser). Unknown/used token → a friendly failure, never a stack trace.
+  app.get('/auth/verify', (req, res) => {
+    const u = store.findByVerifyToken((req.query || {}).token);
+    const page = (ok, msg) => res.status(ok ? 200 : 400).type('html').send(
+      '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+      '<div style="font:16px/1.6 system-ui;max-width:420px;margin:14vh auto;padding:0 20px;text-align:center">' +
+      '<div style="font-size:40px">' + (ok ? '✓' : '⚠️') + '</div><h2 style="margin:.3em 0">' + (ok ? 'ยืนยันอีเมลแล้ว' : 'ยืนยันไม่สำเร็จ') + '</h2>' +
+      '<p style="color:#666">' + msg + '</p><p><a href="/" style="color:#3a56c5">ไปที่ Kumiko เพื่อเข้าสู่ระบบ</a></p></div>');
+    if (!u) return page(false, 'ลิงก์ไม่ถูกต้องหรือถูกใช้ไปแล้ว');
+    store.markVerified(u.id);
+    return page(true, 'บัญชี ' + u.email + ' พร้อมใช้งานแล้ว เข้าสู่ระบบได้เลย');
   });
 
   // POST /auth/login {email,password} — brute-force limited by client IP AND targeted email
@@ -202,6 +240,13 @@ async function startServer(opts = {}) {
     if (!user || !auth.verifyPassword(password, user.passwordHash)) {
       loginLimiter.hit(ipKey); if (emKey) loginLimiter.hit(emKey);   // only FAILURES count
       return res.status(401).json({ error: 'invalid credentials' });
+    }
+    // Block only accounts EXPLICITLY marked unverified; legacy users (no `verified` field)
+    // are grandfathered so an existing owner is never locked out. A bad password above still
+    // 401s first, so this doesn't reveal which emails exist.
+    if (user.verified === false) {
+      loginLimiter.reset(ipKey); if (emKey) loginLimiter.reset(emKey);   // credentials were right — don't penalise
+      return res.status(403).json({ error: 'email_not_verified' });
     }
     loginLimiter.reset(ipKey); if (emKey) loginLimiter.reset(emKey);  // success clears the counters
     const token = auth.signToken({ sub: user.id, email: em }, secret);

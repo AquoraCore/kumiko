@@ -36,7 +36,9 @@ function createStore(filePath) {
   }
 
   // passwordHash + googleId both optional now (Google users have no password).
-  function create({ email, passwordHash, googleId }) {
+  // verified/verifyToken support email verification: a NEW unverified user carries a token;
+  // legacy users (no `verified` field) are treated as verified elsewhere for back-compat.
+  function create({ email, passwordHash, googleId, verified, verifyToken }) {
     load();
     if (users.some((u) => u.email === email)) return null;
     const count = users.length + 1;
@@ -47,9 +49,27 @@ function createStore(filePath) {
     };
     if (passwordHash != null) user.passwordHash = passwordHash;
     if (googleId != null) user.googleId = googleId;
+    if (verified === true || verified === false) user.verified = verified;
+    if (verifyToken) user.verifyToken = verifyToken;
     users.push(user);
     save();
     return user;
+  }
+
+  function findByVerifyToken(token) {
+    const t = String(token == null ? '' : token);
+    if (!t) return null;
+    return load().find((u) => u.verifyToken && u.verifyToken === t) || null;
+  }
+
+  // Mark a user verified and drop the one-time token. Returns true if a change was made.
+  function markVerified(id) {
+    const u = load().find((x) => x.id === id);
+    if (!u) return false;
+    u.verified = true;
+    delete u.verifyToken;
+    save();
+    return true;
   }
 
   // find-or-create-and-link: by googleId first, then LINK to an existing email account,
@@ -71,7 +91,7 @@ function createStore(filePath) {
     return load();
   }
 
-  return { findByEmail, findByGoogleId, create, findOrCreateGoogle, _all };
+  return { findByEmail, findByGoogleId, create, findOrCreateGoogle, findByVerifyToken, markVerified, _all };
 }
 
 module.exports = { createStore };

@@ -21,7 +21,13 @@ async function webAuth(mode) {
       body: JSON.stringify({ email, password: pass }),
     });
     const body = await r.json().catch(() => ({}));
-    if (!r.ok) { msg.textContent = body.error || ('error ' + r.status); return; }
+    // Signup with verification on: no token yet — tell the user to check their email.
+    if (r.ok && body.verifyRequired) { msg.style.color = '#059669'; msg.textContent = 'สมัครแล้ว! เช็คอีเมลเพื่อยืนยันบัญชี จากนั้นเข้าสู่ระบบ'; return; }
+    if (!r.ok) {
+      const map = { email_not_verified: 'ยังไม่ได้ยืนยันอีเมล — เปิดลิงก์ยืนยันในอีเมลก่อน', not_allowed: 'อีเมลนี้ยังไม่ได้รับอนุญาตให้ใช้งาน', 'invalid credentials': 'อีเมลหรือรหัสผ่านไม่ถูกต้อง' };
+      msg.style.color = ''; msg.textContent = map[body.error] || body.error || ('error ' + r.status); return;
+    }
+    if (!body.token) { msg.textContent = 'ไม่ได้รับ token'; return; }
     await window.api.authSetToken(body.token, body.email);
     document.getElementById('webLogin').style.display = 'none';
     location.reload();
