@@ -1622,13 +1622,14 @@ const chatSend = document.getElementById('chatSend');
 // unrelated to any note. Retrieval errors never block the send.
 async function buildPriorityContext(question){
   const parts = [], sources = [], seen = new Set();
-  let hasOpenDoc = false;
+  // P1 — the OPEN document (note or PDF) is the PRIMARY context, placed first and marked
+  // highest-priority. It's always injected when something is open.
   if (currentNote) {
     let body = ''; try { body = (typeof getFullMarkdown === 'function') ? getFullMarkdown() : ''; } catch (_) {}
     if (body && body.trim()) {
       const nm = currentNote.replace(/\.md$/i, '');
       parts.push('[ความสำคัญสูงสุด — โน้ตที่กำลังเปิด] [source: ' + nm + ']\n' + body);
-      sources.push(nm); seen.add(nm.toLowerCase()); hasOpenDoc = true;
+      sources.push(nm); seen.add(nm.toLowerCase());
     }
   } else if (typeof currentPdf === 'string' && currentPdf) {
     // A PDF is open (not a note) → its extracted text IS the primary context. Prefer the
@@ -1638,12 +1639,12 @@ async function buildPriorityContext(question){
     if (!body || !body.trim()) { try { body = (typeof extractPdfToMarkdown === 'function') ? (await extractPdfToMarkdown(currentPdf)) || '' : ''; } catch (_) {} }
     if (body && body.trim()) {
       parts.push('[ความสำคัญสูงสุด — PDF ที่กำลังเปิด] [source: ' + base + ']\n' + body);
-      sources.push(base); seen.add(base.toLowerCase()); hasOpenDoc = true;
+      sources.push(base); seen.add(base.toLowerCase());
     }
   }
-  // Ambient RAG runs ONLY when NO specific document is open — so an open note/PDF references
-  // JUST itself (one source), and RAG breadth kicks in only for free chat (nothing open).
-  if (!hasOpenDoc && vsGet('ragAmbient', true)) {
+  // P2 — ambient RAG ALWAYS runs (even with a doc open): related notes are supporting context,
+  // ranked below the open doc and de-duped against it. The open doc stays the priority.
+  if (vsGet('ragAmbient', true)) {
     try {
       const r = await window.api.ragContext(question);
       const ctx = (r && r.context) || '';
