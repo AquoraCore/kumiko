@@ -6,6 +6,26 @@ const { wikiTargets, linksTo, rewriteLinkTargets } = require('./core/wikilinks')
 const { safeRel, baseName, vaultName } = require('./core/pathutil');
 const { aiConfigView, setConfigKey, buildApiRequest, parseSseDelta, buildEmbedRequest, parseEmbedResponse, resolveThinking, buildEngineInvocation } = require('./core/ai');
 const { spawn } = require('child_process');   // CLI (subscription) engine path — claude / opencode
+const os = require('os');
+// A GUI app launched from Finder/Dock inherits a MINIMAL PATH (/usr/bin:/bin:…) that does NOT
+// include Homebrew etc., so `spawn('claude')` fails with ENOENT even though the CLI is installed.
+// Rebuild a login-like PATH and resolve the binary to an absolute path so CLI mode actually works.
+function _richEnv(){
+  const home = os.homedir();
+  const extra = ['/opt/homebrew/bin', '/usr/local/bin', '/opt/local/bin', path.join(home, '.local', 'bin'), path.join(home, '.bun', 'bin'), path.join(home, '.deno', 'bin'), '/usr/bin', '/bin'];
+  const cur = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
+  const seen = {}, merged = [];
+  for (const d of extra.concat(cur)) { if (d && !seen[d]) { seen[d] = 1; merged.push(d); } }
+  return Object.assign({}, process.env, { PATH: merged.join(path.delimiter) });
+}
+function _resolveBin(cmd, env){
+  if (cmd.indexOf('/') >= 0) return cmd;                       // already a path
+  for (const dir of (env.PATH || '').split(path.delimiter)) {
+    const f = path.join(dir, cmd);
+    try { if (fs.existsSync(f)) return f; } catch (_) {}
+  }
+  return cmd;                                                  // fall back to bare name (spawn may still find it)
+}
 const CoreRag = require('./core/rag');
 
 // In dev, notes live beside the source. When packaged, __dirname is inside the
@@ -434,11 +454,13 @@ async function runApiProvider({ provider, model, prompt, key, rid, emit, thinkin
 function runCliEngine({ engine, model, prompt, rid, emit }){
   const inv = buildEngineInvocation(engine, model, prompt);
   if (!inv) { emit('\r\n[ไม่รู้จัก engine: ' + engine + ']\r\n'); win.webContents.send('engine:done', { runId: rid, code: -1 }); return; }
+  const env = _richEnv();
+  const bin = _resolveBin(inv.cmd, env);   // absolute path so Finder-launched apps find it
   let child;
-  try { child = spawn(inv.cmd, inv.args, { stdio: ['pipe', 'pipe', 'pipe'] }); }
+  try { child = spawn(bin, inv.args, { stdio: ['pipe', 'pipe', 'pipe'], env }); }
   catch (err) { emit('\r\n[เรียก ' + inv.cmd + ' ไม่ได้ — ติดตั้ง/ล็อกอิน CLI แล้วหรือยัง?] ' + (err && err.message || '') + '\r\n'); win.webContents.send('engine:done', { runId: rid, code: -1 }); return; }
   engineProcs.set(rid, child);   // child.kill(signal) satisfies engine:stop
-  child.on('error', (err) => { emit('\r\n[' + inv.cmd + ' error: ' + (err && err.message || err) + ' — ติดตั้ง CLI แล้วหรือยัง?]\r\n'); });
+  child.on('error', (err) => { emit('\r\n[' + inv.cmd + ' error: ' + (err && err.message || err) + ' — ' + (String(err && err.code) === 'ENOENT' ? ('หา `' + inv.cmd + '` ไม่เจอ — ติดตั้งแล้วหรือยัง? (PATH: ' + env.PATH.split(path.delimiter).slice(0,3).join(', ') + '…)') : 'ติดตั้ง CLI แล้วหรือยัง?') + ']\r\n'); });
   if (child.stdin) { if (inv.stdin != null) { try { child.stdin.write(inv.stdin); } catch (_) {} } try { child.stdin.end(); } catch (_) {} }
   if (child.stdout) child.stdout.on('data', (d) => emit(d.toString()));
   if (child.stderr) child.stderr.on('data', (d) => emit(d.toString()));

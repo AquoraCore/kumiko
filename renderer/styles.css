@@ -173,9 +173,9 @@ kbd { font: inherit; font-size: 10px; color: var(--muted); border: 1px solid var
 .ai-prompt-ta { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; padding: 6px 8px;
   border: 1px solid var(--line); border-radius: 6px; background: var(--card, #fff); color: var(--text); }
 /* AI settings — sidebar (section nav) + detail two-pane layout */
-#aiSettingsModal { width: min(680px, 94vw); max-width: 94vw; }
-.ai-settings-body { display: flex; gap: 0; align-items: stretch; min-height: 340px; max-height: 66vh; }
-.ai-settings-nav { flex: 0 0 168px; display: flex; flex-direction: column; gap: 2px; padding: 6px 8px 6px 0; border-right: 1px solid var(--line); }
+#aiSettingsModal { width: min(900px, 96vw); max-width: 96vw; }
+.ai-settings-body { display: flex; gap: 0; align-items: stretch; min-height: 440px; max-height: 82vh; }
+.ai-settings-nav { flex: 0 0 190px; display: flex; flex-direction: column; gap: 2px; padding: 6px 10px 6px 0; border-right: 1px solid var(--line); }
 .ai-nav-item { text-align: left; border: none; background: none; color: var(--text); cursor: pointer;
   padding: 8px 10px; border-radius: 7px; font-size: 13px; line-height: 1.3; }
 .ai-nav-item:hover { background: var(--accent-bg); }

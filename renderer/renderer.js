@@ -1629,6 +1629,16 @@ async function buildPriorityContext(question){
       parts.push('[ความสำคัญสูงสุด — โน้ตที่กำลังเปิด] [source: ' + nm + ']\n' + body);
       sources.push(nm); seen.add(nm.toLowerCase());
     }
+  } else if (typeof currentPdf === 'string' && currentPdf) {
+    // A PDF is open (not a note) → its extracted text IS the primary context. Prefer the
+    // cached PDF-Text note; if the background indexer hasn't produced it yet, extract on demand.
+    const base = currentPdf.replace(/\.pdf$/i, '').split('/').pop();
+    let body = ''; try { body = await window.api.openNote('PDF-Text/' + base + '.md'); } catch (_) {}
+    if (!body || !body.trim()) { try { body = (typeof extractPdfToMarkdown === 'function') ? (await extractPdfToMarkdown(currentPdf)) || '' : ''; } catch (_) {} }
+    if (body && body.trim()) {
+      parts.push('[ความสำคัญสูงสุด — PDF ที่กำลังเปิด] [source: ' + base + ']\n' + body);
+      sources.push(base); seen.add(base.toLowerCase());
+    }
   }
   if (vsGet('ragAmbient', true)) {
     try {
