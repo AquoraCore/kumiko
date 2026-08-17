@@ -1622,12 +1622,13 @@ const chatSend = document.getElementById('chatSend');
 // unrelated to any note. Retrieval errors never block the send.
 async function buildPriorityContext(question){
   const parts = [], sources = [], seen = new Set();
+  let hasOpenDoc = false;
   if (currentNote) {
     let body = ''; try { body = (typeof getFullMarkdown === 'function') ? getFullMarkdown() : ''; } catch (_) {}
     if (body && body.trim()) {
       const nm = currentNote.replace(/\.md$/i, '');
       parts.push('[ความสำคัญสูงสุด — โน้ตที่กำลังเปิด] [source: ' + nm + ']\n' + body);
-      sources.push(nm); seen.add(nm.toLowerCase());
+      sources.push(nm); seen.add(nm.toLowerCase()); hasOpenDoc = true;
     }
   } else if (typeof currentPdf === 'string' && currentPdf) {
     // A PDF is open (not a note) → its extracted text IS the primary context. Prefer the
@@ -1637,10 +1638,12 @@ async function buildPriorityContext(question){
     if (!body || !body.trim()) { try { body = (typeof extractPdfToMarkdown === 'function') ? (await extractPdfToMarkdown(currentPdf)) || '' : ''; } catch (_) {} }
     if (body && body.trim()) {
       parts.push('[ความสำคัญสูงสุด — PDF ที่กำลังเปิด] [source: ' + base + ']\n' + body);
-      sources.push(base); seen.add(base.toLowerCase());
+      sources.push(base); seen.add(base.toLowerCase()); hasOpenDoc = true;
     }
   }
-  if (vsGet('ragAmbient', true)) {
+  // Ambient RAG runs ONLY when NO specific document is open — so an open note/PDF references
+  // JUST itself (one source), and RAG breadth kicks in only for free chat (nothing open).
+  if (!hasOpenDoc && vsGet('ragAmbient', true)) {
     try {
       const r = await window.api.ragContext(question);
       const ctx = (r && r.context) || '';
