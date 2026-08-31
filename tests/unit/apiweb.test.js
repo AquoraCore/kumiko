@@ -25,8 +25,8 @@ function memStore() {
 // if the shim is missing any of these, the renderer hits an undefined call at boot.
 const PRELOAD_METHODS = [
   'startPty', 'ptyInput', 'ptyResize', 'ptyRestart', 'onPtyData',
-  'listNotes', 'openNote', 'readNote', 'importPdf', 'readPdf', 'renamePdf', 'readAnnots', 'saveAnnots',
-  'saveNote', 'onNoteChanged', 'createNote', 'renameNote', 'deleteNote', 'searchNotes', 'backlinks',
+  'listNotes', 'openNote', 'readNote', 'readGlobalMemory', 'saveGlobalMemory', 'importPdf', 'readPdf', 'renamePdf', 'readAnnots', 'saveAnnots',
+  'saveNote', 'onNoteChanged', 'onNoteFlagged', 'createNote', 'renameNote', 'deleteNote', 'searchNotes', 'backlinks',
   'crdtLoad', 'crdtSave', 'noteTable', 'graphData',
   'dbList', 'dbRead', 'dbSave', 'dbCreate', 'dbDelete', 'folderCreate', 'folderRename', 'folderDelete',
   'trashList', 'trashRestore', 'trashDeleteForever', 'trashEmpty',
@@ -155,11 +155,44 @@ describe('web api shim', () => {
     }
   }, 20000);
 
-  it('exposes every method the Electron preload defines (contract parity, 56)', () => {
+  it('global memory round-trips per user and NEVER leaks across accounts', async () => {
+    const s = await startServer({ port: 0, dataDir: tmpDir() });
+    const base = 'http://127.0.0.1:' + s.port;
+    const signup = async (email) => {
+      const r = await fetch(base + '/auth/signup', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email, password: 'password123' }),
+      });
+      return (await r.json()).token;
+    };
+    try {
+      const tokA = await signup('gmem-a@b.com');
+      const tokB = await signup('gmem-b@b.com');
+      const apiA = createWebApi({ baseUrl: base, getToken: () => tokA, store: memStore() });
+      const apiB = createWebApi({ baseUrl: base, getToken: () => tokB, store: memStore() });
+      // happy: A writes their profile and reads it back verbatim
+      expect(await apiA.readGlobalMemory()).toBe('');
+      await apiA.saveGlobalMemory('## ผู้ใช้\n\n- ตอบไทยเสมอ <!--k 2026-08-29-->\n');
+      expect(await apiA.readGlobalMemory()).toContain('ตอบไทยเสมอ');
+      // isolation: B sees an empty profile, and B's write does not touch A's
+      expect(await apiB.readGlobalMemory()).toBe('');
+      await apiB.saveGlobalMemory('## ผู้ใช้\n\n- ของ B');
+      expect(await apiA.readGlobalMemory()).toContain('ตอบไทยเสมอ');
+      expect(await apiA.readGlobalMemory()).not.toContain('ของ B');
+      // edge: logged-out shim degrades to empty read / {error} write
+      const apiOut = createWebApi({ baseUrl: base, getToken: () => null, store: memStore() });
+      expect(await apiOut.readGlobalMemory()).toBe('');
+      expect(await apiOut.saveGlobalMemory('x')).toEqual({ error: 'failed' });
+    } finally {
+      await s.close();
+    }
+  }, 20000);
+
+  it('exposes every method the Electron preload defines (contract parity, 59)', () => {
     const api = createWebApi({ baseUrl: 'http://x', getToken: () => null, store: memStore() });
     const missing = PRELOAD_METHODS.filter((n) => typeof api[n] !== 'function');
     expect(missing).toEqual([]);
-    expect(PRELOAD_METHODS.length).toBe(56);
+    expect(PRELOAD_METHODS.length).toBe(59);
   });
 
   it('vault state round-trips through store (vaultStateReadSync is sync)', async () => {
@@ -312,18 +345,47 @@ describe('web api shim', () => {
       await api.saveNote('Nephron.md', '# Nephron\n\nthe nephron filters blood in the kidney');
       await api.saveNote('Mitochondria.md', '# Mitochondria\n\nmakes ATP energy');
 
+      const names = (r) => (r.sources || []).map((s) => (s && typeof s === 'object') ? s.name : s);
       // HAPPY — BM25 ranks Nephron for this query; Mitochondria is irrelevant.
       const r1 = await api.ragContext('nephron kidney');
       expect(r1.context).toContain('Nephron');
       expect(r1.context.toLowerCase()).toContain('filters');
-      expect(r1.sources).toContain('Nephron');
+      expect(names(r1)).toContain('Nephron');
       expect(r1.context).not.toContain('Mitochondria');
+      // sources now carry a reason label (tiered RAG)
+      expect(r1.sources[0]).toHaveProperty('reason');
 
       // EDGE — no lexical match -> empty; empty query -> empty context.
       const r2 = await api.ragContext('zzzznomatch qqqq');
       expect(r2).toEqual({ context: '', sources: [] });
       const r3 = await api.ragContext('');
       expect(r3.context).toBe('');
+
+      // EXCLUDE — the OPEN doc is P1 upstream, so RAG must NOT re-inject it. With Nephron
+      // excluded, its body disappears from the RAG block entirely (no double-injection).
+      const r4 = await api.ragContext('nephron kidney', { exclude: ['Nephron'] });
+      expect(r4.context).not.toContain('filters');
+      expect(names(r4)).not.toContain('Nephron');
+
+      // ANCHOR — with Nephron open (as docQuery) + a note that LINKS to it, the explicit graph
+      // channel surfaces the linker even though the question is generic.
+      await api.saveNote('Glomerulus.md', '# Glomerulus\n\npart of the [[Nephron]] that filters');
+      const r5 = await api.ragContext('anatomy', { openName: 'Nephron', docQuery: 'Nephron kidney', outlinks: [] });
+      expect(names(r5)).toContain('Glomerulus');
+      expect(r5.sources.find((s) => s.name === 'Glomerulus').reason).toBe('linked');
+
+      // MENTION (Phase 2) — a note naming "Nephron" verbatim WITHOUT a [[link]] is a Tier-2 tie.
+      // It is a BOOST, not an admission ticket: it surfaces when it also matches the question...
+      await api.saveNote('Casual.md', '# Casual\n\nthe Nephron came up in lecture today');
+      const r6 = await api.ragContext('lecture', { openName: 'Nephron', docQuery: 'Nephron kidney' });
+      const casual = r6.sources.find((s) => s.name === 'Casual');
+      expect(casual).toBeTruthy();
+      expect(casual.reason).toBe('mention');
+
+      // ...and is NOT injected when it has nothing to do with the question (the bug that made the
+      // same notes reappear in every single answer).
+      const r7 = await api.ragContext('zzzznomatch qqqq', { openName: 'Nephron', docQuery: 'Nephron kidney' });
+      expect(names(r7)).not.toContain('Casual');
     } finally {
       await s.close();
     }
@@ -397,7 +459,7 @@ describe('web api shim', () => {
       });
       expect(ok).toBe(true);
       expect(parts.join('')).toBe('ok');
-      expect(seen).toEqual({ provider: 'zai', key: 'sk-user', model: 'glm-5.2', thinking: null });
+      expect(seen).toEqual({ provider: 'zai', key: 'sk-user', model: 'glm-5.2', thinking: null, images: [] });
     } finally {
       await s.close();
     }

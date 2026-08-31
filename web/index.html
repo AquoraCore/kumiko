@@ -34,6 +34,20 @@
   </style>
 </head>
 <body>
+  <script src="/core/theme.js?v=__ASSET_VERSION__"></script>
+  <script>
+    (function(){ try {
+      var CT = window.CoreTheme; if (!CT) return;
+      var mode = localStorage.getItem('theme') || 'light';
+      var mql = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+      var dark = CT.resolveMode(mode, mql) === 'dark';
+      var r = document.documentElement; r.setAttribute('data-theme', dark ? 'dark' : 'light');
+      var th = null; try { th = JSON.parse(localStorage.getItem('kumikoTheme') || 'null'); } catch (_) {}
+      var tk = CT.tokens(th, dark); for (var k in tk) r.style.setProperty(k, tk[k]);
+      if (localStorage.getItem('sidebar') === 'collapsed') r.setAttribute('data-boot-sidebar', 'collapsed');
+      if (localStorage.getItem('chatHidden') === '1') r.setAttribute('data-boot-chat', 'hidden');
+    } catch (_) {} })();
+  </script>
   <script>window.KUMIKO_BUILD="__BUILD__";window.KUMIKO_ASSETV="__ASSET_VERSION__";window.KUMIKO_VERSION="__APP_VERSION__";</script>
 
   <!-- BOOT SPLASH: covers the flash of empty panels between CSS-ready and JS-populated.
@@ -136,7 +150,8 @@
       <symbol id="i-book" viewBox="0 0 24 24"><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M9 7h7M9 11h5"/></symbol>
       <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M6 2h12a1 1 0 0 1 1 1v18l-7-4.5L5 21V3a1 1 0 0 1 1-1z"/></symbol>
     </svg>
-  <div id="app">
+  <div id="splash" aria-hidden="true"><div class="splash-logo"><i style="-webkit-mask-image:url(/renderer/logo-mask.png?v=__ASSET_VERSION__);mask-image:url(/renderer/logo-mask.png?v=__ASSET_VERSION__)"></i></div><div class="splash-name">Kumiko</div><div class="splash-bar"><i></i></div></div>
+  <div id="app" class="term-right">
     <!-- SIDEBAR: note list + search -->
     <aside id="sidebar">
       <img id="webAppIcon" src="/web/kumiko-icon.png" alt="Kumiko" />
@@ -228,6 +243,7 @@
       <div id="tableView" class="main-view"></div>
       <div id="dashView" class="main-view"></div>
       <div id="crateView" class="main-view"></div>
+      <div id="tagView" class="main-view"></div>
       <div id="trashView" class="main-view"></div>
       <div id="pdfView" class="main-view">
         <div class="pdf-toolbar">
@@ -237,9 +253,8 @@
             <button id="pdfNext" title="หน้าถัดไป" data-i18n-title="หน้าถัดไป">›</button>
           </span>
           <span class="pdf-spacer"></span>
-          <button id="pdfNoteBtn" class="pdf-tb" title="โน้ตคู่หูของ PDF นี้" data-i18n-title="โน้ตคู่หูของ PDF นี้"><svg class="ic sm"><use href="#i-note"/></svg></button>
           <button id="pdfAnnotsBtn" class="pdf-tb" title="รายการไฮไลต์" data-i18n-title="รายการไฮไลต์"><svg class="ic sm"><use href="#i-list"/></svg></button>
-          <button id="pdfCropBtn" class="pdf-tb" title="ตัดกระดาษ / เลือกพื้นที่ (ไฮไลต์ภาพสแกนได้)" data-i18n-title="ตัดกระดาษ / เลือกพื้นที่ (ไฮไลต์ภาพสแกนได้)"><svg class="ic sm"><use href="#i-scissors"/></svg></button>
+          <button id="pdfAreaBtn" class="pdf-tb" title="ไฮไลต์พื้นที่ (ลากกรอบ — ใช้กับภาพสแกนได้)" data-i18n-title="ไฮไลต์พื้นที่ (ลากกรอบ — ใช้กับภาพสแกนได้)"><svg class="ic sm"><use href="#i-select"/></svg></button>
           <button id="pdfTextBtn" class="pdf-tb" title="ใส่กล่องข้อความ" data-i18n-title="ใส่กล่องข้อความ"><svg class="ic sm"><use href="#i-text"/></svg></button>
         </div>
         <div class="pdf-body">
@@ -280,8 +295,13 @@
         <div id="sessionTabs" class="session-tabs"></div>
         <div id="sessionHead" class="session-head"></div>
         <div id="chatMessages"></div>
+        <div id="attachBar" class="attach-bar" hidden></div>
         <div class="chat-input">
-          <textarea id="chatInput" rows="1" placeholder="พิมพ์ข้อความ… (Enter ส่ง · Shift+Enter ขึ้นบรรทัด)" data-i18n-ph="พิมพ์ข้อความ… (Enter ส่ง · Shift+Enter ขึ้นบรรทัด)"></textarea>
+          <div class="chat-input-wrap">
+            <div id="chatInputHl" aria-hidden="true"></div>
+            <textarea id="chatInput" rows="1" placeholder="พิมพ์ข้อความ… (Enter ส่ง · Shift+Enter ขึ้นบรรทัด)" data-i18n-ph="พิมพ์ข้อความ… (Enter ส่ง · Shift+Enter ขึ้นบรรทัด)"></textarea>
+          </div>
+          <button id="chatAttach" title="แนบภาพ" data-i18n-title="แนบภาพ"><svg class="ic sm"><use href="#i-clip"/></svg><span class="att-badge" hidden>0</span></button>
           <button id="chatSend" title="ส่ง" data-i18n-title="ส่ง"><svg class="ic sm"><use href="#i-send"/></svg></button>
         </div>
       </div>
@@ -299,12 +319,15 @@
   <script src="/core/markdown.js?v=__ASSET_VERSION__"></script>
   <script src="/core/aicaps.js?v=__ASSET_VERSION__"></script>
   <script src="/core/tags.js?v=__ASSET_VERSION__"></script>
+  <script src="/core/tagindex.js?v=__ASSET_VERSION__"></script>
   <script src="/core/frontmatter.js?v=__ASSET_VERSION__"></script>
   <script src="/core/textdiff.js?v=__ASSET_VERSION__"></script>
   <script src="/core/textsim.js?v=__ASSET_VERSION__"></script>
   <script src="/core/rag.js?v=__ASSET_VERSION__"></script>
+  <script src="/core/theme.js?v=__ASSET_VERSION__"></script>
   <script src="/core/wikilinks.js?v=__ASSET_VERSION__"></script>
   <script src="/core/tboxsize.js?v=__ASSET_VERSION__"></script>
+  <script src="/core/memory.js?v=__ASSET_VERSION__"></script>
   <script src="/core/syncstatus.js?v=__ASSET_VERSION__"></script>
   <script src="/core/collabroom.js?v=__ASSET_VERSION__"></script>
   <!-- api-web.js MUST load AFTER core/frontmatter + core/wikilinks: it captures
@@ -318,7 +341,10 @@
   <script src="/renderer/dashboard.js?v=__ASSET_VERSION__"></script>
   <script src="/renderer/pdf.js?v=__ASSET_VERSION__"></script>
   <script src="/renderer/chat.js?v=__ASSET_VERSION__"></script>
+  <script src="/renderer/attach.js?v=__ASSET_VERSION__"></script>
   <script src="/renderer/sidebar.js?v=__ASSET_VERSION__"></script>
+  <script src="/renderer/tagsys.js?v=__ASSET_VERSION__"></script>
+  <script src="/renderer/memsys.js?v=__ASSET_VERSION__"></script>
   <script src="/renderer/dragdrop.js?v=__ASSET_VERSION__"></script>
   <script src="/renderer/renderer.js?v=__ASSET_VERSION__"></script>
 </body>

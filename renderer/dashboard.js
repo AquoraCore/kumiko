@@ -41,6 +41,12 @@ async function renderDash(){
   const head = document.createElement('div'); head.className = 'view-head';
   const title = document.createElement('span'); title.className = 'vh-title'; title.textContent = (typeof currentDashboard === 'function' ? currentDashboard().name : t('แดชบอร์ด'));
   const sp = document.createElement('span'); sp.className = 'vh-sp';
+  // "หน้าแรก" role (from the Study-Scroll direction): open this dashboard on app start
+  const startLab = document.createElement('label'); startLab.className = 'dash-start';
+  const startCk = document.createElement('input'); startCk.type = 'checkbox'; startCk.checked = !!vsGet('startDash', false);
+  startCk.onchange = () => vsSet('startDash', startCk.checked);
+  startLab.appendChild(startCk); startLab.appendChild(document.createTextNode(' ' + t('เปิดหน้านี้เมื่อเริ่มแอพ')));
+  sp.appendChild(startLab);
   const add = document.createElement('button'); add.className = 'solid sm'; add.textContent = t('＋ เพิ่มการ์ด');
   add.onclick = (e) => { e.stopPropagation(); openDashAddMenu(add, dbs); };
   sp.appendChild(add);
@@ -57,8 +63,90 @@ async function renderDash(){
   const need = [...new Set(widgets.map((w) => w.dbId))];
   const data = {};
   for (const id of need){ try { data[id] = await window.api.dbRead(id); } catch (_) { data[id] = null; } }
-  widgets.forEach((w, i) => canvas.appendChild(buildDashCard(w, i, data[w.dbId], widgets)));
+  widgets.forEach((w, i) => canvas.appendChild(w.study ? buildStudyCard(w, i, widgets) : buildDashCard(w, i, data[w.dbId], widgets)));
   scroll.appendChild(canvas); host.appendChild(scroll);
+}
+
+// ---- study widgets (2026-08-20): the vault's own life on the dashboard --------------------
+const STUDY_KINDS = { reviews: 'รอรีวิวจาก AI', reading: 'อ่านต่อ', captures: 'เก็บเข้าโน้ตวันนี้', recent: 'โน้ตแก้ล่าสุด' };
+function _agoText(ts){
+  const m = Math.max(0, Math.round((Date.now() - ts) / 60000));
+  if (m < 1) return t('เมื่อครู่');
+  if (m < 60) return m + ' ' + t('นาทีก่อน');
+  const h = Math.round(m / 60);
+  if (h < 24) return h + ' ' + t('ชม.ก่อน');
+  const d = Math.round(h / 24);
+  return d === 1 ? t('เมื่อวาน') : d + ' ' + t('วันก่อน');
+}
+function _studyRow(icon, label, sub, onClick){
+  const row = document.createElement('div'); row.className = 'dash-li study';
+  row.innerHTML = icoSvg(icon, 'xs');
+  const nm = document.createElement('span'); nm.className = 'dl-nm'; nm.textContent = label; row.appendChild(nm);
+  if (sub){ const s = document.createElement('span'); s.className = 'dl-sub'; s.textContent = sub; row.appendChild(s); }
+  if (onClick) row.onclick = onClick;
+  return row;
+}
+function buildStudyCard(w, idx, widgets){
+  const card = document.createElement('div'); card.className = 'dash-card span-' + (w.span || 1) + (w.tall ? ' tall' : '');
+  const h = document.createElement('div'); h.className = 'dash-h';
+  const ttl = document.createElement('span'); ttl.className = 'dash-t';
+  ttl.innerHTML = icoSvg(w.study === 'reading' ? 'book' : 'note', 'xs');
+  ttl.appendChild(document.createTextNode(' ' + t(STUDY_KINDS[w.study] || w.study)));
+  const kind = document.createElement('span'); kind.className = 'dash-kind'; kind.textContent = t('การเรียน');
+  const dots = document.createElement('button'); dots.className = 'dash-dots'; dots.textContent = '⋯';
+  dots.onclick = (e) => { e.stopPropagation(); openDashCardMenu(dots, idx, widgets); };
+  h.appendChild(ttl); h.appendChild(kind); h.appendChild(dots); card.appendChild(h);
+  const body = document.createElement('div'); body.className = 'dash-body dash-study';
+  card.appendChild(body);
+  const empty = (msg) => { const e = document.createElement('div'); e.className = 'ds-done'; e.textContent = msg; body.appendChild(e); };
+  const base = (rel) => String(rel || '').replace(/\.md$/i, '').split('/').pop();
+
+  if (w.study === 'reviews'){
+    const pending = (window.__pendingReviews) ? [...window.__pendingReviews.keys()] : [];
+    const flagged = (window.__flaggedNotes) ? [...window.__flaggedNotes].filter((r) => pending.indexOf(r) < 0) : [];
+    card.classList.toggle('dash-attn', pending.length + flagged.length > 0);
+    if (!pending.length && !flagged.length) { empty(t('済 ไม่มีงานรอรีวิว')); return card; }
+    pending.slice(0, 5).forEach((rel) => body.appendChild(_studyRow('note', base(rel), t('เสนอแก้ — เปิดเพื่อรีวิว'), () => openNote(rel))));
+    flagged.slice(0, 5).forEach((rel) => body.appendChild(_studyRow('note', base(rel), t('มีการแก้ไขใหม่'), () => openNote(rel))));
+    return card;
+  }
+  if (w.study === 'reading'){
+    const lo = vsGet('lastOpen', null);
+    const pdfs = (vsGet('recentPdfs', []) || []).slice();
+    if (lo && lo.type === 'pdf' && lo.name && pdfs.indexOf(lo.name) < 0) pdfs.unshift(lo.name);
+    if (!pdfs.length) { empty(t('ยังไม่เคยเปิด PDF ใน vault นี้')); return card; }
+    pdfs.slice(0, 3).forEach((rel) => {
+      const pg = (typeof vsPdfPageGet === 'function') ? vsPdfPageGet(rel) : null;
+      body.appendChild(_studyRow('pdf', base(rel), pg ? (t('หน้า ') + pg) : '', () => openPdf(rel)));
+    });
+    const cap = (vsGet('captureLog', []) || [])[0];
+    if (cap && cap.target){
+      const s = document.createElement('div'); s.className = 'ds-target';
+      s.textContent = t('โน้ตเป้าหมายล่าสุด: ') + base(cap.target);
+      s.onclick = () => openNote(cap.target);
+      body.appendChild(s);
+    }
+    return card;
+  }
+  if (w.study === 'captures'){
+    const day0 = new Date(); day0.setHours(0, 0, 0, 0);
+    const log = (vsGet('captureLog', []) || []).filter((c) => c.ts >= day0.getTime());
+    if (!log.length) { empty(t('วันนี้ยังไม่มีการเก็บเข้าโน้ต')); return card; }
+    log.slice(0, 6).forEach((c) => {
+      const icon = c.kind === 'image' ? 'gallery' : 'note';
+      const label = (c.kind === 'image' ? t('ภาพสไลด์หน้า ') + c.page : (c.text || t('ข้อความ')));
+      body.appendChild(_studyRow(icon, label, '→ ' + base(c.target), () => openNote(c.target)));
+    });
+    return card;
+  }
+  if (w.study === 'recent'){
+    const rec = vsGet('recentNotes', []) || [];
+    if (!rec.length) { empty(t('ยังไม่มีประวัติการแก้โน้ต')); return card; }
+    rec.slice(0, 6).forEach((r) => body.appendChild(_studyRow('note', base(r.rel), _agoText(r.ts), () => openNote(r.rel))));
+    return card;
+  }
+  empty('?');
+  return card;
 }
 
 function buildDashCard(w, idx, db, widgets){
@@ -205,6 +293,20 @@ function renderDashViz(body, db, w){
 function openDashAddMenu(anchor, dbs){
   closeDbMenu();
   const menu = document.createElement('div'); menu.className = 'db-menu'; menu.id = 'dbMenu';
+  // study widgets first — the dashboard's "หน้าแรกของวันนี้" role
+  const sh = document.createElement('div'); sh.className = 'lp-sub'; sh.textContent = t('การ์ดการเรียน:'); menu.appendChild(sh);
+  Object.keys(STUDY_KINDS).forEach((k) => {
+    const it = document.createElement('div'); it.className = 'db-mi';
+    it.innerHTML = icoSvg(k === 'reading' ? 'book' : 'note', 'sm');
+    it.appendChild(document.createTextNode(' ' + t(STUDY_KINDS[k])));
+    it.onclick = () => {
+      closeDbMenu();
+      const ws = loadDashWidgets();
+      ws.push({ id: dbNewId('w'), study: k, span: k === 'captures' ? 2 : 1 });
+      saveDashWidgets(ws); renderDash();
+    };
+    menu.appendChild(it);
+  });
   const hd = document.createElement('div'); hd.className = 'lp-sub'; hd.textContent = t('เลือกฐานข้อมูล:'); menu.appendChild(hd);
   if (!dbs.length){ const e = document.createElement('div'); e.className = 'db-mi db-mi-mut'; e.textContent = t('ยังไม่มีฐานข้อมูล'); menu.appendChild(e); }
   dbs.forEach((d) => {

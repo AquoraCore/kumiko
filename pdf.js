@@ -15,9 +15,125 @@ let pendingSel = null;
 
 function pdfPagesEl(){ return document.getElementById('pdfPages'); }
 
+// ---- PDF → markdown text pipeline (POC) --------------------------------------
+// Extract a PDF's text with pdf.js (getTextContent per page, joined into lines) and save
+// it as a note under PDF-Text/, so the existing RAG index picks it up and the AI can
+// "read" the PDF. Runs behind the scenes on open (once per PDF). Scanned/image PDFs yield
+// little text — OCR (e.g. Typhoon-OCR) is the follow-up phase.
+async function extractPdfToMarkdown(name, preData){
+  if (!window.pdfjsLib) return null;
+  let data = preData || null;
+  if (!data) { try { const buf = await window.api.readPdf(name); data = buf ? (buf instanceof Uint8Array ? buf : new Uint8Array(buf)) : null; } catch (_) { data = null; } }
+  if (!data) return null;
+  let doc; try { doc = await window.pdfjsLib.getDocument({ data }).promise; } catch (_) { return null; }
+  const base = name.replace(/\.pdf$/i, '').split('/').pop();
+  let md = '# ' + base + '\n\n> ดึงข้อความอัตโนมัติจากไฟล์ PDF `' + name + '` (สำหรับให้ AI อ้างอิง)\n\n';
+  for (let p = 1; p <= doc.numPages; p++){
+    let text = '';
+    try {
+      const page = await doc.getPage(p);
+      const tc = await page.getTextContent();
+      let line = '', lastY = null;
+      for (const it of tc.items){
+        const y = (it.transform && it.transform.length > 5) ? it.transform[5] : null;
+        if (lastY !== null && y !== null && Math.abs(y - lastY) > 3){ text += line.replace(/\s+$/, '') + '\n'; line = ''; }
+        line += (it.str || '') + (it.hasEOL ? '\n' : ' ');
+        lastY = y;
+      }
+      text += line;
+    } catch (_) {}
+    md += '## หน้า ' + p + '\n\n' + text.trim() + '\n\n';
+  }
+  return md;
+}
+// The visible-body length of a pdf.js extraction (drops the # / > / ## scaffolding), so we
+// can tell a DIGITAL pdf (lots of text) from a SCANNED one (little/none → needs OCR).
+function _pdfBodyLen(md){
+  if (!md) return 0;
+  return md.replace(/^#.*$/gm, '').replace(/^>.*$/gm, '').replace(/^## หน้า.*$/gm, '').replace(/\s+/g, '').length;
+}
+// Cheap content signature (byte length + hashed head/tail) — changes whenever the PDF's
+// bytes change, so a same-named NEW VERSION is detected and re-indexed instead of skipped.
+function _djb2(bytes, start, end){ let h = 5381; for (let i = start; i < end; i++){ h = ((h << 5) + h + bytes[i]) | 0; } return h >>> 0; }
+function _pdfSignature(bytes){
+  const n = bytes.length, k = Math.min(4096, n);
+  return n.toString(36) + '.' + _djb2(bytes, 0, k).toString(36) + '.' + _djb2(bytes, n - k, n).toString(36);
+}
+async function indexPdfIntoRag(name, preData){
+  let md = await extractPdfToMarkdown(name, preData);  // fast path: pdf.js text (digital PDFs)
+  // Sparse text ⇒ likely a scanned/image PDF ⇒ OCR with Apple Vision (desktop/macOS only;
+  // window.api.pdfOcr returns null off-mac, so this quietly no-ops on web/Windows).
+  if (_pdfBodyLen(md) < 40 && window.api && window.api.pdfOcr) {
+    try {
+      const ocr = await window.api.pdfOcr(name);
+      if (ocr && ocr.replace(/\s+/g, '').length > _pdfBodyLen(md)) {
+        const base = name.replace(/\.pdf$/i, '').split('/').pop();
+        md = '# ' + base + '\n\n> ดึงข้อความจาก PDF `' + name + '` ด้วย OCR (Apple Vision) — สำหรับให้ AI อ้างอิง\n\n' + ocr;
+      }
+    } catch (_) {}
+  }
+  if (md == null) return { ok: false };
+  const noteName = 'PDF-Text/' + name.replace(/\.pdf$/i, '').split('/').pop() + '.md';
+  try { await window.api.saveNote(noteName, md); } catch (_) { return { ok: false }; }
+  return { ok: true, note: noteName, chars: md.length };
+}
+
+// ---- Background PDF indexer (Cursor-style) --------------------------------------------
+// Silently OCR/extract every PDF in the vault into RAG, one at a time, throttled so it never
+// blocks the UI. A per-vault cache (by name) skips already-indexed PDFs so it only does new
+// work — like Cursor indexing a codebase. A small chip shows progress.
+let _pdfQueue = [], _pdfIndexing = false;
+function _pdfIndexStatus(remaining){
+  const el = document.getElementById('pdfIndexChip');
+  if (!el) return;
+  if (remaining > 0){ el.hidden = false; el.textContent = '📄 ' + t('อ่าน PDF…') + ' (' + remaining + ')'; }
+  else el.hidden = true;
+}
+async function _indexPdfOnce(name, force){
+  // Read bytes (cheap) to compute the content signature: skip only if the file is UNCHANGED
+  // since last index. A new version of a same-named PDF has a new signature → re-indexed.
+  let bytes = null;
+  try { const b = await window.api.readPdf(name); bytes = b ? (b instanceof Uint8Array ? b : new Uint8Array(b)) : null; } catch (_) {}
+  if (!bytes) return;
+  const sig = _pdfSignature(bytes);
+  const cache = (typeof vsGet === 'function') ? (vsGet('pdfIndexed', {}) || {}) : {};
+  if (cache[name] === sig && !force) return;               // unchanged → skip the expensive extract/OCR
+  const r = await indexPdfIntoRag(name, bytes);            // reuse the bytes we already read
+  if (r && r.ok){ cache[name] = sig; if (typeof vsSet === 'function') vsSet('pdfIndexed', cache); }
+}
+async function _runPdfQueue(){
+  if (_pdfIndexing) return; _pdfIndexing = true;
+  while (_pdfQueue.length){
+    _pdfIndexStatus(_pdfQueue.length);
+    const name = _pdfQueue.shift();
+    try { await _indexPdfOnce(name); } catch (_) {}
+    await new Promise((r) => setTimeout(r, 400));   // throttle — stay out of the way
+  }
+  _pdfIndexing = false; _pdfIndexStatus(0);
+}
+async function backgroundIndexAllPdfs(){
+  let pdfs = []; try { const r = await window.api.listNotes(); pdfs = (r && r.pdfs) || []; } catch (_) { return; }
+  // Queue EVERY PDF (not just unseen names) — _indexPdfOnce skips unchanged ones by signature,
+  // so a re-uploaded / edited PDF is re-indexed. (Future optimisation: gate on file mtime via a
+  // stat API to avoid re-reading bytes of unchanged files each pass.)
+  const todo = pdfs.filter((p) => _pdfQueue.indexOf(p) < 0);
+  if (!todo.length) return;
+  _pdfQueue.push.apply(_pdfQueue, todo);
+  _runPdfQueue();
+}
+window.backgroundIndexAllPdfs = backgroundIndexAllPdfs;
+// Kick off ~5s after load (once the app has settled), and refresh when a vault syncs.
+if (typeof window !== 'undefined') setTimeout(() => { try { backgroundIndexAllPdfs(); } catch (_) {} }, 5000);
+window.extractPdfToMarkdown = extractPdfToMarkdown;
+window.indexPdfIntoRag = indexPdfIntoRag;
+const _pdfIndexed = new Set();   // don't re-extract the same PDF twice per session
+
 async function openPdf(name){
   currentPdf = name;
   currentNote = null;
+  // Behind-the-scenes: (re)extract the OPEN PDF's text into RAG — force a fresh pass once per
+  // session so an opened PDF is always current; the background indexer handles the rest.
+  if (!_pdfIndexed.has(name)) { _pdfIndexed.add(name); Promise.resolve().then(() => _indexPdfOnce(name, true)).catch(() => {}); }
   if (typeof clearAutolink === 'function') clearAutolink();
   const left = document.getElementById('left');
   if (left){ left.classList.remove('view-graph','view-table','view-dash','view-crate','view-trash'); left.classList.add('view-pdf'); }
@@ -660,9 +776,11 @@ function makeTboxEl(b, cssW, cssH){
   // only the box you're editing has one at a time.
   const content = document.createElement('div'); content.className = 'pdf-tbox-content';
   const _mdRender = (s) => { try { return (window.CoreMarkdown && window.CoreMarkdown.mdToHtml) ? window.CoreMarkdown.mdToHtml(String(s || '')) : String(s || ''); } catch (_) { return String(s || ''); } };
-  const renderPreview = () => { content.classList.remove('editing'); const h = _mdRender(b.text); content.innerHTML = h || ('<div class="pdf-tbox-ph">' + t('พิมพ์ที่นี่…') + '</div>'); };
+  const _applyAlign = () => { content.style.textAlign = (b.align === 'center' || b.align === 'right') ? b.align : 'left'; };
+  const renderPreview = () => { content.classList.remove('editing'); const h = _mdRender(b.text); content.innerHTML = h || ('<div class="pdf-tbox-ph">' + t('พิมพ์ที่นี่…') + '</div>'); _applyAlign(); };
+  _applyAlign();
   renderPreview();
-  let saveT = null, crepe = null, creating = false;
+  let saveT = null, crepe = null, creating = false, tbar = null;
   function _onDocDown(e){ if (!el.contains(e.target)) endEdit(); }
   async function startEdit(){
     if (crepe || creating) return;
@@ -679,8 +797,11 @@ function makeTboxEl(b, cssW, cssH){
       const curKey = F.Cursor || 'cursor';
       feats[curKey] = false;
       const c = new window.Crepe({ root: content, defaultValue: b.text || '', features: feats });
+      if (window.MDTColor) { try { c.editor.use(window.MDTColor); } catch (_) {} }       // inline text colour
+      if (window.MDLinkPaste) { try { c.editor.use(window.MDLinkPaste); } catch (_) {} }  // select + paste URL → link
       await c.create();
       crepe = c; el._crepe = c;
+      if (tbar) tbar.hidden = false;   // show the formatting toolbar while editing
       c.on((l) => l.markdownUpdated(() => { b.text = c.getMarkdown(); clearTimeout(saveT); saveT = setTimeout(savePdfAnnots, 500); }));
       // Focus the editor AND drop a real caret at the end — a bare .focus() leaves
       // ProseMirror with no selection, so keystrokes go nowhere (box looks un-typeable).
@@ -702,6 +823,7 @@ function makeTboxEl(b, cssW, cssH){
   }
   async function endEdit(){
     document.removeEventListener('mousedown', _onDocDown, true);
+    if (tbar) tbar.hidden = true;
     if (_pdfTboxEditing === el) _pdfTboxEditing = null;
     if (!crepe) return;
     try { b.text = crepe.getMarkdown(); } catch (_) {}
@@ -791,7 +913,83 @@ function makeTboxEl(b, cssW, cssH){
   });
   el.appendChild(rz);
 
-  el.appendChild(head); el.appendChild(content); el.appendChild(del); el.appendChild(palette);
+  // ---- Formatting toolbar (visible only while the box is being edited) ---------------
+  // Buttons use `mousedown` + preventDefault so the editor NEVER loses its selection when
+  // a button is pressed — otherwise ProseMirror clears the range and the command no-ops.
+  tbar = document.createElement('div'); tbar.className = 'pdf-tbox-tbar'; tbar.hidden = true;
+  const _view = () => (window.MDEdit && el._crepe) ? window.MDEdit.getView(el._crepe) : null;
+  const _sync = () => { try { if (el._crepe) { b.text = el._crepe.getMarkdown(); clearTimeout(saveT); saveT = setTimeout(savePdfAnnots, 400); } } catch (_) {} };
+  const tbtn = (label, title, onDown) => {
+    const bt = document.createElement('button'); bt.type = 'button'; bt.className = 'pdf-tbar-btn';
+    bt.title = title; bt.innerHTML = label;
+    bt.addEventListener('mousedown', (ev) => { ev.preventDefault(); ev.stopPropagation(); onDown(ev); });
+    tbar.appendChild(bt); return bt;
+  };
+  const _mark = (name) => () => { const v = _view(); if (!v) return; const m = v.state.schema.marks[name]; if (!m) return; window.MDEdit.cmd.toggleMark(m)(v.state, v.dispatch, v); v.focus(); _sync(); };
+  const _block = (node, attrs) => () => { const v = _view(); if (!v) return; const n = v.state.schema.nodes[node]; if (!n) return; window.MDEdit.cmd.setBlockType(n, attrs || {})(v.state, v.dispatch, v); v.focus(); _sync(); };
+  const _listCmd = (node) => () => { const v = _view(); if (!v) return; const n = v.state.schema.nodes[node]; if (!n) return; window.MDEdit.list.wrapInList(n)(v.state, v.dispatch, v); v.focus(); _sync(); };
+  const _sep = () => { const s = document.createElement('span'); s.className = 'pdf-tbar-sep'; tbar.appendChild(s); };
+
+  tbtn('<b>B</b>', t('ตัวหนา'), _mark('strong'));
+  tbtn('<i>I</i>', t('ตัวเอียง'), _mark('emphasis'));
+  tbtn('<s>S</s>', t('ขีดฆ่า'), _mark('strike_through'));
+  _sep();
+  tbtn('H', t('หัวข้อ'), _block('heading', { level: 2 }));
+  tbtn('•', t('รายการจุด'), _listCmd('bullet_list'));
+  tbtn('1.', t('รายการเลข'), _listCmd('ordered_list'));
+  tbtn('&lt;/&gt;', t('โค้ด'), _mark('inlineCode'));
+  _sep();
+  // Link: wrap the current selection with a hyperlink. Prefer the clipboard URL (smart-paste);
+  // fall back to a prompt if the clipboard has no URL / permission is denied.
+  tbtn('🔗', t('ลิงก์ (ครอบข้อความก่อน)'), async () => {
+    const v = _view(); if (!v) return;
+    const { from, to, empty } = v.state.selection;
+    if (empty) { try { window.toast && window.toast(t('เลือกข้อความที่จะทำลิงก์ก่อน')); } catch (_) {} return; }
+    let url = '';
+    try { const clip = await navigator.clipboard.readText(); if (/^https?:\/\/\S+$/i.test((clip || '').trim())) url = clip.trim(); } catch (_) {}
+    if (!url) { url = (window.prompt ? window.prompt(t('วาง URL:'), 'https://') : '') || ''; url = url.trim(); }
+    if (!/^https?:\/\/\S+$/i.test(url)) return;
+    const mk = v.state.schema.marks.link; if (!mk) return;
+    v.dispatch(v.state.tr.addMark(from, to, mk.create({ href: url, title: null })));
+    v.focus(); _sync();
+  });
+  _sep();
+  // Alignment cycle: left → center → right (applied to the whole box, stored as b.align).
+  const alBtn = tbtn('⬅', t('จัดวาง: ซ้าย → กลาง → ขวา'), () => {
+    const order = ['left', 'center', 'right'];
+    b.align = order[(order.indexOf(b.align === 'center' || b.align === 'right' ? b.align : 'left') + 1) % 3];
+    _applyAlign(); _syncAlBtn(); savePdfAnnots();
+  });
+  const _syncAlBtn = () => { alBtn.textContent = b.align === 'center' ? '↔' : b.align === 'right' ? '➡' : '⬅'; };
+  _syncAlBtn();
+  _sep();
+  // Text-colour palette: light background + dark text swatches (POC uses `{c:name}…{/c}` markers).
+  const TCOLORS = [
+    ['red', t('แดง')], ['orange', t('ส้ม')], ['yellow', t('เหลือง')], ['green', t('เขียว')],
+    ['blue', t('น้ำเงิน')], ['purple', t('ม่วง')], ['gray', t('เทา')]
+  ];
+  const colBtn = tbtn('🎨', t('สีตัวอักษร'), () => { pop.hidden = !pop.hidden; });
+  const pop = document.createElement('div'); pop.className = 'pdf-tbar-cpop'; pop.hidden = true;
+  TCOLORS.forEach(([name, label]) => {
+    const sw = document.createElement('button'); sw.type = 'button';
+    sw.className = 'pdf-tbar-csw tcolor-' + name; sw.title = label; sw.textContent = 'A';
+    sw.addEventListener('mousedown', (ev) => {
+      ev.preventDefault(); ev.stopPropagation();
+      const v = _view(); if (v && window.__tboxSetColor) { window.__tboxSetColor(v, name); v.focus(); _sync(); }
+      pop.hidden = true;
+    });
+    pop.appendChild(sw);
+  });
+  const clr = document.createElement('button'); clr.type = 'button'; clr.className = 'pdf-tbar-csw none'; clr.title = t('ล้างสี'); clr.textContent = '⌫';
+  clr.addEventListener('mousedown', (ev) => {
+    ev.preventDefault(); ev.stopPropagation();
+    const v = _view(); if (v && window.__tboxSetColor) { window.__tboxSetColor(v, null); v.focus(); _sync(); }
+    pop.hidden = true;
+  });
+  pop.appendChild(clr);
+  colBtn.appendChild(pop);
+
+  el.appendChild(head); el.appendChild(tbar); el.appendChild(content); el.appendChild(del); el.appendChild(palette);
   return el;
 }
 

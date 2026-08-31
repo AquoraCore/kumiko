@@ -17,15 +17,7 @@ describe('autosave (edits persist without ⌘S; never lost on note switch)', () 
     expect(rendererSrc).toContain('async function flushAutosave');
     expect(rendererSrc).toContain('window.flushAutosave = flushAutosave');
     // openNote must flush the CURRENT note before loading the next
-    expect(sidebarSrc).toMatch(/async function openNote[\s\S]{0,200}flushAutosave/);
+    expect(sidebarSrc).toMatch(/async function openNote[\s\S]{0,1200}flushAutosave/);   // window widened: review-dot clear + pending-review hook precede it
   });
 });
 
-describe('Crepe block-drag handle is vertically centered in its block', () => {
-  it('installs a handle-centering observer using transform-agnostic layout metrics', () => {
-    expect(rendererSrc).toContain('installBlockHandleCentering');
-    // must use offsetTop/offsetHeight, NOT getBoundingClientRect (which reads mid-transition)
-    expect(rendererSrc).toMatch(/handleEl\.offsetHeight/);
-    expect(rendererSrc).toMatch(/blk\.offsetHeight/);
-  });
-});

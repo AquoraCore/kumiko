@@ -21,3 +21,8 @@ notes/.seeded
 # local self-hosted backend data (users, persisted rooms)
 .server-data/
 BUILD.txt
+
+# dev screenshots + stale root build artifact (real bundle: renderer/vendor/)
+shot.png
+/crepe.bundle.js
+test-results/

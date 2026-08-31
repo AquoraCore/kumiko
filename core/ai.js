@@ -30,14 +30,19 @@ function aiConfigView(cfg){
   // CLI (subscription) mode fields — which local CLI to spawn + its model (glm/opencode only).
   const cliEngine = (c.cliEngine === 'glm' || c.cliEngine === 'claude') ? c.cliEngine : 'claude';
   const cliModel = (typeof c.cliModel === 'string') ? c.cliModel : '';
-  return { mode, provider, model, thinking, cliEngine, cliModel, hasKey: { anthropic: has('anthropic'), zai: has('zai') } };
+  // vision: which model handles image messages (Z.ai only — Claude models all see), whether to
+  // auto-switch to it, and whether READ-NOTE attaches slide images from notes. Defaults ON.
+  const visionModel = (typeof c.visionModel === 'string') ? c.visionModel : '';
+  const autoVision = (c.autoVision === false) ? false : true;
+  const readNoteImages = (c.readNoteImages === false) ? false : true;
+  return { mode, provider, model, thinking, cliEngine, cliModel, visionModel, autoVision, readNoteImages, hasKey: { anthropic: has('anthropic'), zai: has('zai') || has('zai-coding'), 'zai-coding': has('zai-coding') || has('zai') } };   // both Z.ai endpoints share one key
 }
 
 // Return a NEW config with keys[provider] set to `encrypted`, or DELETED when
 // `encrypted` is null/''/undefined. Never mutates the input. Ignores unknown
 // providers (returns cfg unchanged) so the surface stays {anthropic, zai}.
 function setConfigKey(cfg, provider, encrypted){
-  if (provider !== 'anthropic' && provider !== 'zai') return cfg;
+  if (provider !== 'anthropic' && provider !== 'zai' && provider !== 'zai-coding') return cfg;
   const c = (cfg && typeof cfg === 'object') ? cfg : {};
   const next = Object.assign({}, c, { keys: Object.assign({}, c.keys || {}) });
   if (encrypted === null || encrypted === undefined || encrypted === '') delete next.keys[provider];
@@ -56,8 +61,18 @@ function setConfigKey(cfg, provider, encrypted){
 // the user turns it OFF. A missing/undefined thinking leaves each provider at its default.
 function buildApiRequest(provider, model, prompt, key, opts){
   const thinking = (opts && typeof opts.thinking === 'boolean') ? opts.thinking : null;
+  // images: array of data URIs. Mapped to each provider's content-block shape; text-only
+  // callers pass nothing and get the plain string content exactly as before.
+  const images = (opts && Array.isArray(opts.images)) ? opts.images.filter((u) => /^data:image\//.test(String(u))).slice(0, 4) : [];
+  const openaiContent = () => images.length
+    ? images.map((u) => ({ type: 'image_url', image_url: { url: u } })).concat([{ type: 'text', text: prompt }])
+    : prompt;
   if (provider === 'anthropic') {
-    const body = { model, max_tokens: 4096, stream: true, messages: [{ role: 'user', content: prompt }] };
+    const anthContent = images.length
+      ? images.map((u) => { const m = String(u).match(/^data:(image\/[a-z+.-]+);base64,(.*)$/s); return { type: 'image', source: { type: 'base64', media_type: m ? m[1] : 'image/jpeg', data: m ? m[2] : '' } }; })
+          .concat([{ type: 'text', text: prompt }])
+      : prompt;
+    const body = { model, max_tokens: 4096, stream: true, messages: [{ role: 'user', content: anthContent }] };
     if (thinking === true) { body.thinking = { type: 'enabled', budget_tokens: 2048 }; body.max_tokens = 8192; }  // max_tokens MUST exceed budget
     return {
       url: 'https://api.anthropic.com/v1/messages',
@@ -68,7 +83,7 @@ function buildApiRequest(provider, model, prompt, key, opts){
   // GLM-5 reasoning streams `reasoning_content` (surfaced by parseSseDelta) BEFORE the final
   // `content`. ON by default; `thinking:{type:'disabled'}` forces a direct answer.
   if (provider === 'zai') {
-    const body = { model, stream: true, messages: [{ role: 'user', content: prompt }] };
+    const body = { model, stream: true, messages: [{ role: 'user', content: openaiContent() }] };
     if (thinking === false) body.thinking = { type: 'disabled' };
     return {
       url: 'https://api.z.ai/api/paas/v4/chat/completions',
@@ -79,7 +94,7 @@ function buildApiRequest(provider, model, prompt, key, opts){
   // Z.ai CODING PLAN (subscription) — same OpenAI-compatible shape as zai, but the
   // coding endpoint (a pay-as-you-go zai key hits /paas/v4 and 1113s on no balance).
   if (provider === 'zai-coding') {
-    const body = { model, stream: true, messages: [{ role: 'user', content: prompt }] };
+    const body = { model, stream: true, messages: [{ role: 'user', content: openaiContent() }] };
     if (thinking === false) body.thinking = { type: 'disabled' };
     return {
       url: 'https://api.z.ai/api/coding/paas/v4/chat/completions',
@@ -110,6 +125,28 @@ function parseSseDelta(provider, dataStr){
   const d = obj.choices && obj.choices[0] && obj.choices[0].delta;
   if (d) return d.content || d.reasoning_content || '';
   return '';
+}
+
+// Same as parseSseDelta but keeps the two streams APART: { text, reasoning }. The runner sends
+// reasoning on its own channel (engine:output kind:'reasoning') so the chat can show it as a
+// collapsible "thinking" block and it NEVER lands in the saved answer / note markers.
+function parseSseEvent(provider, dataStr){
+  const s = (typeof dataStr === 'string') ? dataStr : '';
+  const out = { text: '', reasoning: '' };
+  if (s.trim() === '[DONE]') return out;
+  let obj;
+  try { obj = JSON.parse(s); } catch (_) { return out; }
+  if (!obj || typeof obj !== 'object') return out;
+  if (provider === 'anthropic') {
+    if (obj.type === 'content_block_delta' && obj.delta) {
+      if (obj.delta.type === 'text_delta') out.text = obj.delta.text || '';
+      else if (obj.delta.type === 'thinking_delta') out.reasoning = obj.delta.thinking || '';
+    }
+    return out;
+  }
+  const d = obj.choices && obj.choices[0] && obj.choices[0].delta;
+  if (d) { out.text = d.content || ''; out.reasoning = d.reasoning_content || ''; }
+  return out;
 }
 
 // ---- Embedding request builders: PURE, side-effect-free ---------------------
@@ -143,7 +180,7 @@ function parseEmbedResponse(provider, obj){
 
 module.exports = {
   buildEngineInvocation, aiConfigView, setConfigKey,
-  buildApiRequest, parseSseDelta,
+  buildApiRequest, parseSseDelta, parseSseEvent,
   buildEmbedRequest, parseEmbedResponse,
   // capability table (models + thinking support) — re-exported for convenience
   ...require('./aicaps'),

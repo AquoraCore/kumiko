@@ -95,7 +95,9 @@ function createWebApi(opts) {
       const res = await req('GET', '/notes');
       if (!res || !res.ok) return { notes: [], folders: [], pdfs: [] };
       const data = await res.json();
-      notes = (data && data.notes) || [];
+      // KUMIKO.md + KUMIKO-MEMORY.md are hidden from every list-driven surface (parity with
+      // the desktop walker)
+      notes = ((data && data.notes) || []).filter(function (n) { return n !== 'KUMIKO.md' && n !== 'KUMIKO-MEMORY.md'; });
     } catch (_) {
       return { notes: [], folders: [], pdfs: [] };
     }
@@ -135,6 +137,27 @@ function createWebApi(opts) {
     }
   }
 
+  // Global memory (KUMIKO-GLOBAL.md): per-USER, cross-vault — the profile cards that follow
+  // the person across every vault. Never throws — failures read as an empty profile.
+  async function readGlobalMemory() {
+    try {
+      const res = await req('GET', '/memory/global');
+      if (!res || !res.ok) return '';
+      const data = await res.json();
+      return (data && data.content != null) ? data.content : '';
+    } catch (_) {
+      return '';
+    }
+  }
+  async function saveGlobalMemory(content) {
+    try {
+      const res = await req('PUT', '/memory/global', { content: String(content || '') });
+      return (res && res.ok) ? await res.json() : { error: 'failed' };
+    } catch (_) {
+      return { error: 'failed' };
+    }
+  }
+
   // Directory prefixes of a set of `/`-separated rel-paths. ponytail: cloud
   // paths are unix-style; server never emits `\`, so `/`-split is enough.
   function _foldersOf(notes){
@@ -146,19 +169,24 @@ function createWebApi(opts) {
     return Array.from(set).sort();
   }
 
-  // Fetch every note's content. ponytail: N reads (one per note) — fine for a
-  // personal vault; if this gets slow, add a server /notes/all endpoint later.
+  // Fetch every note's content, cached for 15s — chat needs the whole corpus per question, and
+  // without the cache the shim refetched EVERY note over HTTP each time. Mutations bust it.
+  let _allNotesCache = { t: 0, v: null };
+  function _bustNotes(){ _allNotesCache = { t: 0, v: null }; }
   async function _allNotes(){
+    if (_allNotesCache.v && (Date.now() - _allNotesCache.t) < 15000) return _allNotesCache.v;
     const l = await listNotes();
     const names = (l && l.notes) || [];
     const out = [];
     for (const n of names) out.push({ name: n, content: await readNote(n) });
+    _allNotesCache = { t: Date.now(), v: out };
     return out;
   }
 
   // ponytail: openNote returns the content string; the Electron version returns
   // a richer object. The web renderer integration (7d-3) can enrich this later —
   // a plain string is enough for the MVP note editor to render.
+  function onNoteFlagged() { /* web: no external FS watcher */ }
   async function openNote(name) {
     return readNote(name);
   }
@@ -168,6 +196,7 @@ function createWebApi(opts) {
       const res = await req('PUT', '/notes', { name, content: String(content == null ? '' : content) });
       if (!res || !res.ok) return { ok: false };
       const data = await res.json();
+      if (data && data.ok) _bustNotes();
       return { ok: !!(data && data.ok) };
     } catch (_) {
       return { ok: false };
@@ -182,7 +211,7 @@ function createWebApi(opts) {
       const res = await req('PUT', '/notes', { name: final, content: '' });
       if (!res || !res.ok) return { error: 'failed' };
       const data = await res.json();
-      if (data && data.ok) return { name: final };
+      if (data && data.ok) { _bustNotes(); return { name: final }; }
       return { error: 'failed' };
     } catch (_) {
       return { error: 'failed' };
@@ -194,6 +223,7 @@ function createWebApi(opts) {
       const res = await req('DELETE', '/notes?name=' + encodeURIComponent(name));
       if (!res || !res.ok) return { ok: false };
       const data = await res.json();
+      if (data && data.ok) _bustNotes();
       return { ok: !!(data && data.ok) };
     } catch (_) {
       return { ok: false };
@@ -339,40 +369,80 @@ function createWebApi(opts) {
     const c = _readAiCfg(); const keys = c.keys || {}; const prov = c.provider || 'zai';
     return Promise.resolve(keys[prov] ? { ok: true } : { ok: false, error: 'no key set for ' + prov });
   }
-  // LEXICAL BM25 + wikilink expansion over the user's cloud notes — mirrors
-  // main.js buildVaultContext (lexical-only branch). ponytail: no embeddings
-  // on web for now; semantic fusion is a future step. Never throws — {} on error.
-  async function ragContext(question) {
+  // Phase-1 tiered RAG (lexical): channels ① BM25(question) ② BM25(open-doc terms) ③ explicit
+  // graph (open doc [[outlinks]] + backlinks), fused by CoreRag.fuseRag with the user's weights.
+  // Mirrors main.js buildVaultContext minus the semantic channel (no embeddings on web yet).
+  async function ragContext(question, opts) {
     try {
       if (!_rag) return { context: '', sources: [] };
+      opts = (opts && typeof opts === 'object') ? opts : {};
+      const excludeSet = new Set((Array.isArray(opts.exclude) ? opts.exclude : []).map((s) => String(s).toLowerCase()));
+      const openName = opts.openName ? String(opts.openName).toLowerCase() : '';
       const all = await _allNotes();
-      const docs = all.map((n) => ({ id: n.name, name: _baseName(n.name), text: n.content || '' }));
+      const docs = all
+        .map((n) => ({ id: n.name, name: _baseName(n.name), title: _baseName(n.name), text: n.content || '' }))
+        .filter((d) => !excludeSet.has(d.name.toLowerCase()));
       if (!docs.length) return { context: '', sources: [] };
-      // wikilink graph: id -> [neighbour ids], resolved by basename (first-wins), like buildVaultContext
       const baseToId = {};
       for (const d of docs) { const k = d.name.toLowerCase(); if (!(k in baseToId)) baseToId[k] = d.id; }
-      const linkGraph = {};
+      // link graph + backlinks to the open doc (explicit graph channel)
+      const backlinkIds = [];
       for (const d of docs) {
-        const nb = [], seen = {};
-        for (const raw of _wikiTargets(d.text)) {
-          const tid = baseToId[String(raw).toLowerCase().trim()];
-          if (tid && tid !== d.id && !seen[tid]) { seen[tid] = 1; nb.push(tid); }
-        }
-        linkGraph[d.id] = nb;
+        let linksToOpen = false;
+        for (const raw of _wikiTargets(d.text)) { if (openName && String(raw).toLowerCase().trim() === openName) { linksToOpen = true; break; } }
+        if (linksToOpen) backlinkIds.push(d.id);
       }
       const index = _rag.buildIndex(docs);
-      const ranked = _rag.rank(question, index, 6);
-      if (!ranked.length) return { context: '', sources: [] };
-      let orderedIds = _rag.expandByLinks(ranked.map((r) => r.id), linkGraph, 1);
-      if (orderedIds.length > 10) orderedIds = orderedIds.slice(0, 10);
+      // minRelevance cuts weak matches on the raw BM25 spread (see main.js buildVaultContext).
+      const W = _rag.normalizeRagWeights(opts.weights);
+      const questionIds = _rag.rank(question, index, 8, W.minRelevance).map((r) => r.id);
+      const docIds = opts.docQuery ? _rag.rank(String(opts.docQuery), index, 8, W.minRelevance).map((r) => r.id) : [];
+      const outIds = [];
+      (Array.isArray(opts.outlinks) ? opts.outlinks : []).forEach((raw) => {
+        const tid = baseToId[String(raw).toLowerCase().trim()];
+        if (tid && outIds.indexOf(tid) < 0) outIds.push(tid);
+      });
+      const outSet = new Set(outIds);
+      const explicitIds = outIds.slice();
+      backlinkIds.forEach((id) => { if (!outSet.has(id)) explicitIds.push(id); });
+      const reciprocalIds = backlinkIds.filter((id) => outSet.has(id));
+
+      // ③b implicit graph (Tier 2): unlinked mentions — forward (opts.mentions from the open doc)
+      // + reverse (docs that mention the open doc's title). Auto layer that connects PDFs to notes.
+      const mentionIds = [], mentionSeen = new Set();
+      (Array.isArray(opts.mentions) ? opts.mentions : []).forEach((raw) => {
+        const tid = baseToId[String(raw).toLowerCase().trim()];
+        if (tid && !mentionSeen.has(tid)) { mentionSeen.add(tid); mentionIds.push(tid); }
+      });
+      if (opts.openName) {
+        for (const d of docs) {
+          if (mentionSeen.has(d.id)) continue;
+          if (_rag.detectMentions(d.text, [opts.openName]).length) { mentionSeen.add(d.id); mentionIds.push(d.id); }
+        }
+      }
+
+      const fused = _rag.fuseRag(
+        { question: questionIds, doc: docIds, explicit: explicitIds, mention: mentionIds, reciprocal: reciprocalIds },
+        opts.weights
+      );
+      if (!fused.length) return { context: '', sources: [] };
       const byId = {}; for (const d of docs) byId[d.id] = d;
-      const entries = [];
-      for (const id of orderedIds) {
-        const d = byId[id];
-        if (d) entries.push({ id: d.id, name: d.name, text: d.text });
+      const entries = [], reasonByName = {};
+      // One document, one citation — pdf + PDF-Text/ + companion note collapse to one family key.
+      const famSeen = new Set();
+      (Array.isArray(opts.exclude) ? opts.exclude : []).forEach((n) => famSeen.add(_rag.docFamilyKey(n)));
+      for (const f of fused) {
+        const d = byId[f.id];
+        if (!d || !d.text || String(d.text).trim() === '') continue;
+        const fam = _rag.docFamilyKey(d.name);
+        if (famSeen.has(fam)) continue;
+        famSeen.add(fam);
+        // Same rule as P1: only the passages that relate to the question, never the whole file.
+        entries.push({ id: d.id, name: d.name, text: _rag.selectPassages(d.text, question, W.noteBudget) });
+        reasonByName[d.name] = f.reason;
       }
       const context = _rag.buildContextBlock(entries, 6000);
-      const sources = entries.filter((d) => d.text && String(d.text).trim() !== '').map((d) => d.name);
+      const sources = entries.map((d) => ({ name: d.name, reason: reasonByName[d.name] || 'question' }));
       return { context, sources };
     } catch (_) {
       return { context: '', sources: [] };
@@ -394,6 +464,8 @@ function createWebApi(opts) {
     const provider = c.provider || 'zai'; const key = keys[provider]; const model = c.model || '';
     const thinking = (c.thinking === true || c.thinking === false) ? c.thinking : null;
     const body = { prompt };
+    const imgs = (payload && Array.isArray(payload.images)) ? payload.images.filter((u) => /^data:image\//.test(String(u))).slice(0, 4) : [];
+    if (imgs.length) body.images = imgs;
     if (key) { body.provider = provider; body.key = key; if (model) body.model = model; if (thinking !== null) body.thinking = thinking; }
     const ctrl = new AbortController();
     if (runId != null) _aborters.set(runId, ctrl);
@@ -446,11 +518,20 @@ function createWebApi(opts) {
     if (!ql) return [];
     const results = [];
     for (const { name, content } of await _allNotes()) {
-      if (name.toLowerCase().includes(ql)) results.push({ name, line: 0, snippet: name });
+      const isShadow = name.startsWith('PDF-Text/');
+      if (!isShadow && name.toLowerCase().includes(ql)) results.push({ name, line: 0, snippet: name });
       const lines = String(content).split(/\r?\n/);
+      let page = 0, shadowHits = 0;
       for (let i = 0; i < lines.length; i++) {
+        if (isShadow) { const pm = lines[i].match(/^## หน้า (\d+)/); if (pm) page = +pm[1]; }
         if (lines[i].toLowerCase().includes(ql)) {
-          results.push({ name, line: i + 1, snippet: lines[i].trim().slice(0, 120) });
+          if (isShadow) {
+            if (shadowHits >= 3) continue;
+            shadowHits++;
+            results.push({ name, line: i + 1, snippet: lines[i].trim().slice(0, 120), pdf: name.replace(/^PDF-Text\//, '').replace(/\.md$/i, ''), page });
+          } else {
+            results.push({ name, line: i + 1, snippet: lines[i].trim().slice(0, 120) });
+          }
         }
         if (results.length >= 40) return results;
       }
@@ -473,7 +554,8 @@ function createWebApi(opts) {
   // Matches ipc graph:data: nodes deduped by lowercased basename (first wins),
   // edges per from→to pair, skip self-edges and targets with no node.
   async function graphData() {
-    const notes = await _allNotes();
+    // parity with desktop: PDF-Text/ shadow notes stay out of the graph
+    const notes = (await _allNotes()).filter(function (n) { return !n.name.startsWith('PDF-Text/'); });
     const fileByBase = {};
     for (const { name } of notes) {
       const k = _baseName(name).toLowerCase();
@@ -509,7 +591,8 @@ function createWebApi(opts) {
           if (m.name === n.name) continue;
           if (_wl && _wl.linksTo && _wl.linksTo(m.content || '', base)) backlinks++;
         }
-        rows.push({ name: n.name, status: attrs.status || '', tags: attrs.tags || '', backlinks });
+        let bodyTags = []; try { bodyTags = (window.CoreTagIndex ? window.CoreTagIndex.bodyTags((n.content || '').replace(/^---[\s\S]*?---\n/, '')) : []); } catch (_) {}
+        rows.push({ name: n.name, status: attrs.status || '', tags: attrs.tags || '', backlinks, bodyTags });
       }
       return rows;
     } catch (_) {
@@ -769,6 +852,7 @@ function createWebApi(opts) {
   return {
     // storage (7d-1, real)
     listNotes, openNote, readNote, saveNote, createNote, renameNote, deleteNote,
+    readGlobalMemory, saveGlobalMemory,
     // state / vault
     vaultStateReadSync, vaultConfigRead, vaultConfigWrite, vaultList, vaultSwitch, vaultOpen, vaultCreate, vaultRename, vaultDelete,
     // auth
@@ -786,7 +870,7 @@ function createWebApi(opts) {
     trashList, trashRestore, trashDeleteForever, trashEmpty,
     crdtLoad, crdtSave,
     // misc
-    openExternal, onNoteChanged,
+    openExternal, onNoteChanged, onNoteFlagged,
   };
 }
 

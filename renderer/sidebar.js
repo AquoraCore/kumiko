@@ -56,6 +56,11 @@ function makeNoteItem(rel, depth, opts){
   item.style.paddingLeft = (8 + depth * 22) + 'px';        // root notes line up with folders; nested notes step in
   if (depth > 0) item.classList.add('nested');
   item.dataset.dragKind = 'note'; item.dataset.dragRel = rel;
+  if (window.__flaggedNotes && window.__flaggedNotes.has(rel)) {
+    const dot = document.createElement('span'); dot.className = 'review-dot';
+    dot.title = t('AI แก้โน้ตนี้ระหว่างที่ไม่ได้เปิด — เปิดเพื่อตรวจ');
+    item.appendChild(dot);
+  }
   item.onclick = () => openNote(rel);
   item.oncontextmenu = (e) => { e.preventDefault(); openNoteMenu(e.clientX, e.clientY, rel); };
   return item;
@@ -68,6 +73,13 @@ function makeFolderRow(node, depth){
   const ic = document.createElement('span'); ic.className = 'folder-ic'; ic.innerHTML = icoSvg('crate', 'sm');
   const nm = document.createElement('span'); nm.className = 'folder-nm'; nm.textContent = node.name;
   row.appendChild(tri); row.appendChild(ic); row.appendChild(nm);
+  // a flagged note inside a COLLAPSED folder is invisible — bubble the review dot up to the
+  // folder row so "AI ฝากของไว้ให้ตรวจ" can always be seen (log 2026-08-25)
+  if (collapsed && window.__flaggedNotes && [...window.__flaggedNotes].some((n) => n.startsWith(node.path + '/'))) {
+    const dot = document.createElement('span'); dot.className = 'review-dot';
+    dot.title = t('มีโน้ตรอตรวจอยู่ในกล่องนี้ — กางเพื่อดู');
+    row.appendChild(dot);
+  }
   tri.onclick = (e) => { e.stopPropagation(); if (collapsed) collapsedFolders.delete(node.path); else collapsedFolders.add(node.path); persistCollapsed(); renderTree(); };
   row.onclick = () => openCrate(node.path);
   row.oncontextmenu = (e) => { e.preventDefault(); openFolderMenu(row, node); };
@@ -80,22 +92,10 @@ function renderFolderNode(node, container, depth){
     if (!collapsedFolders.has(sub.path)) renderFolderNode(sub, container, depth + 1);
   });
   const pdfs = (node.pdfs || []).slice().sort();
-  const companionOf = {};
-  const companionSet = new Set();
-  pdfs.forEach((p) => {
-    // Prefer the stored link (robust to renames); fall back to the name convention for pairs that predate it.
-    let comp = sbCompanionMap[p];
-    if (!comp || !node.notes.includes(comp)) {
-      comp = (typeof companionNoteName === 'function') ? companionNoteName(p) : p.replace(/\.pdf$/i, '') + ' · โน้ต.md';
-      if (!node.notes.includes(comp)) comp = null;
-    }
-    if (comp) { companionOf[p] = comp; companionSet.add(comp); }
-  });
-  node.notes.slice().sort().forEach((n) => { if (companionSet.has(n)) return; container.appendChild(makeNoteItem(n, depth)); });
-  pdfs.forEach((p) => {
-    container.appendChild(makePdfItem(p, depth));
-    if (companionOf[p]) container.appendChild(makeNoteItem(companionOf[p], depth + 1, { companion: true, icon: 'bookmark', label: t('โน้ตของเล่มนี้') }));
-  });
+  // Companion pairing removed (capture-target redesign): every note is an ordinary topic note,
+  // legacy " · โน้ต" files included — nothing is nested under a PDF anymore.
+  node.notes.slice().sort().forEach((n) => { container.appendChild(makeNoteItem(n, depth)); });
+  pdfs.forEach((p) => { container.appendChild(makePdfItem(p, depth)); });
 }
 function renderTree(){ renderSidebar(); }
 
@@ -125,26 +125,13 @@ function renderCrateView(){
   const pdfs = (node.pdfs || []).slice().sort();
   const crateName = currentCrate ? currentCrate.split('/').pop() : t('โน้ต');
 
-  // Pair each PDF with its companion note (only if that note actually lives in THIS folder).
-  // Same approach as the sidebar's renderFolderNode, so the slip-footer stays in sync.
-  const companionOf = {};
-  const companionSet = new Set();
-  pdfs.forEach((p) => {
-    let comp = sbCompanionMap[p];
-    if (!comp || !notes.includes(comp)) {
-      comp = (typeof companionNoteName === 'function') ? companionNoteName(p) : p.replace(/\.pdf$/i, '') + ' · โน้ต.md';
-      if (!notes.includes(comp)) comp = null;
-    }
-    if (comp) { companionOf[p] = comp; companionSet.add(comp); }
-  });
-
   const scroll = document.createElement('div'); scroll.className = 'crate-scroll';
   const head = document.createElement('div'); head.className = 'crate-head';
   const title = document.createElement('div'); title.className = 'crate-title';
   title.innerHTML = icoSvg('crate', 'sm') + '<span></span>';
   title.querySelector('span').textContent = crateName;
   const sum = document.createElement('div'); sum.className = 'crate-sum';
-  sum.textContent = subs.length + t(' กล่องย่อย · ') + (notes.length - companionSet.size) + t(' โน้ต · ') + pdfs.length + t(' เล่ม');
+  sum.textContent = subs.length + t(' กล่องย่อย · ') + notes.length + t(' โน้ต · ') + pdfs.length + t(' เล่ม');
   head.appendChild(title); head.appendChild(sum); scroll.appendChild(head);
 
   if (!subs.length && !notes.length && !pdfs.length){
@@ -168,33 +155,12 @@ function renderCrateView(){
     const cnt = Object.keys(s.folders || {}).length + (s.notes || []).length + (s.pdfs || []).length;
     grid.appendChild(card('box', 'crate', s.name, cnt + t(' รายการ'), () => openCrate(s.path)));
   });
-  notes.forEach((n) => { if (companionSet.has(n)) return; grid.appendChild(card('note', 'note', n.replace(/\.md$/i, '').split('/').pop(), null, () => openNote(n))); });
-  pdfs.forEach((p) => {
-    if (companionOf[p]) {
-      // Book card with a companion: a div (not a button) holding two clickable regions.
-      const c = document.createElement('div'); c.className = 'crate-card cc-book has-companion';
-      const book = document.createElement('div'); book.className = 'cc-book-region';
-      const bookName = p.replace(/\.pdf$/i, '').split('/').pop();
-      book.title = bookName;
-      book.innerHTML = '<span class="cc-ic"></span><span class="cc-nm"></span>';
-      book.querySelector('.cc-ic').innerHTML = icoSvg('book', 'sm');
-      book.querySelector('.cc-nm').textContent = bookName;
-      book.onclick = () => openPdf(p);
-      const slip = document.createElement('div'); slip.className = 'cc-slip';
-      slip.innerHTML = '<span class="cc-slip-ic"></span><span class="cc-slip-lbl"></span>';
-      slip.querySelector('.cc-slip-lbl').textContent = t('โน้ตของเล่มนี้');
-      slip.querySelector('.cc-slip-ic').innerHTML = icoSvg('bookmark', 'sm');
-      slip.onclick = () => openNote(companionOf[p]);
-      c.appendChild(book); c.appendChild(slip);
-      grid.appendChild(c);
-    } else {
-      grid.appendChild(card('book', 'book', p.replace(/\.pdf$/i, '').split('/').pop(), null, () => openPdf(p)));
-    }
-  });
+  notes.forEach((n) => { grid.appendChild(card('note', 'note', n.replace(/\.md$/i, '').split('/').pop(), null, () => openNote(n))); });
+  pdfs.forEach((p) => { grid.appendChild(card('book', 'book', p.replace(/\.pdf$/i, '').split('/').pop(), null, () => openPdf(p))); });
   scroll.appendChild(grid); host.appendChild(scroll);
 }
 
-async function refreshList(selectName){
+async function refreshList(selectName, opts){
   const res = await window.api.listNotes();
   const notes = Array.isArray(res) ? res : (res.notes || []);
   const folders = Array.isArray(res) ? [] : (res.folders || []);
@@ -202,8 +168,21 @@ async function refreshList(selectName){
   // Stored companion links from each PDF's .annot.json (robust to renames). Falls back to name convention below.
   sbCompanionMap = (res && res.companions && typeof res.companions === 'object') ? res.companions : {};
   window.__wlNotes = new Set(notes.map((n) => n.replace(/\.md$/i, '').split('/').pop().toLowerCase()));  // for broken-link detection
-  window.__wlNoteNames = [...new Set(notes.map((n) => n.replace(/\.md$/i, '').split('/').pop()))].sort((a, b) => a.localeCompare(b));  // for [[ autocomplete
-  noteTreeRoot = buildNoteTree(notes, folders, pdfs);
+  window.__wlNoteNames = [...new Set(notes.map((n) => n.replace(/\.md$/i, '').split('/').pop()))].sort((a, b) => a.localeCompare(b));  // for [[ autocomplete + chat @-mention
+  window.__wlNoteRel = {};   // basename -> rel path (first wins), so @-mentions can fetch content
+  notes.forEach((n) => { const k = n.replace(/\.md$/i, '').split('/').pop().toLowerCase(); if (!(k in window.__wlNoteRel)) window.__wlNoteRel[k] = n; });
+  // PDF-Text/ is the auto-extracted "shadow text" of every PDF — machinery for RAG, not a box
+  // the user works in. HIDDEN from the tree + box lists (like KUMIKO.md) but kept in the name
+  // maps and RAG so the AI can still read PDF content.
+  const treeNotes = notes.filter((n) => !n.startsWith('PDF-Text/'));
+  const treeFolders = folders.filter((f) => f !== 'PDF-Text' && !f.startsWith('PDF-Text/'));
+  window.__wlFolders = treeFolders.slice();   // folder rel paths — AI folder-aware note creation
+  window.__wlPdfRel = {};    // pdf basename -> rel, so [source: <pdf>] chat refs can open the PDF
+  pdfs.forEach((p) => { const k = p.replace(/\.pdf$/i, '').split('/').pop().toLowerCase(); if (!(k in window.__wlPdfRel)) window.__wlPdfRel[k] = p; });
+  noteTreeRoot = buildNoteTree(treeNotes, treeFolders, pdfs);
+  if (typeof refreshTagIndex === 'function') { try { await refreshTagIndex(true); } catch (_) {} }
+  if (typeof updateCaptureTargetBtn === 'function') { try { updateCaptureTargetBtn(); } catch (_) {} }
+  if (opts && opts.keepView) { renderTree(); highlightActiveNote(currentNote); return; }   // refresh data only — never switch what the user is looking at
   try { sbDbCache = await window.api.dbList(); } catch (_) { sbDbCache = []; }
   renderTree();
   const target = selectName && notes.includes(selectName) ? selectName : notes[0];
@@ -219,7 +198,8 @@ function highlightActiveNote(name){
 async function createFolderAt(parentPath){
   const n = await askName(t('ชื่อกล่องใหม่'), '');
   if (!n) return;
-  const rel = parentPath ? parentPath + '/' + n.trim() : n.trim();
+  const nm0 = nameNoSlash(n.trim());
+  const rel = parentPath ? parentPath + '/' + nm0 : nm0;
   const r = await window.api.folderCreate(rel);
   if (r && r.error === 'exists') { alert(t('มีกล่องชื่อนี้อยู่แล้ว')); return; }
   if (r && r.name) collapsedFolders.delete(r.name);
@@ -231,9 +211,9 @@ function openFolderMenu(anchor, node){
   closeFolderMenu();
   const menu = document.createElement('div'); menu.className = 'db-menu'; menu.id = 'folderMenu';
   const items = [
-    [t('โน้ตใหม่ในกล่องนี้'), async () => { const nm = await askName(t('ตั้งชื่อโน้ตใหม่'), ''); if (!nm) return; const r = await window.api.createNote(node.path + '/' + nm.trim()); if (r && r.error === 'exists') { alert(t('มีโน้ตชื่อนี้อยู่แล้ว')); return; } collapsedFolders.delete(node.path); await refreshList(r && r.name); }],
+    [t('โน้ตใหม่ในกล่องนี้'), async () => { const nm = await askName(t('ตั้งชื่อโน้ตใหม่'), ''); if (!nm) return; const r = await window.api.createNote(node.path + '/' + nameNoSlash(nm.trim())); if (r && r.error === 'exists') { alert(t('มีโน้ตชื่อนี้อยู่แล้ว')); return; } collapsedFolders.delete(node.path); await refreshList(r && r.name); }],
     [t('กล่องย่อยใหม่'), () => createFolderAt(node.path)],
-    [t('เปลี่ยนชื่อกล่อง'), async () => { const nm = await askName(t('เปลี่ยนชื่อกล่อง'), node.name); if (!nm || nm.trim() === node.name) return; const parent = node.path.includes('/') ? node.path.slice(0, node.path.lastIndexOf('/')) : ''; const to = parent ? parent + '/' + nm.trim() : nm.trim(); const r = await window.api.folderRename(node.path, to); if (r && r.error) { alert(t('เปลี่ยนชื่อไม่ได้')); return; } await refreshList(currentNote); }],
+    [t('เปลี่ยนชื่อกล่อง'), async () => { const nm = await askName(t('เปลี่ยนชื่อกล่อง'), node.name); if (!nm || nm.trim() === node.name) return; const parent = node.path.includes('/') ? node.path.slice(0, node.path.lastIndexOf('/')) : ''; const nm0 = nameNoSlash(nm.trim()); const to = parent ? parent + '/' + nm0 : nm0; const r = await window.api.folderRename(node.path, to); if (r && r.error) { alert(t('เปลี่ยนชื่อไม่ได้')); return; } await refreshList(currentNote); }],
     [t('ลบกล่อง (ไปถังขยะ)'), async () => { if (!(await confirmDelete(t('ย้ายกล่อง "') + node.name + t('" ไปถังขยะ?') ))) return; await window.api.folderDelete(node.path); await refreshList(); }],
   ];
   items.forEach(([label, fn]) => { const it = document.createElement('div'); it.className = 'db-mi' + (label.startsWith(t('ลบ')) ? ' db-mi-del' : ''); it.textContent = label; it.onclick = () => { closeFolderMenu(); fn(); }; menu.appendChild(it); });
@@ -307,6 +287,9 @@ function setNoteTitle(name){
 }
 
 async function openNote(name) {
+  if (window.__flaggedNotes && window.__flaggedNotes.delete(name)) { try { renderTree(); } catch (_) {} }   // opening = reviewed
+  // a deferred AI edit for this note? open the accept-review once the editor is ready
+  const _pending = (window.__pendingReviews && window.__pendingReviews.get(name)) || null;
   // Flush any pending autosave of the CURRENT note before loading the next one,
   // so unsaved edits are never lost or bled into the new note.
   if (typeof window.flushAutosave === 'function') { try { await window.flushAutosave(); } catch (_) {} }
@@ -314,6 +297,13 @@ async function openNote(name) {
   if (typeof clearAutolink === 'function') clearAutolink();
   const content = await window.api.openNote(name);
   currentNote = name;
+  // deferred AI review: diff RAW-vs-RAW. The editor normalizes markdown on load (escapes, bullet
+  // style, H1 stripping), so diffing the raw-file-based proposal against the editor's serialization
+  // marked ~every line as changed — a one-section edit read as "แก้ทั้ง sheet" (log 2026-08-24).
+  if (_pending) {
+    window.__pendingReviews.delete(name);
+    setTimeout(() => { try { if (currentNote === name && typeof applyReplyToNote === 'function') applyReplyToNote(_pending, { silent: true, baseRaw: content }); } catch (_) {} }, 250);
+  }
   setNoteTitle(name);
   const parsed = parseFrontmatter(content);
   currentAttrs = parsed.attrs;
@@ -321,8 +311,11 @@ async function openNote(name) {
   setDirty(false);
   banner.hidden = true;
   loadPropsBar();
+  if (typeof applyRulesMode === 'function') applyRulesMode(name);
+  if (typeof maybeShowNewNoteProposal === 'function') maybeShowNewNoteProposal(name); else { const b = document.getElementById('nnPropose'); if (b) b.remove(); }
   vsSet('lastNote', name);
   vsSet('lastOpen', { type: 'note', name });
+  try { if (typeof touchRecentNote === 'function') touchRecentNote(name); } catch (_) {}
   refreshBacklinks(name);
   highlightActiveNote(name);
 }

@@ -1,10 +1,11 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage } = require('electron');
 const path = require('path');
+const _tagIndex = require('./core/tagindex.js');
 const fs = require('fs');
 const chokidar = require('chokidar');
 const { wikiTargets, linksTo, rewriteLinkTargets } = require('./core/wikilinks');
 const { safeRel, baseName, vaultName } = require('./core/pathutil');
-const { aiConfigView, setConfigKey, buildApiRequest, parseSseDelta, buildEmbedRequest, parseEmbedResponse, resolveThinking, buildEngineInvocation } = require('./core/ai');
+const { aiConfigView, setConfigKey, buildApiRequest, parseSseDelta, parseSseEvent, modelSupportsVision, visionModelFor, buildEmbedRequest, parseEmbedResponse, resolveThinking, buildEngineInvocation } = require('./core/ai');
 const { spawn } = require('child_process');   // CLI (subscription) engine path — claude / opencode
 const os = require('os');
 // A GUI app launched from Finder/Dock inherits a MINIMAL PATH (/usr/bin:/bin:…) that does NOT
@@ -69,7 +70,24 @@ function decKey(enc){
   } catch (_) { return ''; }
 }
 // INTERNAL — never exposed to the renderer. The API provider (step 3b) calls this.
-function getDecryptedKey(provider){ const cfg = readAiConfig(); return decKey(cfg.keys && cfg.keys[provider]); }
+function getDecryptedKey(provider){
+  const cfg = readAiConfig(); const keys = (cfg.keys || {});
+  // Z.ai: the Coding Plan and pay-as-you-go endpoints take the SAME key — use whichever was saved
+  const alt = provider === 'zai-coding' ? 'zai' : provider === 'zai' ? 'zai-coding' : null;
+  return decKey(keys[provider] || (alt ? keys[alt] : undefined));
+}
+// a provider error body → one short line the user can act on (Z.ai 1113 = the key is a Coding
+// Plan key hitting the pay-as-you-go endpoint, or the reverse — the #1 cause of "429")
+function apiErrorHint(provider, status, bodyText){
+  let msg = '';
+  try { const j = JSON.parse(bodyText || ''); msg = (j.error && (j.error.message || j.error.code)) || j.message || ''; if (j.error && j.error.code) msg = '[' + j.error.code + '] ' + msg; } catch (_) { msg = String(bodyText || '').slice(0, 200); }
+  let hint = '';
+  if (provider === 'zai' && /1113|balance|resource package/i.test(msg)) hint = ' → คีย์นี้น่าจะเป็น Z.ai Coding Plan: ไปที่ ตั้งค่า → ผู้ให้บริการ แล้วเลือก "GLM (Z.ai Coding Plan)"';
+  else if (provider === 'zai-coding' && status === 429) hint = ' → โควตา Coding Plan ชั่วคราวเต็ม หรือคีย์นี้เป็นแบบเติมเงิน: ลองเลือก "GLM (Z.ai)"';
+  else if (status === 429) hint = ' → ถูกจำกัดอัตรา/โควตา รอสักครู่แล้วลองใหม่';
+  else if (status === 401 || status === 403) hint = ' → คีย์ไม่ถูกต้องหรือหมดอายุ';
+  return (msg ? ' ' + msg : '') + hint;
+}
 
 ipcMain.handle('ai:getConfig', () => aiConfigView(readAiConfig()));
 ipcMain.handle('ai:setConfig', (e, patch) => {
@@ -78,6 +96,9 @@ ipcMain.handle('ai:setConfig', (e, patch) => {
     if (patch.mode) cfg.mode = patch.mode;
     if (patch.provider) cfg.provider = patch.provider;
     if ('model' in patch) cfg.model = patch.model;
+    if ('visionModel' in patch) cfg.visionModel = patch.visionModel;
+    if ('autoVision' in patch) cfg.autoVision = patch.autoVision;
+    if ('readNoteImages' in patch) cfg.readNoteImages = patch.readNoteImages;
     if ('thinking' in patch) cfg.thinking = patch.thinking;   // true/false/null (provider default)
     if ('cliEngine' in patch) cfg.cliEngine = patch.cliEngine;   // 'claude' | 'glm' (CLI/subscription mode)
     if ('cliModel' in patch) cfg.cliModel = patch.cliModel;
@@ -107,7 +128,8 @@ ipcMain.handle('ai:testConnection', async () => {
     const body = Object.assign({}, built.body, { stream: false });
     if ('max_tokens' in body) body.max_tokens = 8;
     const res = await fetch(built.url, { method: 'POST', headers: built.headers, body: JSON.stringify(body) });
-    return { ok: res.ok, status: res.status };
+    let bt = ''; if (!res.ok) { try { bt = await res.text(); } catch (_) {} }
+    return { ok: res.ok, status: res.status, hint: res.ok ? '' : apiErrorHint(aicfg.provider, res.status, bt).trim() };
   } catch (err) {
     return { ok: false, error: String(err) };
   }
@@ -209,40 +231,98 @@ function readVaultStateRagSemantic(){
 // vault exceeds either. Semantic is OPT-IN (WASHI_TEST_EMBED || state.ragSemantic)
 // and degrades gracefully: off / no key / any error -> byte-for-byte the 5b
 // lexical path. Never throws.
-async function buildVaultContext(question){
+// rel-file -> { sig, text, tf, len, wt } — see the incremental-index note inside buildVaultContext.
+const _ragIndexCache = new Map();
+// Phase-1 tiered RAG: fuse channels — ① BM25(question) ② BM25(open-doc terms) ③ explicit graph
+// (the open doc's [[outlinks]] + backlinks) ④ semantic (opt-in) — weighted by the user's config
+// (see CoreRag.DEFAULT_RAG_WEIGHTS). Connection is a PRIOR amplifying relevance, never overriding.
+// opts: { exclude[], docQuery, outlinks[], openName, weights }.
+async function buildVaultContext(question, opts){
   try {
+    opts = (opts && typeof opts === 'object') ? opts : {};
     const SCAN_CAP = 300, FILE_CAP = 40000;
+    const excludeSet = new Set((Array.isArray(opts.exclude) ? opts.exclude : []).map((s) => String(s).toLowerCase()));
+    const openName = opts.openName ? String(opts.openName).toLowerCase() : '';   // the open doc (P1), for backlinks
     const rels = walkNotes(NOTES_DIR, '');
     const docs = [], baseToId = {};
     for (let i = 0; i < rels.length && i < SCAN_CAP; i++) {
       const rel = rels[i];
-      let text;
-      try { text = fs.readFileSync(path.join(NOTES_DIR, rel), 'utf8'); } catch (_) { continue; }
-      if (text.length > FILE_CAP) text = text.slice(0, FILE_CAP);
-      docs.push({ id: rel, name: baseName(rel), text });
+      if (excludeSet.has(baseName(rel).toLowerCase())) continue;   // already P1
+      // INCREMENTAL INDEX: read + tokenize a file only when its signature changed — the whole
+      // vault used to be re-read and re-tokenized from scratch on every single question.
+      const full = path.join(NOTES_DIR, rel);
+      let st; try { st = fs.statSync(full); } catch (_) { continue; }
+      const ck = NOTES_DIR + '|' + rel, sig = st.mtimeMs + ':' + st.size;
+      let ent = _ragIndexCache.get(ck);
+      if (!ent || ent.sig !== sig) {
+        let text;
+        try { text = fs.readFileSync(full, 'utf8'); } catch (_) { continue; }
+        if (text.length > FILE_CAP) text = text.slice(0, FILE_CAP);
+        const stats = CoreRag.docTf(text, baseName(rel));   // title indexed (boosted) here
+        ent = { sig, text, tf: stats.tf, len: stats.len, wt: wikiTargets(text) };
+        _ragIndexCache.set(ck, ent);
+      }
+      docs.push({ id: rel, name: baseName(rel), text: ent.text, tf: ent.tf, len: ent.len, wt: ent.wt });
       const k = baseName(rel).toLowerCase();      // first wins, like graph:data's fileByBase
       if (!(k in baseToId)) baseToId[k] = rel;
     }
-    const linkGraph = {};                          // id -> [neighbour ids]
+    if (_ragIndexCache.size > SCAN_CAP * 3) _ragIndexCache.clear();   // blunt bound (renames / vault switches)
+    if (!docs.length) return { context: '', sources: [] };
+
+    // link graph + which docs link BACK to the open doc (explicit backlinks)
+    const linkGraph = {}, backlinkIds = [];
     for (const d of docs) {
       const seen = new Set(), nb = [];
-      for (const raw of wikiTargets(d.text)) {
-        const tid = baseToId[raw.toLowerCase().trim()];
+      let linksToOpen = false;
+      for (const raw of d.wt) {
+        const key = raw.toLowerCase().trim();
+        if (openName && key === openName) linksToOpen = true;
+        const tid = baseToId[key];
         if (!tid || tid === d.id || seen.has(tid)) continue;
         seen.add(tid); nb.push(tid);
       }
       linkGraph[d.id] = nb;
+      if (linksToOpen) backlinkIds.push(d.id);
     }
-    const index = CoreRag.buildIndex(docs);
-    const lex = CoreRag.rank(question, index, 6);
-    const lexIds = lex.map((r) => r.id);
 
-    // ---- Semantic fusion (only when opted in) ----
+    const index = CoreRag.buildIndexFromTf(docs);   // docs already carry cached {tf,len}
+    // ① question channel + ② open-doc channel (BM25). minRelevance cuts weak matches HERE, on the
+    // raw BM25 spread — after fusion every score is ~1/(k+rank) and a ratio can't tell them apart.
+    const W = CoreRag.normalizeRagWeights(opts.weights);
+    const questionIds = CoreRag.rank(question, index, 8, W.minRelevance).map((r) => r.id);
+    const docIds = opts.docQuery ? CoreRag.rank(String(opts.docQuery), index, 8, W.minRelevance).map((r) => r.id) : [];
+    // ③ explicit graph channel: the open doc's [[outlinks]] (resolved) ∪ its backlinks; two-way = reciprocal
+    const outIds = [];
+    (Array.isArray(opts.outlinks) ? opts.outlinks : []).forEach((raw) => {
+      const tid = baseToId[String(raw).toLowerCase().trim()];
+      if (tid && outIds.indexOf(tid) < 0) outIds.push(tid);
+    });
+    const outSet = new Set(outIds);
+    const explicitIds = outIds.slice();
+    backlinkIds.forEach((id) => { if (!outSet.has(id)) explicitIds.push(id); });
+    const reciprocalIds = backlinkIds.filter((id) => outSet.has(id));   // linked BOTH ways
+
+    // ③b implicit graph (Tier 2, Phase 2): unlinked MENTIONS — no [[link]] but the title appears
+    // verbatim. Forward = titles the OPEN doc mentions (detected renderer-side, opts.mentions);
+    // reverse = docs that mention the open doc's title. This is the auto layer that connects PDFs.
+    const mentionIds = [], mentionSeen = new Set();
+    (Array.isArray(opts.mentions) ? opts.mentions : []).forEach((raw) => {
+      const tid = baseToId[String(raw).toLowerCase().trim()];
+      if (tid && !mentionSeen.has(tid)) { mentionSeen.add(tid); mentionIds.push(tid); }
+    });
+    if (opts.openName) {
+      for (const d of docs) {
+        if (mentionSeen.has(d.id)) continue;
+        if (CoreRag.detectMentions(d.text, [opts.openName]).length) { mentionSeen.add(d.id); mentionIds.push(d.id); }
+      }
+    }
+
+    // ④ semantic channel (opt-in) → feeds the 'similar' tier
+    let similarIds = [];
     const semOn = !!process.env.WASHI_TEST_EMBED || readVaultStateRagSemantic();
-    let seedIds = lexIds;
     if (semOn && docs.length) {
       const cache = readEmbCache();
-      const toEmbed = [];                            // { id, sig, hash } for stale/missing entries
+      const toEmbed = [];
       for (const d of docs) {
         const sig = d.name + '\n' + String(d.text).slice(0, 2000);
         const hash = embHash(sig);
@@ -251,42 +331,48 @@ async function buildVaultContext(question){
       }
       if (toEmbed.length) {
         const fresh = await embedTexts(toEmbed.map((t) => t.sig));
-        if (fresh) {                                 // null -> semantic unavailable; skip gracefully
-          for (let i = 0; i < toEmbed.length; i++) cache.notes[toEmbed[i].id] = { hash: toEmbed[i].hash, vec: fresh[i] };
-          writeEmbCache(cache);
-        }
+        if (fresh) { for (let i = 0; i < toEmbed.length; i++) cache.notes[toEmbed[i].id] = { hash: toEmbed[i].hash, vec: fresh[i] }; writeEmbCache(cache); }
       }
       const qv = await embedTexts([question]);
       if (qv && qv[0]) {
         const docVecs = [];
-        for (const d of docs) {
-          const e = cache.notes[d.id];
-          if (e && Array.isArray(e.vec)) docVecs.push({ id: d.id, vec: e.vec });
-        }
-        const semIds = CoreRag.rankByVector(qv[0], docVecs, 6).map((s) => s.id);
-        seedIds = CoreRag.fuseRRF([lexIds, semIds], { limit: 8 }).map((x) => x.id);
+        for (const d of docs) { const e = cache.notes[d.id]; if (e && Array.isArray(e.vec)) docVecs.push({ id: d.id, vec: e.vec }); }
+        similarIds = CoreRag.rankByVector(qv[0], docVecs, 8).map((s) => s.id);
       }
-      // qv null -> skip semantic; seedIds stays lexIds (graceful fallback).
     }
 
-    if (seedIds.length === 0) return { context: '', sources: [] };  // checked AFTER fusion
-    let orderedIds = CoreRag.expandByLinks(seedIds, linkGraph, 1);
-    if (orderedIds.length > 10) orderedIds = orderedIds.slice(0, 10);
+    const fused = CoreRag.fuseRag(
+      { question: questionIds, doc: docIds, explicit: explicitIds, mention: mentionIds, similar: similarIds, reciprocal: reciprocalIds },
+      opts.weights
+    );
+    if (!fused.length) return { context: '', sources: [] };
+
     const byId = {}; for (const d of docs) byId[d.id] = d;
-    const entries = [];
-    for (const id of orderedIds) {
-      const d = byId[id];
-      if (d) entries.push({ id: d.id, name: d.name, text: d.text });
+    const entries = [], reasonByName = {};
+    // One document must be cited ONCE, even though it may exist as pdf + PDF-Text/ + companion note.
+    // Seed with the open doc so RAG never cites a second copy of what's already P1.
+    const famSeen = new Set();
+    (Array.isArray(opts.exclude) ? opts.exclude : []).forEach((n) => famSeen.add(CoreRag.docFamilyKey(n)));
+    for (const f of fused) {
+      const d = byId[f.id];
+      if (!d || !d.text || String(d.text).trim() === '') continue;
+      const fam = CoreRag.docFamilyKey(d.name);
+      if (famSeen.has(fam)) continue;
+      famSeen.add(fam);
+      // Same rule as P1: inject the passages of this note that RELATE to the question, not the
+      // whole file — one long note otherwise eats the entire context budget (and got head-cut).
+      entries.push({ id: d.id, name: d.name, text: CoreRag.selectPassages(d.text, question, W.noteBudget) });
+      reasonByName[d.name] = f.reason;
     }
     const context = CoreRag.buildContextBlock(entries, 6000);
-    const sources = entries.filter((d) => d.text && String(d.text).trim() !== '').map((d) => d.name);
+    const sources = entries.map((d) => ({ name: d.name, reason: reasonByName[d.name] || 'question' }));
     return { context, sources };
   } catch (_) {
     return { context: '', sources: [] };
   }
 }
 
-ipcMain.handle('rag:context', async (e, { question } = {}) => await buildVaultContext(typeof question === 'string' ? question : ''));
+ipcMain.handle('rag:context', async (e, { question, opts } = {}) => await buildVaultContext(typeof question === 'string' ? question : '', opts || {}));
 
 // ---- Vault registry (per-user JSON: which folder is the active vault) ----
 function vaultsFile(){ return path.join(app.getPath('userData'), 'vaults.json'); }
@@ -346,7 +432,8 @@ let win;
 let watcher;
 let openFilePath = null;
 let lastKnownContent = null;
-const engineProcs = new Map();   // runId -> child process (concurrent runs)
+const engineProcs = new Map();
+let _lastEngineExit = 0;   // gate for flagging AI edits to non-open files   // runId -> child process (concurrent runs)
 const MAX_ENGINES = 4;
 
 function loadWinState() {
@@ -375,14 +462,20 @@ function createWindow() {
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 14, y: 18 },
     backgroundColor: '#f3ece0',
-    show: !process.env.WASHI_TEST,
+    show: false,   // shown on ready-to-show: no half-painted layout flash (see below)
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // rAF must keep ticking while the window is hidden/occluded: pdf.js page renders
+      // (AI slide-clips) hang otherwise, which silently killed a NEW-NOTE (log 2026-08-19).
+      backgroundThrottling: false,
     },
   });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  // first paint already has the theme tokens + static layout classes (index.html head script),
+  // so showing here means the user never sees the raw grid; tests keep the window hidden.
+  win.once('ready-to-show', () => { if (!process.env.WASHI_TEST) win.show(); });
   win.on('resize', saveWinState);
   win.on('move', saveWinState);
   win.on('close', saveWinState);
@@ -408,26 +501,28 @@ app.on('window-all-closed', () => {
 // Pure request/parse logic lives in core/ai.js; only the fetch+stream plumbing
 // is here. engineProcs[rid] holds { kill() -> ctrl.abort() } so SIGINT/SIGKILL
 // calls from engine:stop become a no-op abort on the AbortController.
-async function runApiProvider({ provider, model, prompt, key, rid, emit, thinking }){
+async function runApiProvider({ provider, model, prompt, key, rid, emit, thinking, images }){
   const ctrl = new AbortController();
   engineProcs.set(rid, { kill(){ try { ctrl.abort(); } catch (_) {} } });
   const killer = setTimeout(() => {
     if (engineProcs.has(rid)) { try { ctrl.abort(); } catch (_) {} emit('\r\n[timeout — engine killed]\r\n'); }
   }, 300000);
-  const finish = (code) => { clearTimeout(killer); engineProcs.delete(rid); win.webContents.send('engine:done', { runId: rid, code }); };
+  const finish = (code) => { clearTimeout(killer); engineProcs.delete(rid); _lastEngineExit = Date.now(); win.webContents.send('engine:done', { runId: rid, code }); };
   const emitLine = (line) => {
     const trimmed = line.trim();
     if (trimmed.indexOf('data:') !== 0) return;     // skip event:/ping/blank lines
     let rest = trimmed.slice(5);                    // drop "data:"
     if (rest.charCodeAt(0) === 32) rest = rest.slice(1);   // drop one leading space
-    const delta = parseSseDelta(provider, rest);
-    if (delta) emit(delta);
+    const ev = parseSseEvent(provider, rest);
+    if (ev.reasoning) emitReasoning(ev.reasoning);   // thinking → its own channel, never the answer
+    if (ev.text) emit(ev.text);
   };
-  const built = buildApiRequest(provider, model, prompt, key, { thinking: resolveThinking(provider, model, thinking) });
+  const emitReasoning = (data) => win.webContents.send('engine:output', { runId: rid, data, kind: 'reasoning' });
+  const built = buildApiRequest(provider, model, prompt, key, { thinking: resolveThinking(provider, model, thinking), images });
   if (!built) { finish(-1); return; }
   try {
     const res = await fetch(built.url, { method: 'POST', headers: built.headers, body: JSON.stringify(built.body), signal: ctrl.signal });
-    if (!res.ok) { emit('\r\n[API error ' + res.status + ']\r\n'); finish(res.status); return; }
+    if (!res.ok) { let bt = ''; try { bt = await res.text(); } catch (_) {} emit('\r\n[API error ' + res.status + ']' + apiErrorHint(provider, res.status, bt) + '\r\n'); finish(res.status); return; }
     const reader = res.body.getReader();
     const dec = new TextDecoder();
     let buf = '';
@@ -457,18 +552,22 @@ function runCliEngine({ engine, model, prompt, rid, emit }){
   const env = _richEnv();
   const bin = _resolveBin(inv.cmd, env);   // absolute path so Finder-launched apps find it
   let child;
-  try { child = spawn(bin, inv.args, { stdio: ['pipe', 'pipe', 'pipe'], env }); }
+  // cwd MUST be the vault so the CLI can open/edit the note by its {file} name (e.g. "Nephron.md").
+  // Without this the action-bar "let AI edit this note" flow silently no-ops: claude runs in the app
+  // dir, can't find the file, edits nothing → the chokidar watcher never fires → no accept/review.
+  try { child = spawn(bin, inv.args, { stdio: ['pipe', 'pipe', 'pipe'], env, cwd: NOTES_DIR }); }
   catch (err) { emit('\r\n[เรียก ' + inv.cmd + ' ไม่ได้ — ติดตั้ง/ล็อกอิน CLI แล้วหรือยัง?] ' + (err && err.message || '') + '\r\n'); win.webContents.send('engine:done', { runId: rid, code: -1 }); return; }
   engineProcs.set(rid, child);   // child.kill(signal) satisfies engine:stop
   child.on('error', (err) => { emit('\r\n[' + inv.cmd + ' error: ' + (err && err.message || err) + ' — ' + (String(err && err.code) === 'ENOENT' ? ('หา `' + inv.cmd + '` ไม่เจอ — ติดตั้งแล้วหรือยัง? (PATH: ' + env.PATH.split(path.delimiter).slice(0,3).join(', ') + '…)') : 'ติดตั้ง CLI แล้วหรือยัง?') + ']\r\n'); });
   if (child.stdin) { if (inv.stdin != null) { try { child.stdin.write(inv.stdin); } catch (_) {} } try { child.stdin.end(); } catch (_) {} }
   if (child.stdout) child.stdout.on('data', (d) => emit(d.toString()));
   if (child.stderr) child.stderr.on('data', (d) => emit(d.toString()));
-  child.on('close', (code) => { engineProcs.delete(rid); win.webContents.send('engine:done', { runId: rid, code: (code == null ? 0 : code) }); });
+  child.on('close', (code) => { engineProcs.delete(rid); _lastEngineExit = Date.now(); win.webContents.send('engine:done', { runId: rid, code: (code == null ? 0 : code) }); });
 }
 
 // ---- One-shot engine runner (no shell, argv array) ----
-ipcMain.handle('engine:run', (e, { engine, model, prompt, runId }) => {
+ipcMain.handle('engine:run', (e, { engine, model, prompt, runId, images }) => {
+  images = Array.isArray(images) ? images.filter((u) => /^data:image\//.test(String(u))).slice(0, 4) : [];
   const rid = runId || 'default';
   const emit = (data) => win.webContents.send('engine:output', { runId: rid, data });
   // ponytail: TEST-ONLY stub engine. Streams a canned reply over ~600ms and is
@@ -482,7 +581,7 @@ ipcMain.handle('engine:run', (e, { engine, model, prompt, runId }) => {
     const fake = { kill() {
       if (done) return; done = true;
       timers.forEach(clearTimeout);
-      engineProcs.delete(rid);
+      engineProcs.delete(rid); _lastEngineExit = Date.now();
       win.webContents.send('engine:done', { runId: rid, code: 130 });   // aborted
     }};
     engineProcs.set(rid, fake);
@@ -490,7 +589,7 @@ ipcMain.handle('engine:run', (e, { engine, model, prompt, runId }) => {
     chunks.forEach((c, i) => timers.push(setTimeout(() => { if (!done) emit(c); }, 150 * (i + 1))));
     timers.push(setTimeout(() => {
       if (done) return; done = true;
-      engineProcs.delete(rid);
+      engineProcs.delete(rid); _lastEngineExit = Date.now();
       win.webContents.send('engine:done', { runId: rid, code: 0 });     // finished
     }, 150 * (chunks.length + 1)));
     return;
@@ -508,14 +607,40 @@ ipcMain.handle('engine:run', (e, { engine, model, prompt, runId }) => {
     // glm needs an opencode model (default the Coding-Plan one); claude's model is an
     // OPTIONAL alias (opus/sonnet/haiku) — empty means the claude CLI's own default.
     const mdl = (eng === 'glm') ? (aicfg.cliModel || 'zai-coding-plan/glm-5.2') : (aicfg.cliModel || '');
+    // CLI can't take content blocks — write images to temp files and point the CLI at them
+    // (both `claude` and `opencode` read image files with their own tools)
+    if (images.length) prompt += '\n\n' + _imagesToTempFiles(images).map((f, i) => '[ภาพแนบที่ ' + (i + 1) + ': ' + f + ' — เปิดอ่านไฟล์ภาพนี้ประกอบคำตอบ]').join('\n');
     runCliEngine({ engine: eng, model: mdl, prompt, rid, emit });
     return;
   }
   // Otherwise the API-key path. If no key/api config is set, emit a graceful error.
   const key = getDecryptedKey(aicfg.provider);
   if (!key) { emit('\r\n[ยังไม่ได้ตั้งค่า API key — ไปที่ ⚙ ตั้งค่า AI]\r\n'); win.webContents.send('engine:done', { runId: rid, code: -1 }); return; }
-  runApiProvider({ provider: aicfg.provider, model: aicfg.model || model, prompt, key, rid, emit, thinking: aicfg.thinking });
+  let apiModel = aicfg.model || model;
+  let usedVision = false;
+  if (images.length) {
+    if (!modelSupportsVision(aicfg.provider, apiModel)) {
+      const vm = (aicfg.autoVision !== false) ? (aicfg.visionModel || visionModelFor(aicfg.provider, apiModel)) : null;
+      if (vm && modelSupportsVision(aicfg.provider, vm)) { apiModel = vm; usedVision = true; }
+      else { emit('\r\n[โมเดล ' + apiModel + ' มองภาพไม่ได้ และไม่ได้เปิดสลับรุ่นอัตโนมัติ — ภาพถูกตัดออก]\r\n'); images = []; }
+    } else usedVision = true;
+  }
+  if (usedVision) win.webContents.send('engine:output', { runId: rid, data: apiModel, kind: 'vision-model' });
+  runApiProvider({ provider: aicfg.provider, model: apiModel, prompt, key, rid, emit, thinking: aicfg.thinking, images });
 });
+
+// data URIs → temp .jpg/.png files for the CLI path; best-effort cleanup after 10 minutes
+function _imagesToTempFiles(images){
+  const os = require('os');
+  const out = [];
+  images.forEach((u, i) => {
+    const m = String(u).match(/^data:image\/([a-z+.-]+);base64,(.*)$/s); if (!m) return;
+    const ext = m[1] === 'png' ? 'png' : 'jpg';
+    const f = path.join(os.tmpdir(), 'kumiko-img-' + Date.now() + '-' + i + '.' + ext);
+    try { fs.writeFileSync(f, Buffer.from(m[2], 'base64')); out.push(f); setTimeout(() => { try { fs.unlinkSync(f); } catch (_) {} }, 600000); } catch (_) {}
+  });
+  return out;
+}
 
 // ---- Stop a running engine for ONE runId (other concurrent runs untouched) ----
 ipcMain.handle('engine:stop', (e, { runId }) => {
@@ -541,7 +666,10 @@ function walkNotes(dir, base){
     if (ent.name.startsWith('.')) continue;
     const rel = base ? base + '/' + ent.name : ent.name;
     if (ent.isDirectory()) { if (IGNORE_DIRS.has(ent.name)) continue; out = out.concat(walkNotes(path.join(dir, ent.name), rel)); }
-    else if (ent.name.endsWith('.md')) out.push(rel);
+    // KUMIKO.md (standing rules) + KUMIKO-MEMORY.md (memory layer) are the AI's own files —
+    // hidden from every list-driven surface (sidebar, graph, @-mentions, RAG) by user request;
+    // read/written directly by name (rules desk / memory desk).
+    else if (ent.name.endsWith('.md') && rel !== 'KUMIKO.md' && rel !== 'KUMIKO-MEMORY.md') out.push(rel);
   }
   return out;
 }
@@ -641,6 +769,7 @@ ipcMain.handle('note:open', (e, name) => {
 
 ipcMain.handle('note:save', (e, payload) => {
   const p = path.join(NOTES_DIR, payload.name);
+  fs.mkdirSync(path.dirname(p), { recursive: true });   // AI NEW-NOTE may name a brand-new folder
   fs.writeFileSync(p, payload.content, 'utf8');
   lastKnownContent = payload.content;
   return true;
@@ -648,6 +777,17 @@ ipcMain.handle('note:save', (e, payload) => {
 
 ipcMain.handle('note:read', (e, name) => {
   try { return fs.readFileSync(path.join(NOTES_DIR, name), 'utf8'); } catch (_) { return ''; }
+});
+
+// ---- global memory (cross-vault, per-user): KUMIKO-GLOBAL.md lives in userData, NOT in any
+// vault — the ผู้ใช้ (profile) memory cards follow the person across every vault on this machine.
+function globalMemFile(){ return path.join(app.getPath('userData'), 'KUMIKO-GLOBAL.md'); }
+ipcMain.handle('memory:global:read', () => {
+  try { return fs.readFileSync(globalMemFile(), 'utf8'); } catch (_) { return ''; }
+});
+ipcMain.handle('memory:global:save', (e, content) => {
+  try { fs.writeFileSync(globalMemFile(), String(content || '')); return { ok: true }; }
+  catch (_) { return { error: 'failed' }; }
 });
 
 ipcMain.handle('pdf:read', (e, name) => {
@@ -678,7 +818,7 @@ ipcMain.handle('pdf:ocr', (e, { name, maxPages } = {}) => {
   });
 });
 
-ipcMain.handle('pdf:import', async () => {
+ipcMain.handle('pdf:import', async (e, payload) => {
   const win = BrowserWindow.getFocusedWindow();
   let r;
   try { r = await dialog.showOpenDialog(win, { title: 'นำเข้า PDF', properties: ['openFile'], filters: [{ name: 'PDF', extensions: ['pdf'] }] }); }
@@ -686,11 +826,15 @@ ipcMain.handle('pdf:import', async () => {
   if (!r || r.canceled || !r.filePaths || !r.filePaths[0]) return null;
   const src = r.filePaths[0];
   const base = path.basename(src);
-  let dest = path.join(NOTES_DIR, base);
+  // land in the box the user is WORKING IN (aligned with note/box creation), root when none
+  const dir = safeRel(String((payload && payload.dir) || '')) || '';
+  const destDir = dir ? path.join(NOTES_DIR, dir) : NOTES_DIR;
+  try { fs.mkdirSync(destDir, { recursive: true }); } catch (_) {}
+  let dest = path.join(destDir, base);
   let i = 1;
-  while (fs.existsSync(dest)) { const ext = path.extname(base); const stem = base.slice(0, base.length - ext.length); dest = path.join(NOTES_DIR, stem + ' (' + i + ')' + ext); i++; }
+  while (fs.existsSync(dest)) { const ext = path.extname(base); const stem = base.slice(0, base.length - ext.length); dest = path.join(destDir, stem + ' (' + i + ')' + ext); i++; }
   try { fs.copyFileSync(src, dest); } catch (_) { return null; }
-  return { name: path.basename(dest) };
+  return { name: (dir ? dir + '/' : '') + path.basename(dest) };
 });
 
 ipcMain.handle('pdf:rename', (e, { from, to }) => {
@@ -902,7 +1046,9 @@ ipcMain.handle('note:table', () => {
     const base=baseName(f);
     let backlinks=0;
     for(const g of files){ if(g===f) continue; if(linksTo(contents[g], base)) backlinks++; }
-    rows.push({ name:f, status:attrs.status||'', tags:attrs.tags||'', backlinks });
+    // bodyTags: #hashtags written in the markdown body (CoreTagIndex) — source 'body' in the tag index
+    let bodyTags=[]; try { bodyTags=_tagIndex.bodyTags(contents[f].replace(/^---[\s\S]*?---\n/, '')); } catch(_){}
+    rows.push({ name:f, status:attrs.status||'', tags:attrs.tags||'', backlinks, bodyTags });
   }
   return rows;
 });
@@ -915,13 +1061,25 @@ ipcMain.handle('note:search', (e, query) => {
   let files = [];
   files = walkNotes(NOTES_DIR);
   for (const name of files) {
-    if (name.toLowerCase().includes(ql)) results.push({ name, line: 0, snippet: name });
+    // PDF-Text/ shadows are machinery — a hit there is really a hit IN THE PDF: report it as
+    // the PDF (basename + page from the '## หน้า N' markers), capped so slides don't crowd
+    // out real notes. Never list the shadow file itself (log 2026-08-26).
+    const isShadow = name.startsWith('PDF-Text/');
+    if (!isShadow && name.toLowerCase().includes(ql)) results.push({ name, line: 0, snippet: name });
     let content = '';
     try { content = fs.readFileSync(path.join(NOTES_DIR, name), 'utf8'); } catch (_) { continue; }
     const lines = content.split(/\r?\n/);
+    let page = 0, shadowHits = 0;
     for (let i = 0; i < lines.length; i++) {
+      if (isShadow) { const pm = lines[i].match(/^## หน้า (\d+)/); if (pm) page = +pm[1]; }
       if (lines[i].toLowerCase().includes(ql)) {
-        results.push({ name, line: i + 1, snippet: lines[i].trim().slice(0, 120) });
+        if (isShadow) {
+          if (shadowHits >= 3) continue;
+          shadowHits++;
+          results.push({ name, line: i + 1, snippet: lines[i].trim().slice(0, 120), pdf: name.replace(/^PDF-Text\//, '').replace(/\.md$/i, ''), page });
+        } else {
+          results.push({ name, line: i + 1, snippet: lines[i].trim().slice(0, 120) });
+        }
       }
       if (results.length >= 40) return results;
     }
@@ -932,7 +1090,8 @@ ipcMain.handle('note:search', (e, query) => {
 // ---- Graph view (notes + [[wikilinks]]) ----
 ipcMain.handle('graph:data', () => {
   let files=[];
-  files = walkNotes(NOTES_DIR);
+  // PDF-Text/ shadow notes are RAG machinery — they'd render as orphan nodes in the graph
+  files = walkNotes(NOTES_DIR).filter((f) => !f.startsWith('PDF-Text/'));
   // wikilinks resolve by BASENAME, so the graph namespace is basenames:
   // two files sharing a basename (e.g. ระบบไต.md and ชีววิทยา/ระบบไต.md) are one node,
   // otherwise the duplicates render as orphan cards with no strings attached.
@@ -1093,8 +1252,18 @@ function startWatch() {
   if (watcher) watcher.close();
   watcher = chokidar.watch(NOTES_DIR, { ignoreInitial: true });
   watcher.on('change', (p) => {
-    if (!openFilePath) return;
-    if (path.resolve(p) !== path.resolve(openFilePath)) return;
+    const rel = path.relative(NOTES_DIR, p).split(path.sep).join('/');
+    if (!rel.endsWith('.md') || rel.startsWith('.washi/') || rel.startsWith('.trash/') || rel.startsWith('databases/')) return;
+    const isOpen = openFilePath && path.resolve(p) === path.resolve(openFilePath);
+    if (!isOpen) {
+      // An AI edit to a file the user does NOT have open used to land silently (auto-accepted).
+      // Flag it so the sidebar can show a review dot. Gated to engine activity so app-driven
+      // multi-file writes (rename link rewrites, sync) don't false-flag.
+      if (engineProcs.size > 0 || Date.now() - _lastEngineExit < 10000) {
+        if (win && !win.isDestroyed()) win.webContents.send('note:flagged', { name: rel });
+      }
+      return;
+    }
     let content;
     try { content = fs.readFileSync(p, 'utf8'); } catch (_) { return; }
     if (content === lastKnownContent) return; // our own save, ignore

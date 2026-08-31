@@ -41,7 +41,10 @@
       "identity": null
     },
     "extraResources": [
-      { "from": "native/pdf-ocr", "to": "pdf-ocr" }
+      {
+        "from": "native/pdf-ocr",
+        "to": "pdf-ocr"
+      }
     ],
     "directories": {
       "output": "dist"
@@ -67,6 +70,7 @@
     "hypermd": "^0.3.11",
     "jsonwebtoken": "^9.0.3",
     "marked": "^12.0.2",
+    "mermaid": "^11.16.1",
     "pdfjs-dist": "^3.11.174",
     "ws": "^8.21.1",
     "y-prosemirror": "^1.3.7",

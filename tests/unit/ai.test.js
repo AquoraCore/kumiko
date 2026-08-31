@@ -43,18 +43,18 @@ describe('buildEngineInvocation', () => {
 describe('aiConfigView', () => {
   it('maps a populated config to a safe view, hiding raw keys (happy)', () => {
     const v = aiConfigView({ mode: 'api', provider: 'zai', model: 'm', keys: { anthropic: 'x' } });
-    expect(v).toEqual({ mode: 'api', provider: 'zai', model: 'm', thinking: null, cliEngine: 'claude', cliModel: '', hasKey: { anthropic: true, zai: false } });
+    expect(v).toEqual({ mode: 'api', provider: 'zai', model: 'm', thinking: null, cliEngine: 'claude', cliModel: '', visionModel: '', autoVision: true, readNoteImages: true, hasKey: { anthropic: true, zai: false, 'zai-coding': false } });
   });
 
   it('defaults to cli/anthropic/empty when given null (edge)', () => {
     expect(aiConfigView(null)).toEqual({
-      mode: 'cli', provider: 'anthropic', model: '', thinking: null, cliEngine: 'claude', cliModel: '', hasKey: { anthropic: false, zai: false },
+      mode: 'cli', provider: 'anthropic', model: '', thinking: null, cliEngine: 'claude', cliModel: '', visionModel: '', autoVision: true, readNoteImages: true, hasKey: { anthropic: false, zai: false, 'zai-coding': false },
     });
   });
 
   it('defaults to cli/anthropic/empty when given an empty object (edge)', () => {
     expect(aiConfigView({})).toEqual({
-      mode: 'cli', provider: 'anthropic', model: '', thinking: null, cliEngine: 'claude', cliModel: '', hasKey: { anthropic: false, zai: false },
+      mode: 'cli', provider: 'anthropic', model: '', thinking: null, cliEngine: 'claude', cliModel: '', visionModel: '', autoVision: true, readNoteImages: true, hasKey: { anthropic: false, zai: false, 'zai-coding': false },
     });
   });
 
@@ -67,7 +67,7 @@ describe('aiConfigView', () => {
 
   it('treats a non-string / empty key as absent (edge)', () => {
     const v = aiConfigView({ keys: { anthropic: '', zai: 123, x: 'y' } });
-    expect(v.hasKey).toEqual({ anthropic: false, zai: false });
+    expect(v.hasKey).toEqual({ anthropic: false, zai: false, 'zai-coding': false });
   });
 });
 
@@ -217,5 +217,30 @@ describe('parseEmbedResponse', () => {
 
   it('returns [] for anthropic (defensive) (edge)', () => {
     expect(parseEmbedResponse('anthropic', { data: [{ embedding: [1] }] })).toEqual([]);
+  });
+});
+
+describe('parseSseEvent — reasoning kept apart from the answer', () => {
+  const { parseSseEvent } = require('../../core/ai.js');
+  it('zai/zai-coding: reasoning_content → reasoning, content → text; anthropic thinking_delta → reasoning', () => {
+    expect(parseSseEvent('zai-coding', JSON.stringify({ choices: [{ delta: { reasoning_content: 'hmm' } }] }))).toEqual({ text: '', reasoning: 'hmm' });
+    expect(parseSseEvent('zai', JSON.stringify({ choices: [{ delta: { content: 'ok' } }] }))).toEqual({ text: 'ok', reasoning: '' });
+    expect(parseSseEvent('anthropic', JSON.stringify({ type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: 'T' } }))).toEqual({ text: '', reasoning: 'T' });
+    expect(parseSseEvent('anthropic', JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: 'A' } }))).toEqual({ text: 'A', reasoning: '' });
+    expect(parseSseEvent('zai', '[DONE]')).toEqual({ text: '', reasoning: '' });
+    expect(parseSseEvent('zai', 'not json')).toEqual({ text: '', reasoning: '' });
+  });
+  it('runner emits reasoning on kind:"reasoning"; chat shows a collapsible block and keeps it out of the answer; side chat/autolink/server ignore it', () => {
+    const fs = require('fs'), path = require('path');
+    const read = (f) => fs.readFileSync(path.join(__dirname, '../..', f), 'utf8');
+    expect(read('main.js')).toMatch(/if \(ev\.reasoning\) emitReasoning\(ev\.reasoning\);/);
+    expect(read('main.js')).toMatch(/kind: 'reasoning'/);
+    const chat = read('renderer/chat.js');
+    expect(chat).toMatch(/if \(payload\.kind === 'reasoning'\) \{\n    last\.think = /);
+    expect(chat).toMatch(/function thinkBlockHtml\(m, open\)/);
+    expect(chat).toMatch(/thinkBlockHtml\(m, running && !m\.text\) \+ _linkify/);
+    expect(read('renderer/renderer.js')).toMatch(/p\.runId === 'autolink' && p\.kind !== 'reasoning'/);
+    expect(read('renderer/renderer.js')).toMatch(/if \(!sc \|\| p\.kind === 'reasoning'\) return;/);
+    expect(read('server/index.js')).toMatch(/const ev = aiCore\.parseSseEvent\(provider, m\[1\]\);\n        if \(ev\.text\) yield ev\.text;/);
   });
 });

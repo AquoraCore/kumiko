@@ -11,7 +11,9 @@ contextBridge.exposeInMainWorld('api', {
   listNotes: () => ipcRenderer.invoke('note:list'),
   openNote: (name) => ipcRenderer.invoke('note:open', name),
   readNote: (name) => ipcRenderer.invoke('note:read', name),
-  importPdf: () => ipcRenderer.invoke('pdf:import'),
+  readGlobalMemory: () => ipcRenderer.invoke('memory:global:read'),
+  saveGlobalMemory: (content) => ipcRenderer.invoke('memory:global:save', content),
+  importPdf: (dir) => ipcRenderer.invoke('pdf:import', { dir: dir || '' }),
   readPdf: (name) => ipcRenderer.invoke('pdf:read', name),
   pdfOcr: (name, maxPages) => ipcRenderer.invoke('pdf:ocr', { name, maxPages }),   // Apple Vision OCR (macOS)
   renamePdf: (from, to) => ipcRenderer.invoke('pdf:rename', { from, to }),
@@ -19,6 +21,7 @@ contextBridge.exposeInMainWorld('api', {
   saveAnnots: (name, data) => ipcRenderer.invoke('pdf:saveAnnots', { name, data }),
   saveNote: (name, content) => ipcRenderer.invoke('note:save', { name, content }),
   onNoteChanged: (cb) => ipcRenderer.on('note:changed', (_e, d) => cb(d)),
+  onNoteFlagged: (cb) => ipcRenderer.on('note:flagged', (_e, d) => cb(d)),
   createNote: (name) => ipcRenderer.invoke('note:create', name),
   renameNote: (from, to) => ipcRenderer.invoke('note:rename', { from, to }),
   deleteNote: (name) => ipcRenderer.invoke('note:delete', name),
@@ -62,7 +65,7 @@ contextBridge.exposeInMainWorld('api', {
   aiSetConfig: (patch) => ipcRenderer.invoke('ai:setConfig', patch),
   aiSetKey: (provider, key) => ipcRenderer.invoke('ai:setKey', { provider, key }),
   aiTestConnection: () => ipcRenderer.invoke('ai:testConnection'),
-  ragContext: (question) => ipcRenderer.invoke('rag:context', { question }),
+  ragContext: (question, opts) => ipcRenderer.invoke('rag:context', { question, opts: opts || {} }),
 
   collabRelay,   // phase 6c-3a: point the collab editor at a specific y-websocket relay
 

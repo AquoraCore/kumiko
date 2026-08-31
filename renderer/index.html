@@ -6,6 +6,23 @@
   <title>Kumiko</title>
   <link rel="stylesheet" href="vendor/crepe.bundle.css" />
   <link rel="stylesheet" href="styles.css" />
+  <!-- THEME BOOT — runs before first paint: mode + hue tokens from localStorage, so the window
+       never flashes the default vermilion/cream before renderer.js applies the real theme.
+       (A per-vault theme override is applied a moment later by applyKumikoTheme.) -->
+  <script src="../core/theme.js"></script>
+  <script>
+    (function(){ try {
+      var CT = window.CoreTheme; if (!CT) return;
+      var mode = localStorage.getItem('theme') || 'light';
+      var mql = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+      var dark = CT.resolveMode(mode, mql) === 'dark';
+      var r = document.documentElement; r.setAttribute('data-theme', dark ? 'dark' : 'light');
+      var th = null; try { th = JSON.parse(localStorage.getItem('kumikoTheme') || 'null'); } catch (_) {}
+      var tk = CT.tokens(th, dark); for (var k in tk) r.style.setProperty(k, tk[k]);
+      if (localStorage.getItem('sidebar') === 'collapsed') r.setAttribute('data-boot-sidebar', 'collapsed');
+      if (localStorage.getItem('chatHidden') === '1') r.setAttribute('data-boot-chat', 'hidden');
+    } catch (_) {} })();
+  </script>
   <script src="vendor/mermaid.bundle.js"></script>
   <script src="vendor/crepe.bundle.js"></script>
 </head>
@@ -20,6 +37,7 @@
      <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
       <symbol id="i-folderplus" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11.5v5M9.5 14h5"/></symbol>
        <symbol id="i-crate" viewBox="0 0 24 24"><path d="M12 3L20 7.5L20 16.5L12 21L4 16.5L4 7.5Z"/><path d="M12 12L20 7.5M12 12L12 21M12 12L4 7.5"/><path d="M16 5.25l-8 4.5"/></symbol>
+     <symbol id="i-dots" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></symbol>
      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
      <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M4.5 12a7.5 7.5 0 0 1 .2-1.7l-1.9-1.5 2-3.4 2.2.9a7.6 7.6 0 0 1 2.9-1.7L10.4 2h3.9l.5 2.4a7.6 7.6 0 0 1 2.9 1.7l2.2-.9 2 3.4-1.9 1.5a7.5 7.5 0 0 1 0 3.4l1.9 1.5-2 3.4-2.2-.9a7.6 7.6 0 0 1-2.9 1.7l-.5 2.4h-3.9l-.5-2.4a7.6 7.6 0 0 1-2.9-1.7l-2.2.9-2-3.4 1.9-1.5A7.5 7.5 0 0 1 4.5 12z"/></symbol>
      <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a6.6 6.6 0 0 0 9.8 9.8z"/></symbol>
@@ -66,7 +84,9 @@
       <symbol id="i-book" viewBox="0 0 24 24"><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M9 7h7M9 11h5"/></symbol>
       <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M6 2h12a1 1 0 0 1 1 1v18l-7-4.5L5 21V3a1 1 0 0 1 1-1z"/></symbol>
     </svg>
-  <div id="app">
+  <!-- SPLASH — covers the layout until the vault is loaded (removed by the boot sequence) -->
+  <div id="splash" aria-hidden="true"><div class="splash-logo"><i style="-webkit-mask-image:url(logo-mask.png);mask-image:url(logo-mask.png)"></i></div><div class="splash-name">Kumiko</div><div class="splash-bar"><i></i></div></div>
+  <div id="app" class="term-right">
     <!-- SIDEBAR: note list + search -->
     <aside id="sidebar">
       <div class="sb-head">
@@ -95,6 +115,7 @@
         <svg class="ic xs vc-caret"><use href="#i-chevdown"/></svg>
       </div>
     </aside>
+    <div id="sbRail" title="ลากเพื่อปรับความกว้าง · ดับเบิลคลิกเพื่อคืนค่า" data-i18n-title="ลากเพื่อปรับความกว้าง · ดับเบิลคลิกเพื่อคืนค่า"></div>
 
     <!-- LEFT: editor -->
     <section id="left">
@@ -117,12 +138,12 @@
           <button id="autolinkBtn" class="ghost" title="ร้อยเชือก — AI แนะนำลิงก์ไปโน้ตอื่น" data-i18n-title="ร้อยเชือก — AI แนะนำลิงก์ไปโน้ตอื่น" hidden><svg class="ic"><use href="#i-thread"/></svg></button>
           <button id="sideChatBtn" class="ghost" title="แชตลอย (⌘J)" data-i18n-title="แชตลอย (⌘J)" hidden><svg class="ic"><use href="#i-chat"/></svg></button>
           <button id="saveBtn" class="ghost" title="บันทึก (⌘S)" data-i18n-title="บันทึก (⌘S)"><svg class="ic"><use href="#i-save"/></svg></button>
+          <button id="barMoreBtn" class="ghost bar-more" title="เพิ่มเติม" data-i18n-title="เพิ่มเติม"><svg class="ic"><use href="#i-dots"/></svg></button>
           <span class="bar-div"></span>
           <button id="sidebarToggle" class="ghost" title="ซ่อน/แสดงแถบโน้ต" data-i18n-title="ซ่อน/แสดงแถบโน้ต"><svg class="ic"><use href="#i-sidebar"/></svg></button>
           <button id="aiPanelToggle" class="ghost" title="ซ่อน/แสดงแชต AI" data-i18n-title="ซ่อน/แสดงแชต AI"><svg class="ic"><use href="#i-panel"/></svg></button>
           <button id="tldrBtn" class="ghost" hidden>TL;DR</button>
           <button id="quizBtn" class="ghost" hidden data-i18n="ทดสอบฉัน">ทดสอบฉัน</button>
-          <button id="settingsBtn" class="ghost" hidden data-i18n="ตั้งค่า">ตั้งค่า</button>
           <button id="themeBtn" class="ghost" hidden data-i18n="ธีม">ธีม</button>
         </div>
       </header>
@@ -151,6 +172,19 @@
       <div id="aiUndo" class="ai-undo" hidden><span data-i18n="AI แก้โน้ตนี้แล้ว">AI แก้โน้ตนี้แล้ว</span><span><button id="aiUndoBtn" class="ghost sm" data-i18n="↩ เลิกทำ AI">↩ เลิกทำ AI</button><button id="aiUndoDismiss" class="ghost sm" data-i18n="ปิด">ปิด</button></span></div>
 
       <div id="editorWrap">
+        <!-- KUMIKO.md "rules desk" header — shown instead of the plain title when the standing-rules file is open -->
+        <div id="rulesHead" class="rules-head" hidden>
+          <div class="rules-hanko" aria-hidden="true">組</div>
+          <div class="rules-txt">
+            <div class="rules-title" data-i18n="กติกาการทำงานร่วมกับ AI">กติกาการทำงานร่วมกับ AI</div>
+            <div class="rules-sub" data-i18n="ส่งให้ AI ทุกข้อความ · ลำดับ: คำสั่งล่าสุด › กติกานี้ › บทสนทนา · AI แก้ไฟล์นี้เองไม่ได้ — เสนอได้ คุณยืนยัน">ส่งให้ AI ทุกข้อความ · ลำดับ: คำสั่งล่าสุด › กติกานี้ › บทสนทนา · AI แก้ไฟล์นี้เองไม่ได้ — เสนอได้ คุณยืนยัน</div>
+            <div class="rules-meter"><div class="rules-bar"><i id="rulesBarFill"></i></div><span id="rulesCount">0 / 2,000</span></div>
+          </div>
+          <div class="rules-acts">
+            <button id="rulesResetBtn" class="ghost sm" data-i18n="คืนค่าเริ่มต้น">คืนค่าเริ่มต้น</button>
+            <button id="rulesBackBtn" class="ghost sm" data-i18n="กลับไปตั้งค่า">กลับไปตั้งค่า</button>
+          </div>
+        </div>
         <div id="noteTitle" class="note-title" hidden></div>
         <div id="editorHost"></div>
       </div>
@@ -158,6 +192,7 @@
       <div id="tableView" class="main-view"></div>
       <div id="dashView" class="main-view"></div>
       <div id="crateView" class="main-view"></div>
+      <div id="tagView" class="main-view"></div>
       <div id="trashView" class="main-view"></div>
       <div id="pdfView" class="main-view">
         <div class="pdf-toolbar">
@@ -167,9 +202,8 @@
             <button id="pdfNext" title="หน้าถัดไป" data-i18n-title="หน้าถัดไป">›</button>
           </span>
           <span class="pdf-spacer"></span>
-          <button id="pdfNoteBtn" class="pdf-tb" title="โน้ตคู่หูของ PDF นี้" data-i18n-title="โน้ตคู่หูของ PDF นี้"><svg class="ic sm"><use href="#i-note"/></svg></button>
           <button id="pdfAnnotsBtn" class="pdf-tb" title="รายการไฮไลต์" data-i18n-title="รายการไฮไลต์"><svg class="ic sm"><use href="#i-list"/></svg></button>
-          <button id="pdfCropBtn" class="pdf-tb" title="ตัดกระดาษ / เลือกพื้นที่ (ไฮไลต์ภาพสแกนได้)" data-i18n-title="ตัดกระดาษ / เลือกพื้นที่ (ไฮไลต์ภาพสแกนได้)"><svg class="ic sm"><use href="#i-scissors"/></svg></button>
+          <button id="pdfAreaBtn" class="pdf-tb" title="ไฮไลต์พื้นที่ (ลากกรอบ — ใช้กับภาพสแกนได้)" data-i18n-title="ไฮไลต์พื้นที่ (ลากกรอบ — ใช้กับภาพสแกนได้)"><svg class="ic sm"><use href="#i-select"/></svg></button>
           <button id="pdfTextBtn" class="pdf-tb" title="ใส่กล่องข้อความ" data-i18n-title="ใส่กล่องข้อความ"><svg class="ic sm"><use href="#i-text"/></svg></button>
         </div>
         <div class="pdf-body">
@@ -194,7 +228,7 @@
       </div>
     </section>
 
-    <div id="divider"></div>
+    <div id="divider" title="ลากเพื่อปรับความกว้าง · ดับเบิลคลิกเพื่อคืนค่า" data-i18n-title="ลากเพื่อปรับความกว้าง · ดับเบิลคลิกเพื่อคืนค่า"></div>
 
     <!-- RIGHT: terminal -->
     <section id="right">
@@ -210,8 +244,13 @@
         <div id="sessionTabs" class="session-tabs"></div>
         <div id="sessionHead" class="session-head"></div>
         <div id="chatMessages"></div>
+        <div id="attachBar" class="attach-bar" hidden></div>
         <div class="chat-input">
-          <textarea id="chatInput" rows="1" placeholder="พิมพ์ข้อความ… (Enter ส่ง · Shift+Enter ขึ้นบรรทัด)" data-i18n-ph="พิมพ์ข้อความ… (Enter ส่ง · Shift+Enter ขึ้นบรรทัด)"></textarea>
+          <div class="chat-input-wrap">
+            <div id="chatInputHl" aria-hidden="true"></div>
+            <textarea id="chatInput" rows="1" placeholder="พิมพ์ข้อความ… (Enter ส่ง · Shift+Enter ขึ้นบรรทัด)" data-i18n-ph="พิมพ์ข้อความ… (Enter ส่ง · Shift+Enter ขึ้นบรรทัด)"></textarea>
+          </div>
+          <button id="chatAttach" title="แนบภาพ" data-i18n-title="แนบภาพ"><svg class="ic sm"><use href="#i-clip"/></svg><span class="att-badge" hidden>0</span></button>
           <button id="chatSend" title="ส่ง" data-i18n-title="ส่ง"><svg class="ic sm"><use href="#i-send"/></svg></button>
         </div>
       </div>
@@ -229,21 +268,27 @@
   <script src="../core/markdown.js"></script>
   <script src="../core/aicaps.js"></script>
   <script src="../core/tags.js"></script>
+  <script src="../core/tagindex.js"></script>
   <script src="../core/frontmatter.js"></script>
   <script src="../core/textdiff.js"></script>
   <script src="../core/textsim.js"></script>
   <script src="../core/rag.js"></script>
+  <script src="../core/theme.js"></script>
   <script src="../core/sync.js"></script>
   <script src="../core/syncstatus.js"></script>
   <script src="../core/collabroom.js"></script>
   <script src="../core/tboxsize.js"></script>
+  <script src="../core/memory.js"></script>
   <script src="i18n.js"></script>
   <script src="state.js"></script>
   <script src="db.js"></script>
   <script src="dashboard.js"></script>
   <script src="pdf.js"></script>
   <script src="chat.js"></script>
+  <script src="attach.js"></script>
   <script src="sidebar.js"></script>
+  <script src="tagsys.js"></script>
+  <script src="memsys.js"></script>
   <script src="dragdrop.js"></script>
   <script src="renderer.js"></script>
   <script src="sync.js"></script>

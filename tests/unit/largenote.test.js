@@ -19,12 +19,12 @@ async function signup(base, email) {
   return (await r.json()).token;
 }
 
-// Regression: crop-into-note embeds a base64 PNG data-URI in the note markdown.
-// Such a note exceeds express.json's 100kb DEFAULT, which used to 413 -> saveNote
-// silently failed on WEB (desktop writes a file, no limit). The server must accept
-// a multi-hundred-kB note body.
-describe('web notes accept large bodies (crop-into-note data-URI)', () => {
-  it('HAPPY: a ~600kB note (simulated crop image) saves and reads back intact', async () => {
+// Regression: an AI slide-clip (===PDF-CLIP===) embeds a base64 JPEG data-URI in the note
+// markdown (manual crop used to as well, before it was removed 2026-08-18). Such a note
+// exceeds express.json's 100kb DEFAULT, which used to 413 -> saveNote silently failed on WEB
+// (desktop writes a file, no limit). The server must accept a multi-hundred-kB note body.
+describe('web notes accept large bodies (slide-clip data-URI)', () => {
+  it('HAPPY: a ~600kB note (simulated clip image) saves and reads back intact', async () => {
     const s = await startServer({ port: 0, dataDir: tmpDir() });
     const base = 'http://127.0.0.1:' + s.port;
     const token = await signup(base, 'largenote@b.com');

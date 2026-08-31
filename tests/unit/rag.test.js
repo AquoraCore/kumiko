@@ -21,10 +21,11 @@ describe('tokenize (happy)', () => {
     expect(toks).not.toContain('the');
   });
 
-  it('emits Thai character bigrams and no raw space', () => {
+  it('segments Thai into real words (no accidental cross-syllable bigrams)', () => {
     const toks = tokenize('หน่วยไต กรองเลือด');
-    const thaiBigrams = toks.filter((t) => /^[\u0E00-\u0E7F]{2}$/.test(t));
-    expect(thaiBigrams.length).toBeGreaterThan(0);
+    expect(toks.some((t) => /^[\u0E00-\u0E7F]{2,}$/.test(t))).toBe(true);
+    expect(toks).toContain('เลือด');       // a real word, not a char pair
+    expect(toks).not.toContain('งเ');      // the old bigram junk across syllables
     expect(toks).not.toContain(' ');
   });
 });
@@ -310,5 +311,432 @@ describe('fuseRRF (edge)', () => {
     const r = fuseRRF([['a', 'b', 'c', 'd']], { limit: 1 });
     expect(r).toHaveLength(1);
     expect(r[0].id).toBe('a');
+  });
+});
+
+// ---- P1/P2 double-injection guard (bug fixed 2026-08-17) --------------------
+// The OPEN document is injected as P1 by buildPriorityContext. Ambient RAG (P2) must
+// EXCLUDE it so its body is never injected a second time. These lock the `exclude`
+// plumbing across the desktop chain (renderer → preload → main IPC → buildVaultContext),
+// which can't be imported into node (electron / browser globals).
+const _fs = require('fs');
+const _path = require('path');
+const _read = (p) => _fs.readFileSync(_path.join(__dirname, '../../', p), 'utf8');
+describe('RAG excludes the open doc (no P1/P2 double-injection)', () => {
+  it('renderer passes the open-doc basename in exclude + anchors on it', () => {
+    const s = _read('renderer/renderer.js');
+    expect(s).toContain('exclude, openName, docQuery, outlinks, mentions, weights: ragWeights()');
+    expect(s).toMatch(/exclude\.push\(nm\)/);
+    expect(s).toMatch(/exclude\.push\(base\)/);
+  });
+  it('preload forwards opts (incl. exclude) through the rag:context IPC', () => {
+    expect(_read('preload.js')).toContain("invoke('rag:context', { question, opts: opts || {} })");
+  });
+  it('main buildVaultContext filters excluded basenames out of the index', () => {
+    const s = _read('main.js');
+    expect(s).toMatch(/async function buildVaultContext\(question, opts\)/);
+    expect(s).toContain('excludeSet');
+    expect(s).toMatch(/excludeSet\.has\(baseName\(rel\)\.toLowerCase\(\)\)/);
+  });
+});
+
+// ---- Tiered weighted fusion (Phase 1, weights locked 2026-08-17) --------------
+import { weightedRRF, fuseRag, normalizeRagWeights, DEFAULT_RAG_WEIGHTS } from '../../core/rag.js';
+
+describe('normalizeRagWeights', () => {
+  it('fills every default and overrides only provided keys', () => {
+    const w = normalizeRagWeights({ explicit: 2.0, junk: 'x' });
+    expect(w.explicit).toBe(2.0);
+    expect(w.question).toBe(DEFAULT_RAG_WEIGHTS.question);
+    expect(w).not.toHaveProperty('junk');
+  });
+  it('ignores non-numbers, keeps defaults', () => {
+    expect(normalizeRagWeights({ doc: 'nope' }).doc).toBe(DEFAULT_RAG_WEIGHTS.doc);
+    expect(normalizeRagWeights(null).question).toBe(1.0);
+  });
+});
+
+describe('weightedRRF', () => {
+  it('weights each list independently; rank 0 scores weight/(k+0)', () => {
+    const s = weightedRRF([{ ids: ['a'], weight: 2 }, { ids: ['a'], weight: 1 }], 60);
+    expect(s.a).toBeCloseTo(2 / 60 + 1 / 60, 10);
+  });
+});
+
+describe('fuseRag — connection is a PRIOR that amplifies relevance, never overrides', () => {
+  it('an ON-TOPIC linked note beats an OFF-TOPIC linked note (the core goal)', () => {
+    const out = fuseRag({
+      question: ['OnTopic'],            // relevant to the question
+      doc: [],
+      explicit: ['OnTopic', 'OffTopic'] // both are user-linked
+    });
+    const on = out.find((r) => r.id === 'OnTopic');
+    const off = out.find((r) => r.id === 'OffTopic');
+    expect(on.score).toBeGreaterThan(off.score);          // relevance breaks the tie
+    expect(on.reason).toBe('linked');
+  });
+
+  it('explicit (tier1) outranks similar (tier3) at the same relevance', () => {
+    const out = fuseRag({ question: ['X', 'Y'], explicit: ['X'], similar: ['Y'] });
+    const x = out.find((r) => r.id === 'X'), y = out.find((r) => r.id === 'Y');
+    // X and Y are both question hits, but X carries the tier-1 prior
+    expect(x.score).toBeGreaterThan(y.score);
+    expect(x.reason).toBe('linked');
+  });
+
+  it('reciprocal (two-way) links score higher than one-way', () => {
+    const one = fuseRag({ question: ['A'], explicit: ['A'] });
+    const two = fuseRag({ question: ['A'], explicit: ['A'], reciprocal: ['A'] });
+    expect(two[0].score).toBeGreaterThan(one[0].score);
+  });
+
+  it('caps connection-ONLY notes (anti-flood) but keeps relevant ones', () => {
+    // 10 linked notes, none relevant to the question → only capExplicit(4) survive
+    const linked = Array.from({ length: 10 }, (_, i) => 'L' + i);
+    const out = fuseRag({ question: [], doc: [], explicit: linked }, { capExplicit: 4 });
+    expect(out.length).toBe(4);
+    out.forEach((r) => expect(r.reason).toBe('linked'));
+  });
+
+  it('a relevant-but-unlinked note still surfaces (recall not lost)', () => {
+    const out = fuseRag({ question: ['Fresh'], explicit: [] });
+    expect(out.find((r) => r.id === 'Fresh')).toBeTruthy();
+    expect(out.find((r) => r.id === 'Fresh').reason).toBe('question');
+  });
+
+  it('respects the limit', () => {
+    const q = Array.from({ length: 20 }, (_, i) => 'Q' + i);
+    expect(fuseRag({ question: q }, { limit: 5 }).length).toBe(5);
+  });
+});
+
+// ---- Phase-1 channel wiring + weight-config UI (source guards) ----------------
+describe('Phase-1 tiered RAG is wired end-to-end', () => {
+  const R = (p) => require('fs').readFileSync(require('path').join(__dirname, '../../', p), 'utf8');
+  it('renderer extracts open-doc signals (outlinks + docQuery) and passes weights', () => {
+    const s = R('renderer/renderer.js');
+    expect(s).toContain('function _docSignals');
+    expect(s).toMatch(/outlinks/);
+    expect(s).toContain('weights: ragWeights()');
+    expect(s).toContain("reason: 'open'");
+  });
+  it('main buildVaultContext builds the 4 channels and calls fuseRag', () => {
+    const s = R('main.js');
+    expect(s).toContain('CoreRag.fuseRag');
+    ['questionIds', 'docIds', 'explicitIds', 'reciprocalIds', 'backlinkIds'].forEach((v) => expect(s).toContain(v));
+  });
+  it('web ragContext mirrors the channels via _rag.fuseRag', () => {
+    const s = R('web/api-web.js');
+    expect(s).toContain('_rag.fuseRag');
+    expect(s).toContain('backlinkIds');
+    expect(s).toContain('reciprocalIds');
+  });
+  it('settings expose every weight as a live-tunable field with a hint + reset', () => {
+    const s = R('renderer/renderer.js');
+    expect(s).toContain('RAG_W_FIELDS');
+    ['question', 'doc', 'explicit', 'mention', 'similar', 'reciprocity', 'capExplicit', 'limit']
+      .forEach((k) => expect(s).toContain("'" + k + "'"));
+    expect(s).toContain("vsSet('ragWeights'");
+    expect(s).toContain('คืนค่าเริ่มต้น');   // reset button
+  });
+  it('the source-pill row is gone from the chat UI (removed on request)', () => {
+    const s = R('renderer/chat.js');
+    expect(s).not.toContain('rag-sources');
+    expect(s).not.toContain('rag-src-');
+    expect(R('renderer/styles.css')).not.toContain('.rag-src');
+    // the retrieval side still RETURNS reasons — only the rendering was dropped
+    expect(R('renderer/renderer.js')).toContain("reason: 'open'");
+  });
+});
+
+// ---- detectMentions (Phase 2 — unlinked title mentions) -----------------------
+import { detectMentions } from '../../core/rag.js';
+
+describe('detectMentions', () => {
+  it('finds a note title that appears verbatim (word boundary)', () => {
+    expect(detectMentions('the Nephron filters blood', ['Nephron', 'Mitochondria'])).toEqual(['Nephron']);
+  });
+  it('is case-insensitive', () => {
+    expect(detectMentions('about the nephron', ['Nephron'])).toEqual(['Nephron']);
+  });
+  it('does NOT match a title that is only part of a larger word', () => {
+    expect(detectMentions('nephrons and atpase', ['Nephron', 'ATP'])).toEqual([]);
+  });
+  it('ignores titles already inside [[wikilinks]] (those are Tier 1, not mentions)', () => {
+    expect(detectMentions('see [[Nephron]] here', ['Nephron'])).toEqual([]);
+  });
+  it('skips titles shorter than minLen', () => {
+    expect(detectMentions('ไต and go', ['ไต', 'go'])).toEqual([]);   // both < 3
+  });
+  it('matches Thai titles by substring (no reliable word boundary)', () => {
+    expect(detectMentions('เรื่องหน่วยไตของฉัน', ['หน่วยไต'])).toEqual(['หน่วยไต']);
+  });
+  it('dedupes and is safe on empty/null', () => {
+    expect(detectMentions('Nephron Nephron', ['Nephron'])).toEqual(['Nephron']);
+    expect(detectMentions(null, ['x'])).toEqual([]);
+    expect(detectMentions('x', null)).toEqual([]);
+  });
+});
+
+describe('fuseRag — mention (Tier 2) sits between explicit and question-only', () => {
+  it('a mention outranks a plain question hit but ranks below an explicit link', () => {
+    const out = fuseRag({ question: ['L', 'M', 'Q'], explicit: ['L'], mention: ['M'] });
+    const score = (id) => out.find((r) => r.id === id).score;
+    expect(score('L')).toBeGreaterThan(score('M'));  // explicit(1.0) > mention(0.8)
+    expect(score('M')).toBeGreaterThan(score('Q'));  // mention prior > no connection
+    expect(out.find((r) => r.id === 'M').reason).toBe('mention');
+  });
+});
+
+describe('Phase-2 mention channel is wired end-to-end', () => {
+  const R = (p) => require('fs').readFileSync(require('path').join(__dirname, '../../', p), 'utf8');
+  it('renderer detects mentions in the open doc and passes them', () => {
+    const s = R('renderer/renderer.js');
+    expect(s).toContain('window.CoreRag.detectMentions');
+    expect(s).toContain('mentions, weights: ragWeights()');
+  });
+  it('main + web resolve mentions + reverse-detect, into the fuseRag mention channel', () => {
+    ['main.js', 'web/api-web.js'].forEach((f) => {
+      const s = R(f);
+      expect(s).toContain('mentionIds');
+      expect(s).toContain('detectMentions(d.text, [opts.openName])');
+      expect(s).toContain('mention: mentionIds');
+    });
+  });
+});
+
+// ---- admission threshold + one-document-one-citation --------------------------
+import { docFamilyKey } from '../../core/rag.js';
+
+describe('minRelevance — admission, not ranking (weights order; this one excludes)', () => {
+  const corpus = buildIndex([
+    { id: 'strong', text: 'nephron nephron nephron kidney filtration glomerulus' },
+    { id: 'weak',   text: 'a long unrelated note about cooking that merely says kidney once' },
+    { id: 'none',   text: 'mitochondria atp energy' },
+  ]);
+
+  it('keeps the strong match and drops the barely-overlapping one', () => {
+    const all = rank('nephron kidney', corpus, 8);            // no floor -> both admitted
+    expect(all.map((r) => r.id)).toContain('weak');
+    const cut = rank('nephron kidney', corpus, 8, 0.25);      // floor -> noise removed
+    expect(cut.map((r) => r.id)).toContain('strong');
+    expect(cut.map((r) => r.id)).not.toContain('weak');
+  });
+
+  it('always keeps the top hit (a floor can never empty a non-empty result)', () => {
+    const r = rank('nephron kidney', corpus, 8, 0.99);
+    expect(r.length).toBeGreaterThan(0);
+    expect(r[0].id).toBe('strong');
+  });
+
+  it('omitted / 0 ratio preserves the old admit-everything behaviour', () => {
+    expect(rank('nephron kidney', corpus, 8, 0).length).toBe(rank('nephron kidney', corpus, 8).length);
+  });
+
+  it('connection-only notes are unaffected (they never go through BM25)', () => {
+    const out = fuseRag({ question: [], explicit: ['L'] });
+    expect(out.find((r) => r.id === 'L').reason).toBe('linked');
+  });
+});
+
+describe('docFamilyKey — one document cited once', () => {
+  it('collapses the pdf, its PDF-Text extract and its companion note', () => {
+    const k = docFamilyKey('chapter10.pdf');
+    expect(docFamilyKey('PDF-Text/chapter10.md')).toBe(k);
+    expect(docFamilyKey('chapter10 · โน้ต.md')).toBe(k);
+    expect(docFamilyKey('chapter10')).toBe(k);
+  });
+  it('keeps genuinely different documents apart', () => {
+    expect(docFamilyKey('chapter10.pdf')).not.toBe(docFamilyKey('chapter11.pdf'));
+  });
+  it('is safe on null/empty', () => {
+    expect(docFamilyKey(null)).toBe('');
+  });
+});
+
+describe('backends dedupe by document family (incl. against the open doc)', () => {
+  const R = (p) => require('fs').readFileSync(require('path').join(__dirname, '../../', p), 'utf8');
+  it('main + web collapse same-document artifacts and seed with exclude', () => {
+    ['main.js', 'web/api-web.js'].forEach((f) => {
+      const s = R(f);
+      expect(s).toContain('famSeen');
+      expect(s).toContain('docFamilyKey');
+    });
+  });
+  it('minRelevance is exposed in Settings like the other weights', () => {
+    const s = R('renderer/renderer.js');
+    expect(s).toContain("'minRelevance'");
+    expect(s).toContain('เกณฑ์ผ่านขั้นต่ำ');
+  });
+});
+
+// Bug 2026-08-18: after the relevance floor cleared the 💬 question hits, the SAME notes came
+// straight back as 🔗 "mention" — because connection-only admission ignored relevance entirely.
+// An open chapter mentions a dozen note titles, so those were injected into EVERY answer forever.
+describe('only YOUR links may surface without matching the question', () => {
+  it('a mention with no relevance to the question is NOT injected', () => {
+    const out = fuseRag({ question: [], doc: [], mention: ['DFD', 'ระบบสารสนเทศ'] });
+    expect(out).toEqual([]);
+  });
+
+  it('similar is a RELEVANCE channel (cosine vs the question), so it may surface on its own', () => {
+    // unlike `mention`, the similar list is ranked against the question — it carries relevance
+    const out = fuseRag({ question: [], similar: ['Whatever'] });
+    expect(out.map((r) => r.id)).toEqual(['Whatever']);
+    expect(out[0].reason).toBe('similar');
+  });
+
+  it('but an EXPLICIT link still surfaces on a vague question (user intent is evidence)', () => {
+    const out = fuseRag({ question: [], explicit: ['MyLink'] });
+    expect(out.map((r) => r.id)).toEqual(['MyLink']);
+    expect(out[0].reason).toBe('linked');
+  });
+
+  it('a mention that IS relevant still gets its Tier-2 boost', () => {
+    const out = fuseRag({ question: ['A', 'B'], mention: ['B'] });
+    const a = out.find((r) => r.id === 'A'), b = out.find((r) => r.id === 'B');
+    expect(b).toBeTruthy();
+    expect(b.reason).toBe('mention');
+    expect(b.score).toBeGreaterThan(a.score);   // boosted above the plain question hit
+  });
+
+  it('capExplicit 0 means nothing surfaces without matching the question', () => {
+    expect(fuseRag({ question: [], explicit: ['L'] }, { capExplicit: 0 })).toEqual([]);
+  });
+});
+
+// The OPEN document (P1) must be injected as the RELEVANT PARTS, not the whole thing and not the
+// first N characters — head-truncation throws away the passage that answers the question.
+import { splitPassages, selectPassages } from '../../core/rag.js';
+
+describe('splitPassages', () => {
+  it('starts a new passage at each markdown heading, keeping the heading with its body', () => {
+    const p = splitPassages('# A\nbody a\n\n# B\nbody b');
+    expect(p).toHaveLength(2);
+    expect(p[0].text).toContain('# A');
+    expect(p[0].text).toContain('body a');
+    expect(p[1].text).toContain('# B');
+  });
+  it('is safe on empty input', () => {
+    expect(splitPassages('')).toEqual([]);
+  });
+});
+
+describe('selectPassages — keep what matches, in document order', () => {
+  // the answer sits at the END, exactly where head-truncation would lose it
+  const doc = [
+    '# Intro\n' + 'filler about nothing in particular. '.repeat(60),
+    '# Middle\n' + 'more unrelated padding text here. '.repeat(60),
+    '# Shipping\nthe carrier receives the shipping notice and the goods',
+  ].join('\n\n');
+
+  it('returns the doc unchanged when it already fits the budget', () => {
+    expect(selectPassages('short doc', 'anything', 10000)).toBe('short doc');
+  });
+
+  it('keeps the RELEVANT tail that head-truncation would have thrown away', () => {
+    const out = selectPassages(doc, 'carrier shipping notice', 900);
+    expect(out).toContain('carrier receives the shipping notice');
+    expect(out.length).toBeLessThanOrEqual(900 + 40);
+    // prove the naive approach would have failed
+    expect(doc.slice(0, 900)).not.toContain('carrier receives the shipping notice');
+  });
+
+  it('marks elided regions so the model knows there are gaps', () => {
+    expect(selectPassages(doc, 'carrier shipping notice', 900)).toContain('…');
+  });
+
+  it('falls back to the head when the query matches nothing (never empty context)', () => {
+    const out = selectPassages(doc, 'zzzznomatch qqqq', 500);
+    expect(out.length).toBeGreaterThan(0);
+    expect(out).toContain('Intro');
+  });
+
+  it('works with Thai queries', () => {
+    const thai = ['# บทนำ\n' + 'ข้อความทั่วไป '.repeat(80), '# การจัดส่ง\nผู้ขนส่งรับสินค้าและใบแจ้ง'].join('\n\n');
+    expect(selectPassages(thai, 'ผู้ขนส่ง', 400)).toContain('ผู้ขนส่งรับสินค้า');
+  });
+});
+
+// "inject เฉพาะเรื่องที่เกี่ยวข้อง" applies EVERYWHERE, not only to long open docs.
+describe('relevant-only injection across the whole prompt', () => {
+  const R = (f) => require('fs').readFileSync(require('path').join(__dirname, '../../', f), 'utf8');
+  it('P2 supporting notes are passage-selected per note (no whole-note dumps)', () => {
+    ['main.js', 'web/api-web.js'].forEach((f) => {
+      expect(R(f)).toMatch(/selectPassages\(d\.text, question, W\.noteBudget\)/);
+    });
+  });
+  it('the question LEADS the prompt and is restated at the end (not a bottom history line)', () => {
+    const s = R('renderer/renderer.js');
+    expect(s).toContain("'คำถามล่าสุดของผู้ใช้: ' + msg");
+    expect(s).toContain("'ตอบคำถามนี้: ' + msg");
+    expect(s).toContain('บทสนทนาก่อนหน้า:');
+  });
+  it('history goes through historyText (no full note bodies, capped)', () => {
+    expect(R('renderer/renderer.js')).toContain('window.CoreMarkdown.historyText');
+  });
+  it('both budgets are tunable weights with sane defaults', () => {
+    expect(DEFAULT_RAG_WEIGHTS.p1Budget).toBe(12000);
+    expect(DEFAULT_RAG_WEIGHTS.noteBudget).toBe(1600);
+    const s = R('renderer/renderer.js');
+    expect(s).toContain("'p1Budget'");
+    expect(s).toContain("'noteBudget'");
+  });
+});
+
+// ---- search quality: Thai words + stopwords + title indexing + incremental index ----
+import { docTf, buildIndexFromTf } from '../../core/rag.js';
+
+describe('Thai tokenization quality (the #1 source of junk injections)', () => {
+  it('drops Thai function words and keeps content words', () => {
+    const toks = tokenize('สรุปให้หน่อย');
+    expect(toks).toContain('สรุป');
+    expect(toks).not.toContain('ให้');
+    expect(toks).not.toContain('หน่อย');
+    expect(toks).not.toContain('รุ');      // the bigram that used to collide with unrelated notes
+  });
+  it('a vague Thai ask no longer matches an unrelated note', () => {
+    const idx = buildIndex([
+      { id: 'A', text: 'ประวัติศาสตร์กรุงศรีอยุธยา' },   // used to hit via shared \'รุ\'/\'อย\' pairs
+      { id: 'B', text: 'สรุปการทดลอง และสรุปผล' },
+    ]);
+    const ids = rank('สรุปให้หน่อย', idx, 5).map((r) => r.id);
+    expect(ids).not.toContain('A');
+    expect(ids).toContain('B');
+  });
+});
+
+describe('title indexing', () => {
+  it('finds a note by its TITLE even when the body never repeats the word', () => {
+    const idx = buildIndex([
+      { id: 'dfd', title: 'DFD - Data Flow Diagram', text: 'แผนภาพการไหลของข้อมูลในระบบ' },
+      { id: 'x', title: 'Other', text: 'unrelated body' },
+    ]);
+    expect(rank('dfd', idx, 3).map((r) => r.id)).toContain('dfd');
+  });
+});
+
+describe('buildIndexFromTf — cached per-doc stats assemble the identical index', () => {
+  it('matches buildIndex output exactly', () => {
+    const docs = [{ id: 'a', text: 'nephron filters blood' }, { id: 'b', text: 'atp energy' }];
+    const viaCache = buildIndexFromTf(docs.map((d) => Object.assign({ id: d.id }, docTf(d.text))));
+    expect(viaCache).toEqual(buildIndex(docs));
+  });
+});
+
+describe('incremental index + corpus cache wiring', () => {
+  const R = (f) => require('fs').readFileSync(require('path').join(__dirname, '../../', f), 'utf8');
+  it('main.js re-indexes only files whose signature changed', () => {
+    const s = R('main.js');
+    expect(s).toContain('_ragIndexCache');
+    expect(s).toContain('st.mtimeMs');
+    expect(s).toContain('CoreRag.docTf(text, baseName(rel))');
+    expect(s).toContain('CoreRag.buildIndexFromTf(docs)');
+  });
+  it('web caches the fetched corpus briefly and busts it on every mutation', () => {
+    const s = R('web/api-web.js');
+    expect(s).toContain('_allNotesCache');
+    expect((s.match(/_bustNotes\(\)/g) || []).length).toBeGreaterThanOrEqual(4);   // def + 3 mutators
+    expect(s).toContain("title: _baseName(n.name)");
   });
 });

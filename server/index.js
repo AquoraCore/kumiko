@@ -110,9 +110,14 @@ async function startServer(opts = {}) {
   // tests run without a real LLM/key. Yields text deltas; returns early if unset.
   // creds = { provider, key, model } (client-provided wins over managed defaults).
   const streamChat = opts.streamChat || (async function* (prompt, creds) {
-    const { provider, key, model, thinking } = creds || {};
+    const { provider, key, model, thinking, images } = creds || {};
     if (!provider || !key) return;
-    const req = aiCore.buildApiRequest(provider, model, prompt, key, { thinking: aiCore.resolveThinking(provider, model, thinking) });
+    // an image message on a text-only model → the provider's vision model (same auto-switch as desktop)
+    let mdl = model;
+    if (images && images.length && aiCore.modelSupportsVision && !aiCore.modelSupportsVision(provider, mdl)) {
+      const vm = aiCore.visionModelFor(provider, mdl); if (vm) mdl = vm;
+    }
+    const req = aiCore.buildApiRequest(provider, mdl, prompt, key, { thinking: aiCore.resolveThinking(provider, mdl, thinking), images });
     if (!req) return;
     const res = await fetch(req.url, { method: 'POST', headers: req.headers, body: JSON.stringify(req.body) });
     if (!res.ok || !res.body) return;
@@ -124,8 +129,10 @@ async function startServer(opts = {}) {
       while ((i = buf.indexOf('\n')) >= 0) {
         const line = buf.slice(0, i); buf = buf.slice(i + 1);
         const m = line.match(/^data:\s?(.*)$/); if (!m) continue;
-        const delta = aiCore.parseSseDelta(provider, m[1]);
-        if (delta) yield delta;
+        // managed (web) stream is plain text: reasoning is DROPPED here — the web client has no
+        // separate thinking channel yet, and mixing it into the answer is worse than omitting it
+        const ev = aiCore.parseSseEvent(provider, m[1]);
+        if (ev.text) yield ev.text;
       }
     }
   });
@@ -285,6 +292,21 @@ async function startServer(opts = {}) {
   const dbs = app.locals.dbs;
   const pdfs = createPdfStore(path.join(dataDir, 'vaults'));
   const vfs = createVaultFs(path.join(dataDir, 'vaults'));
+
+  // ---- global memory: KUMIKO-GLOBAL.md — per-USER, cross-vault (beside vaults.json).
+  // Fixed filename + encodeURIComponent(userId) (same as vaultreg) → no path traversal surface.
+  const gmemPath = (uid) => path.join(dataDir, 'vaults', encodeURIComponent(String(uid)), 'KUMIKO-GLOBAL.md');
+  app.get('/memory/global', requireAuth, (req, res) => {
+    try { res.json({ content: fs.readFileSync(gmemPath(req.user.sub), 'utf8') }); }
+    catch (_) { res.json({ content: '' }); }
+  });
+  app.put('/memory/global', requireAuth, (req, res) => {
+    try {
+      fs.mkdirSync(path.dirname(gmemPath(req.user.sub)), { recursive: true });
+      fs.writeFileSync(gmemPath(req.user.sub), String((req.body || {}).content || ''));
+      res.json({ ok: true });
+    } catch (_) { res.json({ error: 'failed' }); }
+  });
 
   // ---- vaults (Phase 8.2): per-user vault registry CRUD ----
   // GET /vaults -> { vaults: [...] } (default vault is lazily created on first read)
@@ -484,7 +506,7 @@ async function startServer(opts = {}) {
     }
     res.setHeader('content-type', 'text/plain; charset=utf-8');
     try {
-      for await (const delta of streamChat(prompt, { provider, key, model, thinking })) res.write(delta);
+      for await (const delta of streamChat(prompt, { provider, key, model, thinking, images: Array.isArray(b.images) ? b.images.slice(0, 4) : [] })) res.write(delta);
       res.end();
     } catch (_) { try { res.end(); } catch (__) {} }
   });
