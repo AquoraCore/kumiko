@@ -45,7 +45,7 @@ describe('CoreTheme.patternUri', () => {
 describe('CoreTheme.normalize + presets', () => {
   it('bad fields fall back per-field; good fields survive', () => {
     const n = CT.normalize({ accent: 'x', pattern: 'weird', intensity: 99, radius: 'soft', preset: 'nope' });
-    expect(n).toEqual({ preset: 'kumiko', pattern: 'shippou', intensity: 'faint', radius: 'soft' });
+    expect(n).toEqual({ preset: 'kumiko', pattern: 'sakuragoshi', intensity: 'faint', radius: 'soft' });   // fallback = new default (2026-09-01)
     expect(CT.normalize({ pattern: 'kagome', intensity: 'mid', radius: 'shoji', preset: 'ai' }))
       .toEqual({ preset: 'ai', pattern: 'kagome', intensity: 'mid', radius: 'shoji' });
     // legacy migration: 'sumi' (dark-as-a-colour) → kumiko; numeric intensity → nearest step
@@ -314,7 +314,7 @@ describe('boot: first paint carries the theme; splash until the vault loads', ()
   });
 });
 
-describe('kazaguruma tile + new logo pipeline', () => {
+describe('tiles + logo pipeline (v2: kumiko-sakura, 2026-09-01)', () => {
   const CT = require('../../core/theme.js');
   const fs = require('fs'), path = require('path');
   it('kazaguruma is a selectable pattern (64px cell, blades ~70%, hub dot) and has a Thai name + EN entry', () => {
@@ -324,6 +324,55 @@ describe('kazaguruma tile + new logo pipeline', () => {
     expect(decodeURIComponent(u)).toContain("width='64'");
     expect(fs.readFileSync(path.join(__dirname, '../../renderer/renderer.js'), 'utf8')).toContain("kazaguruma: '風車 คาซะกุรุมะ'");
     expect(fs.readFileSync(path.join(__dirname, '../../renderer/i18n.js'), 'utf8')).toContain("'風車 คาซะกุรุมะ': '風車 Kazaguruma'");
+  });
+  it('the 2026-09-01 ref batch: all 21 tiles present, each named in Thai + EN, valid URIs', () => {
+    const BATCH = ['sakuragoshi', 'hanaasa', 'yukiwa', 'asanoha6', 'kiku', 'kumo', 'goma', 'shokko6',
+      'izutsu', 'hoshi', 'hikari', 'rindo', 'kakuasa', 'sanjubishi', 'tsumiishi', 'hanabishi',
+      'mitsukude', 'mikado', 'shokko8', 'fundo', 'senbon'];
+    const renderer = fs.readFileSync(path.join(__dirname, '../../renderer/renderer.js'), 'utf8');
+    const i18n = fs.readFileSync(path.join(__dirname, '../../renderer/i18n.js'), 'utf8');
+    const namesBlock = renderer.slice(renderer.indexOf('const PATTERN_NAMES'), renderer.indexOf('const INTENSITY_NAMES'));
+    for (const k of BATCH) {
+      expect(CT.PATTERNS).toContain(k);
+      expect(CT.patternUri(k, '#bd5540', 0.08)).toMatch(/^url\(/);
+      const m = namesBlock.match(new RegExp(k + ": '([^']+)'"));
+      expect(m, k + ' must have a Thai name').toBeTruthy();
+      expect(i18n, k + ' Thai name needs an EN entry').toContain("'" + m[1] + "':");
+    }
+    // 9 originals + 21 batch = 30 tiles (+ 'none')
+    expect(CT.PATTERNS.length).toBe(31);
+    // fundo/senbon carry the enriched v2 geometry (nested / double-rail), not the plain v1
+    const fundoD = decodeURIComponent(CT.patternUri('fundo', '#000', 0.1));
+    expect(fundoD.split('Z').length - 1).toBeGreaterThanOrEqual(3);
+    const senbonD = decodeURIComponent(CT.patternUri('senbon', '#000', 0.1));
+    expect((senbonD.match(/H/g) || []).length).toBeGreaterThanOrEqual(4);
+  });
+  it('sakuragoshi is the DEFAULT pattern (kumiko preset + global fallback)', () => {
+    expect(CT.PRESETS.kumiko.pattern).toBe('sakuragoshi');
+    const norm = CT.normalizeTheme ? CT.normalizeTheme({}) : null;
+    if (norm) expect(norm.pattern).toBe('sakuragoshi');
+    const src = fs.readFileSync(path.join(__dirname, '../../core/theme.js'), 'utf8');
+    expect(src).toContain("var DEFAULT = { preset: 'kumiko', pattern: 'sakuragoshi'");
+  });
+  it('sakura (logo v2) is a selectable pattern with baked 5-fold petals + Thai/EN names', () => {
+    expect(CT.PATTERNS).toContain('sakura');
+    const d = CT.TILES ? CT.TILES.sakura.d : '';
+    // 5 petal subpaths + the cell frame = 6 closepaths, all coordinates baked (no transforms)
+    expect((CT.patternUri('sakura', '#bd5540', 0.08).match(/Z/g) || []).length).toBeGreaterThanOrEqual(6);
+    expect(fs.readFileSync(path.join(__dirname, '../../renderer/renderer.js'), 'utf8')).toContain("sakura: '桜 ซากุระคุมิโกะ'");
+    expect(fs.readFileSync(path.join(__dirname, '../../renderer/i18n.js'), 'utf8')).toContain("'桜 ซากุระคุมิโกะ': '桜 Kumiko Sakura'");
+  });
+  it('logo masters are the K2 kumiko-sakura (5-fold rotate of one cleft petal, sumi + cream)', () => {
+    const logo = fs.readFileSync(path.join(__dirname, '../../build/kumiko-logo.svg'), 'utf8');
+    const mask = fs.readFileSync(path.join(__dirname, '../../build/kumiko-mask.svg'), 'utf8');
+    for (const svg of [logo, mask]) {
+      expect(svg).toContain('rotate(72 32 32)');
+      expect(svg).toContain('rotate(288 32 32)');
+      expect(svg).toContain('L32 11.5');   // the cleft tip of the single master petal
+    }
+    expect(logo).toContain('#2e2b28');   // sumi plaque
+    expect(logo).toContain('#e8d9b8');   // cream wood stroke
+    expect(mask).toContain('stroke="#fff"');
   });
   it('splash pinwheel spins slowly (masked layer only) and reduced-motion stops it', () => {
     const css = fs.readFileSync(path.join(__dirname, '../../renderer/styles.css'), 'utf8');

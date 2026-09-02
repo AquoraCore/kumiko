@@ -236,7 +236,7 @@ describe('parseSseEvent — reasoning kept apart from the answer', () => {
     expect(read('main.js')).toMatch(/if \(ev\.reasoning\) emitReasoning\(ev\.reasoning\);/);
     expect(read('main.js')).toMatch(/kind: 'reasoning'/);
     const chat = read('renderer/chat.js');
-    expect(chat).toMatch(/if \(payload\.kind === 'reasoning'\) \{\n    last\.think = /);
+    expect(chat).toMatch(/if \(payload\.kind === 'reasoning'\) \{[\s\S]{0,400}last\.think = /);
     expect(chat).toMatch(/function thinkBlockHtml\(m, open\)/);
     expect(chat).toMatch(/thinkBlockHtml\(m, running && !m\.text\) \+ _linkify/);
     expect(read('renderer/renderer.js')).toMatch(/p\.runId === 'autolink' && p\.kind !== 'reasoning'/);

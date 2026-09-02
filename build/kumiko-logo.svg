@@ -1,1 +1,12 @@
-<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1024 1024'><defs><filter id='b' x='-50%' y='-50%' width='200%' height='200%'><feGaussianBlur stdDeviation='14'/></filter></defs><rect width='1024' height='1024' rx='230' fill='#f6f0e3'/><ellipse cx='512.0' cy='906.24' rx='215.04' ry='22.528' fill='#000' opacity='0.10' filter='url(#b)'/><g transform='rotate(0 512.0 512.0)'><g stroke='#bd5540' stroke-width='49' fill='none' stroke-linejoin='miter'><path d='M512.0 512.0L512.0 117.8L814.1 281.6Z'/></g></g><g transform='rotate(90 512.0 512.0)'><g stroke='#845b4e' stroke-width='49' fill='none' stroke-linejoin='miter'><path d='M512.0 512.0L512.0 117.8L814.1 281.6Z'/></g></g><g transform='rotate(180 512.0 512.0)'><g stroke='#bd5540' stroke-width='49' fill='none' stroke-linejoin='miter'><path d='M512.0 512.0L512.0 117.8L814.1 281.6Z'/></g></g><g transform='rotate(270 512.0 512.0)'><g stroke='#845b4e' stroke-width='49' fill='none' stroke-linejoin='miter'><path d='M512.0 512.0L512.0 117.8L814.1 281.6Z'/></g></g><circle cx='512.0' cy='512.0' r='56.32' fill='#f6f0e3' stroke='#bd5540' stroke-width='26'/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Kumiko logo v2 "ซากุระคุมิโกะ" (K2, user-picked 2026-09-01): ONE petal (cleft tip)
+       rotated 72° x5 = exact 5-fold symmetry; cream wood on sumi plaque, star hole at heart -->
+  <rect width="64" height="64" rx="14" fill="#2e2b28"/>
+  <g fill="none" stroke="#e8d9b8" stroke-width="2.8" stroke-linejoin="round" stroke-linecap="round">
+    <g id="p"><path d="M32 28.5 C27.5 26 25 21 25 15.5 C25 10.5 27.5 7.8 29.8 9.2 L32 11.5 L34.2 9.2 C36.5 7.8 39 10.5 39 15.5 C39 21 36.5 26 32 28.5 Z"/></g>
+    <use href="#p" transform="rotate(72 32 32)"/>
+    <use href="#p" transform="rotate(144 32 32)"/>
+    <use href="#p" transform="rotate(216 32 32)"/>
+    <use href="#p" transform="rotate(288 32 32)"/>
+  </g>
+</svg>

@@ -504,10 +504,23 @@ app.on('window-all-closed', () => {
 async function runApiProvider({ provider, model, prompt, key, rid, emit, thinking, images }){
   const ctrl = new AbortController();
   engineProcs.set(rid, { kill(){ try { ctrl.abort(); } catch (_) {} } });
-  const killer = setTimeout(() => {
-    if (engineProcs.has(rid)) { try { ctrl.abort(); } catch (_) {} emit('\r\n[timeout — engine killed]\r\n'); }
-  }, 300000);
-  const finish = (code) => { clearTimeout(killer); engineProcs.delete(rid); _lastEngineExit = Date.now(); win.webContents.send('engine:done', { runId: rid, code }); };
+  // SMART timeout (2026-09-02): the old flat 5-minute kill sat right on top of real work —
+  // a 3-chapter diagram job legitimately THINKS for ~4:24 with reasoning streaming the whole
+  // time. So: abort only when the stream goes SILENT (no bytes at all — reasoning counts as
+  // life) for STALL_MS, plus a generous hard cap so nothing runs forever.
+  const STALL_MS = 120000, HARD_MS = 900000;
+  const startedAt = Date.now();
+  let lastByte = Date.now();
+  const killer = setInterval(() => {
+    if (!engineProcs.has(rid)) return;
+    const stalled = Date.now() - lastByte > STALL_MS;
+    const tooLong = Date.now() - startedAt > HARD_MS;
+    if (!stalled && !tooLong) return;
+    try { ctrl.abort(); } catch (_) {}
+    emit(stalled ? '\r\n[ขาดการตอบสนองเกิน 2 นาที — ตัดการเชื่อมต่อ ลองส่งใหม่อีกครั้ง]\r\n'
+                 : '\r\n[เกินเวลาสูงสุด 15 นาที — ตัดการเชื่อมต่อ]\r\n');
+  }, 15000);
+  const finish = (code) => { clearInterval(killer); engineProcs.delete(rid); _lastEngineExit = Date.now(); win.webContents.send('engine:done', { runId: rid, code }); };
   const emitLine = (line) => {
     const trimmed = line.trim();
     if (trimmed.indexOf('data:') !== 0) return;     // skip event:/ping/blank lines
@@ -529,6 +542,7 @@ async function runApiProvider({ provider, model, prompt, key, rid, emit, thinkin
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
+      lastByte = Date.now();   // any byte — reasoning included — proves the engine is alive
       buf += dec.decode(value, { stream: true });
       let nl;
       while ((nl = buf.indexOf('\n')) >= 0) { emitLine(buf.slice(0, nl)); buf = buf.slice(nl + 1); }
@@ -1258,7 +1272,10 @@ function startWatch() {
     if (!isOpen) {
       // An AI edit to a file the user does NOT have open used to land silently (auto-accepted).
       // Flag it so the sidebar can show a review dot. Gated to engine activity so app-driven
-      // multi-file writes (rename link rewrites, sync) don't false-flag.
+      // multi-file writes (rename link rewrites, sync) don't false-flag. PDF-Text/ shadow notes
+      // are exempt: the BACKGROUND INDEXER rewrites them constantly, and when that overlaps a
+      // chat run they were false-flagged as "AI edits" (found 4 stale flags, 2026-09-01).
+      if (rel.startsWith('PDF-Text/')) return;
       if (engineProcs.size > 0 || Date.now() - _lastEngineExit < 10000) {
         if (win && !win.isDestroyed()) win.webContents.send('note:flagged', { name: rel });
       }

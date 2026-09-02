@@ -855,3 +855,80 @@ describe('review dot bubbles up to collapsed folder rows', () => {
     expect(sb).toMatch(/if \(collapsed && window\.__flaggedNotes && \[\.\.\.window\.__flaggedNotes\]\.some\(\(n\) => n\.startsWith\(node\.path \+ '\/'\)\)\)/);
   });
 });
+
+// 2026-09-01: the file-watcher review flag must NEVER fire for PDF-Text/ shadow notes — the
+// background indexer rewrites them constantly, and overlapping a chat run false-flagged them
+// as AI edits (4 stale review flags found in the wild).
+describe('watcher flag exempts PDF-Text shadow notes', () => {
+  it('main.js returns before the engine-activity flag check for PDF-Text/', () => {
+    const fs2 = require('fs'); const path2 = require('path');
+    const main = fs2.readFileSync(path2.join(__dirname, '../../main.js'), 'utf8');
+    const i = main.indexOf("rel.startsWith('PDF-Text/')");
+    const j = main.indexOf("note:flagged");
+    expect(i).toBeGreaterThan(0);
+    expect(i).toBeLessThan(j);
+  });
+});
+
+// 2026-09-02: a NEW-NOTE created while the user is elsewhere must offer a one-click path to
+// its review — a toast with "เปิดรีวิว" (jump → เก็บ/ทิ้ง banner), and the chat's 🆕 line shows
+// BASE names so linkifyRefs makes them clickable.
+describe('new-note notification carries a jump-to-review button', () => {
+  const fs3 = require('fs'); const path3 = require('path');
+  const read3 = (p) => fs3.readFileSync(path3.join(__dirname, '../../', p), 'utf8');
+  it('creation toast: STICKY (stays until pressed) + เปิดรีวิว action opening the first new note', () => {
+    const r = read3('renderer/renderer.js');
+    expect(r).toMatch(/firstRel && currentNote !== firstRel[\s\S]{0,300}เปิดรีวิว[\s\S]{0,60}openNote\(firstRel\)/);
+    expect(r).toMatch(/AI สร้างโน้ตใหม่: /);
+    expect((r.match(/sticky: true, action: \{ label: t\('เปิดรีวิว'\)/g) || []).length).toBe(2);
+    // the overwrite-proposal toast got the same button
+    expect(r).toMatch(/เสนอเขียนทับ[\s\S]{0,200}เปิดรีวิว[\s\S]{0,60}openNote\(rel0\)/);
+  });
+  it('pdfToast: sticky = no auto-expiry + ✕ dismiss; chat 🆕 line uses base names (linkifiable)', () => {
+    const pj = read3('renderer/pdf.js');
+    expect(pj).toContain("(opts && opts.life) ||");
+    expect(pj).toMatch(/opts\.sticky[\s\S]{0,300}toast-x/);
+    expect(pj).toMatch(/\} else \{\n    setTimeout\(kill, life\);\n  \}/);
+    expect(read3('renderer/chat.js')).toMatch(/สร้างโน้ตใหม่'\) \+ ': ' \+ nn\.notes\.map\(\(x\) => String\(x\.name \|\| ''\)\.split\('\/'\)\.pop\(\)\)/);
+    const i18n = read3('renderer/i18n.js');
+    expect(i18n).toContain("'เปิดรีวิว': 'Open review'");
+    expect(i18n).toContain("'AI สร้างโน้ตใหม่: '");
+  });
+});
+
+// 2026-09-02: the เก็บ/ทิ้ง banner shows WHICH note it's judging and each button's shortcut
+// (⌘↩ keep · ⌘⇧⌫ discard — shift required: bare ⌘⌫ is macOS delete-to-line-start in the
+// live editor right behind the banner). Same banner, no redesign.
+describe('new-note banner: note name + keyboard shortcuts', () => {
+  const fs4 = require('fs'); const path4 = require('path');
+  const r = fs4.readFileSync(path4.join(__dirname, '../../renderer/renderer.js'), 'utf8');
+  const css4 = fs4.readFileSync(path4.join(__dirname, '../../renderer/styles.css'), 'utf8');
+  it('shows the base note name inline', () => {
+    expect(r).toMatch(/nn-name'\)\.textContent = rel\.replace\(\/\\\.md\$\/i, ''\)\.split\('\/'\)\.pop\(\)/);
+  });
+  it('keyboard: ⌘↩ keeps, ⌘⇧⌫ discards, listener self-unbinds when the banner is gone', () => {
+    expect(r).toMatch(/e\.key === 'Enter'\) \{ e\.preventDefault\(\); keep\.onclick\(\)/);
+    expect(r).toMatch(/e\.key === 'Backspace' && e\.shiftKey\) \{ e\.preventDefault\(\); drop\.onclick\(\)/);
+    expect(r).toMatch(/if \(!document\.body\.contains\(bar\)\) \{ document\.removeEventListener\('keydown', onKey, true\)/);
+    expect((r.match(/unbind\(\)/g) || []).length).toBeGreaterThanOrEqual(2);
+    expect(r).toContain("k.textContent = '⌘↩'");
+    expect(r).toContain("k.textContent = '⌘⇧⌫'");
+  });
+  it('kbd chips styled inside the existing banner', () => {
+    expect(css4).toMatch(/\.nn-propose kbd \{[^}]*currentColor/);
+  });
+});
+
+// 2026-09-03: the orphan-section card ("เนื้อหา 14 หัวข้อแต่ไม่รู้ลงโน้ตไหน") grew WIDER than
+// the chat pane (the target <select> carries up to 200 note names — its intrinsic width won)
+// and its heading list had no height cap. Fits-the-pane guards:
+describe('orphan-section card stays inside the chat pane', () => {
+  const fs5 = require('fs'); const path5 = require('path');
+  const css5 = fs5.readFileSync(path5.join(__dirname, '../../renderer/styles.css'), 'utf8');
+  it('kr-confirm capped to pane width; row wraps; list scrolls; select can shrink', () => {
+    expect(css5).toMatch(/\.kr-confirm \{[^}]*max-width: calc\(100% - 20px\)[^}]*box-sizing: border-box/);
+    expect(css5).toMatch(/\.kr-row \{[^}]*flex-wrap: wrap/);
+    expect(css5).toMatch(/\.orph-list \{[^}]*max-height: 132px[^}]*overflow-y: auto/);
+    expect(css5).toMatch(/\.orph-sel \{[^}]*flex: 1 1 160px[^}]*max-width: 100%/);
+  });
+});

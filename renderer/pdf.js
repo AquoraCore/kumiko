@@ -834,7 +834,7 @@ function askAiHighlight(hl){
 // ----- tiny toast (reuses the .toast style); opts.action = {label, fn} adds a button -----
 function pdfToast(msg, opts){
   const el = document.createElement('div'); el.className = 'toast';
-  const life = (opts && opts.action) ? 4500 : 2000;   // actionable toasts linger long enough to click
+  const life = (opts && opts.life) || ((opts && opts.action) ? 4500 : 2000);   // actionable toasts linger long enough to click
   const kill = () => { el.classList.remove('show'); setTimeout(() => { try { el.remove(); } catch (_) {} }, 300); };
   if (opts && opts.action) {
     const sp = document.createElement('span'); sp.textContent = msg; el.appendChild(sp);
@@ -845,9 +845,17 @@ function pdfToast(msg, opts){
   } else {
     el.textContent = msg;
   }
+  // sticky (user request 2026-09-02: "อยู่ถาวรจนกว่าจะกด"): no auto-expiry — the toast stays
+  // until the action button or the ✕ is pressed. Used for AI-created-note review prompts.
+  if (opts && opts.sticky) {
+    const x = document.createElement('button'); x.type = 'button'; x.className = 'toast-x'; x.textContent = '✕';
+    x.onclick = (e) => { e.stopPropagation(); kill(); };
+    el.appendChild(x);
+  } else {
+    setTimeout(kill, life);
+  }
   document.body.appendChild(el);
   requestAnimationFrame(() => el.classList.add('show'));
-  setTimeout(kill, life);
 }
 // Short display name of the current capture target ('' when none) — used by toasts so the
 // user always SEES where a capture landed (and can change it right there).

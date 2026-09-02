@@ -80,7 +80,9 @@ function chatDisplayText(s, streaming){
   } catch (_) {}
   try {
     const nn = window.CoreMarkdown && window.CoreMarkdown.extractNewNotes && window.CoreMarkdown.extractNewNotes(s);
-    if (nn && nn.notes.length) { s = nn.chat; createdLine += '\n\n*🆕 ' + t('สร้างโน้ตใหม่') + ': ' + nn.notes.map((x) => x.name).join(', ') + '*'; }
+    // base names (no folder path) so linkifyRefs turns them into clickable note links —
+    // the reader can jump straight from this line to the review (user request 2026-09-02)
+    if (nn && nn.notes.length) { s = nn.chat; createdLine += '\n\n*🆕 ' + t('สร้างโน้ตใหม่') + ': ' + nn.notes.map((x) => String(x.name || '').split('/').pop()).join(', ') + '*'; }
   } catch (_) {}
   try {
     const r = window.CoreMarkdown && window.CoreMarkdown.extractNoteUpdate && window.CoreMarkdown.extractNoteUpdate(s);
@@ -211,7 +213,31 @@ function renderChat(){
     const b = document.createElement('div'); b.className = 'm ' + m.role;
     const running = s.running && i === s.messages.length - 1 && m.role === 'ai';
     if (running && !m.text) { buildWaitInto(b, m); liveBubble = b; }
-    else if (m.role === 'ai') { b.innerHTML = thinkBlockHtml(m, running && !m.text) + _linkify(mdToHtml(chatDisplayText(m.text, running))); if (running) liveBubble = b; }
+    else if (m.role === 'ai') {
+      b.innerHTML = thinkBlockHtml(m, running && !m.text) + _linkify(mdToHtml(chatDisplayText(m.text, running)));
+      // user-stopped reply — "ลมหยุดพัด": the marker is the kazaguruma itself, still and
+      // muted. Empty ones become a whisper bubble (dashed, transparent) with the BIG pinwheel
+      // that was just spinning; it decelerates to a stop once (kaza-stopping) right after the
+      // press, then stays frozen. Mid-text stops get the tiny still pinwheel under the text.
+      if (m.stopped) {
+        const emptyStop = !(m.text || '').trim();
+        if (emptyStop) b.classList.add('m-stop-empty');
+        const st = document.createElement('div'); st.className = 'm-stop' + (emptyStop ? ' m-stop-big' : '');
+        // a toy pinwheel AT REST: masked head on a planted stick (the stick is the tell that
+        // the wind is gone — user-picked design, mock 2026-08-29)
+        const stick = document.createElement('span'); stick.className = 'kaza-stick' + (emptyStop ? ' lg' : ' sm');
+        const kz = document.createElement('span');
+        kz.className = 'spin-kaza kaza-stopped' + (emptyStop ? ' lg' : ' sm');
+        if (m._justStopped) { kz.classList.add('kaza-stopping'); delete m._justStopped; }
+        stick.appendChild(kz);
+        st.appendChild(stick);
+        const tx = document.createElement('span'); tx.className = 'm-stop-txt';
+        tx.textContent = t(emptyStop ? 'หยุดการตอบแล้ว' : 'หยุดโดยคุณ — ตอบไม่จบ');
+        st.appendChild(tx);
+        b.appendChild(st);
+      }
+      if (running) liveBubble = b;
+    }
     else if (window.CoreMarkdown && window.CoreMarkdown._mdEsc) { b.innerHTML = _linkify(window.CoreMarkdown._mdEsc(m.text)); }
     else { b.textContent = m.text; }
     if (m.role === 'user' && m.thumbs && m.thumbs.length) {
@@ -303,7 +329,9 @@ window.api.onEngineOutput((payload) => {
   // kept OUT of the answer text — it used to be concatenated into the reply (2026-08-22)
   if (payload.kind === 'vision-model') { last.visionModel = data; return; }
   if (payload.kind === 'reasoning') {
-    last.think = ((last.think || '') + stripAnsi(data)).slice(0, 6000);
+    // keep the TAIL — a heavy job thinks 50k+ chars, and the 💭 chip is more useful showing
+    // where the thinking ENDED (conclusions) than where it began (was slice(0,6000))
+    last.think = ((last.think || '') + stripAnsi(data)).slice(-6000);
     if (runId === activeId && liveBubble) { renderLive(last, true); chatScroll(); }
     return;
   }
@@ -318,12 +346,28 @@ window.api.onEngineOutput((payload) => {
 // bubble takes over (thinking collapses to the 💭 chip).
 function buildWaitInto(el, m){
   el.classList.add('m-wait');
-  // design A: pinwheel + label only — the reasoning stream stays quiet and lands in the
-  // collapsed 💭 chip once the answer arrives (user dropped the ghost-text idea 2026-08-25)
+  // design A + proof-of-work (2026-09-02): pinwheel + label + an ELAPSED CLOCK — a real
+  // 3-chapter diagram job thinks silently for ~4:24, and without visible life the user
+  // stopped it at 95% believing it hung. No thinking text here (user: "ไม่ต้องแสดง word") —
+  // the reasoning stays in the collapsed 💭 chip. Spinner node still built ONCE (rebuilding
+  // restarts the CSS spin); only the clock text updates after.
   if (!el.querySelector('.wait-spin')) {
-    el.innerHTML = '<div class="wait-spin"><i class="spin-kaza lg"></i><span></span></div>';
-    el.querySelector('.wait-spin span').textContent = t('กำลังคิด…');
+    el.innerHTML = '<div class="wait-spin"><i class="spin-kaza lg"></i><span class="wait-lbl"></span><span class="wait-clock"></span></div>';
+    el.querySelector('.wait-lbl').textContent = t('กำลังคิด…');
+    if (!m._t0) m._t0 = Date.now();
+    // heartbeat so the clock ticks even while the stream is silent; self-clears once the
+    // bubble leaves the waiting state or is replaced by a re-render
+    const iv = setInterval(() => {
+      if (!document.contains(el) || !el.classList.contains('m-wait')) { clearInterval(iv); return; }
+      _waitClockRefresh(el, m);
+    }, 1000);
   }
+  _waitClockRefresh(el, m);
+}
+function _waitClockRefresh(el, m){
+  const c = el.querySelector('.wait-clock'); if (!c) return;
+  const sec = Math.max(0, Math.round((Date.now() - (m._t0 || Date.now())) / 1000));
+  c.textContent = sec >= 5 ? (Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0')) : '';
 }
 function renderLive(m, running){
   if (!liveBubble) return;
@@ -346,10 +390,15 @@ window.api.onEngineDone(async (payload) => {
   if (last && last.role === 'ai') {
     const shown = cleanChatText(last._acc || '').trim();
     // an empty reply used to persist as a BLANK bubble — the user couldn't tell the engine
-    // failed and had to guess (log: msg 72, 2026-08-18). Say it failed, loudly.
+    // failed and had to guess (log: msg 72, 2026-08-18). Say it failed, loudly — EXCEPT when
+    // the user pressed stop themselves: that's deliberate, so render a calm "หยุดแล้ว" state
+    // (partial text kept, no warning) instead of an error that says "try again".
     const failed = payload && payload.code != null && payload.code !== 0;
-    last.text = shown || t('⚠ engine ไม่ตอบกลับ (คำตอบว่าง') + (failed ? t(' · exit ') + payload.code : '') + t(') — ลองส่งข้อความเดิมอีกครั้ง');
-    delete last._acc;
+    const stopped = failed && payload.code === 130 && s._stopReq && (Date.now() - s._stopReq < 120000);
+    delete s._stopReq;
+    if (stopped) { last.stopped = true; last.text = shown; last._justStopped = true; }   // one-shot "ลมหยุด" decel on next render
+    else last.text = shown || t('⚠ engine ไม่ตอบกลับ (คำตอบว่าง') + (failed ? t(' · exit ') + payload.code : '') + t(') — ลองส่งข้อความเดิมอีกครั้ง');
+    delete last._acc; delete last._t0;
     // stream died mid note-block (abort/timeout/error): salvage the partial draft instead of
     // letting a half-written note evaporate with the protocol text
     if (failed && typeof salvagePartialNoteBlock === 'function') { try { await salvagePartialNoteBlock(last.text); } catch (_) {} }
@@ -359,7 +408,9 @@ window.api.onEngineDone(async (payload) => {
   if (runId === activeId) renderChat();
   // ---- Kumiko tool lines: file verbs run now; READ/SEARCH turns the reply into an
   // INTERMEDIATE step — fetch the results and let the SAME session answer again (bounded).
-  const acts = (window.CoreMarkdown && window.CoreMarkdown.extractActions)
+  // a user-stopped reply is DONE — half-emitted verbs don't execute, and no tool
+  // continuation restarts the engine the user just stopped
+  const acts = (window.CoreMarkdown && window.CoreMarkdown.extractActions && !(last && last.stopped))
     ? window.CoreMarkdown.extractActions((last && last.text) || '') : { any: false, needsContinue: false };
   if (last && last.role === 'ai' && acts.any && typeof runKumikoVerbs === 'function') {
     try { await runKumikoVerbs(acts); } catch (_) {}

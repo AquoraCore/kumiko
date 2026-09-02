@@ -1682,9 +1682,9 @@ table.db tr:hover .db-delrow { opacity: 1; }
 .ts-check { font: 12px var(--font); color: var(--text); display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
 
 /* KUMIKO.md rule-proposal confirm card (floats above the chat input until acted on) */
-.kr-confirm { margin: 6px 10px; padding: 8px 10px; background: var(--sheet); border: 1px solid var(--line-strong); border-radius: var(--r-paper); display: flex; flex-direction: column; gap: 6px; }
+.kr-confirm { margin: 6px 10px; padding: 8px 10px; background: var(--sheet); border: 1px solid var(--line-strong); border-radius: var(--r-paper); display: flex; flex-direction: column; gap: 6px; max-width: calc(100% - 20px); min-width: 0; box-sizing: border-box; }
 .kr-head { font: 600 12px var(--font); color: var(--accent); }
-.kr-row { display: flex; align-items: flex-start; gap: 8px; }
+.kr-row { display: flex; align-items: flex-start; gap: 8px; min-width: 0; flex-wrap: wrap; }
 .kr-text { flex: 1; font: 13px var(--font); color: var(--text); line-height: 1.45; }
 .kr-acts { display: flex; gap: 5px; flex: 0 0 auto; }
 .kr-add, .kr-skip { font: 12px var(--font); border-radius: var(--r-frame); padding: 3px 10px; cursor: pointer; }
@@ -2323,8 +2323,8 @@ button.tg-chip { cursor: pointer; text-align: left; }
 .m-think[open] summary { border-bottom: 1px dashed var(--line); }
 .m-think-body { padding: 6px 10px 8px; color: var(--muted); white-space: pre-wrap; max-height: 220px; overflow: auto; line-height: 1.5; }
 /* orphan-section card (reuses kr-confirm shell) */
-.orph-list { font: 12px/1.6 var(--font); color: var(--muted); white-space: pre-wrap; padding: 2px 2px 6px; }
-.orph-sel { flex: 1; min-width: 0; font: 12.5px var(--font); color: var(--text); background: var(--sheet); border: 1px solid var(--line); border-radius: var(--r-frame); padding: 5px 8px; }
+.orph-list { font: 12px/1.6 var(--font); color: var(--muted); white-space: pre-wrap; padding: 2px 2px 6px; max-height: 132px; overflow-y: auto; overflow-wrap: anywhere; }
+.orph-sel { flex: 1 1 160px; min-width: 0; max-width: 100%; font: 12.5px var(--font); color: var(--text); background: var(--sheet); border: 1px solid var(--line); border-radius: var(--r-frame); padding: 5px 8px; }
 
 /* ============================================================
    IMAGE ATTACH — chips above the chat input · menu · bubble thumbnails
@@ -2426,3 +2426,36 @@ button.tg-chip { cursor: pointer; text-align: left; }
 .mem-head .mem-x { margin-left: 6px; }
 .mem-hint { margin-top: 12px; color: var(--muted); font-size: 11.5px; line-height: 1.6; border-top: 1px dashed var(--line); padding-top: 9px; }
 .mem-c-acts .mem-pill { margin-top: 0; }
+
+/* ---- user-stopped reply: calm, not an error — a toy kazaguruma AT REST on its stick ---- */
+.m-stop { display: flex; align-items: flex-start; gap: 8px; color: var(--muted); font-size: 12px; font-weight: 600; margin-top: 7px; }
+.m-stop-big { gap: 11px; font-size: 13px; }
+/* stick: planted pole under the head — the tell that the wind is gone */
+.kaza-stick { position: relative; flex: none; display: inline-block; }
+.kaza-stick .spin-kaza { display: block; position: relative; }
+.kaza-stick::after { content: ''; position: absolute; left: 50%; transform: translateX(-50%); border-radius: 2px; background: var(--muted); opacity: .4; }
+.kaza-stick.sm { height: 26px; }
+.kaza-stick.sm::after { width: 2px; top: 7px; height: 18px; }
+.kaza-stick.lg { height: 52px; }
+.kaza-stick.lg::after { width: 2.5px; top: 17px; height: 34px; }
+/* head: frozen at a rest angle, muted — no spin */
+.m-stop .spin-kaza.kaza-stopped { animation: none; background: var(--muted); opacity: .55; transform: rotate(160deg); }
+/* "ลมหยุด": one-shot deceleration right after the user presses stop (accent → muted) */
+.m-stop .spin-kaza.kaza-stopped.kaza-stopping { animation: kaza-decel .9s cubic-bezier(.15, .6, .3, 1) forwards; }
+@keyframes kaza-decel {
+  from { transform: rotate(-200deg); background: var(--accent); opacity: 1; }
+  to { transform: rotate(160deg); background: var(--muted); opacity: .55; }
+}
+@media (prefers-reduced-motion: reduce) { .m-stop .spin-kaza.kaza-stopped.kaza-stopping { animation: none; } }
+/* text sits level with the head's hub, not the stick's middle */
+.m-stop.m-stop-big .m-stop-txt { margin-top: 8px; }
+.m-stop:not(.m-stop-big) .m-stop-txt { margin-top: 0; }
+.m.ai.m-stop-empty { background: transparent; border: 1px dashed var(--line-strong); box-shadow: none; }
+.m.ai.m-stop-empty .m-stop { margin-top: 0; }
+
+/* ---- waiting bubble proof-of-work: elapsed clock + latest-thought ticker ---- */
+.wait-clock { color: var(--muted); font-weight: 500; font-size: 12px; opacity: .75; font-variant-numeric: tabular-nums; }
+.toast-x { border: none; background: transparent; color: inherit; opacity: .55; font-size: 12px; margin-left: 2px; padding: 2px 4px; cursor: pointer; }
+.toast-x:hover { opacity: 1; }
+.nn-propose .nn-name { color: var(--text); }
+.nn-propose kbd { font: 600 10.5px var(--font); border: 1px solid currentColor; opacity: .6; border-radius: 4px; padding: 1px 5px; margin-left: 7px; }

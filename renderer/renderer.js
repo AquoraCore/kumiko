@@ -1200,7 +1200,8 @@ async function maybeCreateNewNotes(text){
           window.__pendingReviews.set(rel0, nb0);
           window.__flaggedNotes.add(rel0);
           try { renderTree(); } catch (_) {}
-          pdfToast(t('มีโน้ตชื่อนี้อยู่แล้ว — AI เสนอเขียนทับ ') + rel0.replace(/\.md$/i, '') + t(' — เปิดโน้ตเพื่อรีวิว'));
+          pdfToast(t('มีโน้ตชื่อนี้อยู่แล้ว — AI เสนอเขียนทับ ') + rel0.replace(/\.md$/i, '').split('/').pop(),
+          { sticky: true, action: { label: t('เปิดรีวิว'), fn: () => openNote(rel0) } });
         }
       } catch (_) {}
       continue;
@@ -1218,6 +1219,14 @@ async function maybeCreateNewNotes(text){
   }
   // refresh the list but STAY where the user is; new notes get the red dot so they're findable
   if (firstRel && typeof refreshList === 'function') { try { await refreshList(firstRel, { keepView: true }); } catch (_) {} }
+  // ...and the toast carries a jump button: creations used to announce themselves only as a
+  // sidebar dot, leaving the user to hunt for the note (user request 2026-09-02). Opening the
+  // first new note lands directly on its เก็บ/ทิ้ง review banner.
+  if (firstRel && currentNote !== firstRel && typeof pdfToast === 'function') {
+    const label = firstRel.replace(/\.md$/i, '').split('/').pop();
+    pdfToast('🆕 ' + t('AI สร้างโน้ตใหม่: ') + label,
+      { sticky: true, action: { label: t('เปิดรีวิว'), fn: () => openNote(firstRel) } });
+  }
 }
 
 // ---- Kumiko tool executors -------------------------------------------------------------
@@ -1465,16 +1474,33 @@ function maybeShowNewNoteProposal(rel){
   const old = document.getElementById('nnPropose'); if (old) old.remove();
   if (!rel || !window.__newNoteProposals || !window.__newNoteProposals.has(rel)) return;
   const bar = document.createElement('div'); bar.className = 'banner nn-propose'; bar.id = 'nnPropose';
-  const txt = document.createElement('span'); txt.innerHTML = '<b>🆕 ' + t('AI สร้างโน้ตนี้') + '</b> — ' + t('ตรวจแล้วเลือกได้ว่าจะเก็บหรือทิ้ง');
+  // same banner, richer info (user request 2026-09-02): the NOTE NAME sits in the line, and
+  // each button advertises its shortcut. ⌘⇧⌫ (not bare ⌘⌫) for discard — the editor behind
+  // this banner is live, and macOS uses ⌘⌫ for delete-to-line-start while typing.
+  const txt = document.createElement('span');
+  txt.innerHTML = '<b>🆕 ' + t('AI สร้างโน้ตนี้') + '</b> — <b class="nn-name"></b> — ' + t('ตรวจแล้วเลือกได้ว่าจะเก็บหรือทิ้ง');
+  txt.querySelector('.nn-name').textContent = rel.replace(/\.md$/i, '').split('/').pop();
   const btns = document.createElement('span');
-  const keep = document.createElement('button'); keep.className = 'solid sm'; keep.textContent = t('เก็บโน้ตนี้');
-  keep.onclick = () => { window.__newNoteProposals.delete(rel); bar.remove(); };
-  const drop = document.createElement('button'); drop.className = 'ghost sm'; drop.textContent = t('ทิ้ง (ลงถังขยะ)');
+  const onKey = (e) => {
+    if (!document.body.contains(bar)) { document.removeEventListener('keydown', onKey, true); return; }
+    if (!(e.metaKey || e.ctrlKey)) return;
+    if (e.key === 'Enter') { e.preventDefault(); keep.onclick(); }
+    else if (e.key === 'Backspace' && e.shiftKey) { e.preventDefault(); drop.onclick(); }
+  };
+  const unbind = () => document.removeEventListener('keydown', onKey, true);
+  const keep = document.createElement('button'); keep.className = 'solid sm';
+  keep.innerHTML = ''; keep.appendChild(document.createTextNode(t('เก็บโน้ตนี้')));
+  { const k = document.createElement('kbd'); k.textContent = '⌘↩'; keep.appendChild(k); }
+  keep.onclick = () => { window.__newNoteProposals.delete(rel); bar.remove(); unbind(); };
+  const drop = document.createElement('button'); drop.className = 'ghost sm';
+  drop.appendChild(document.createTextNode(t('ทิ้ง (ลงถังขยะ)')));
+  { const k = document.createElement('kbd'); k.textContent = '⌘⇧⌫'; drop.appendChild(k); }
   drop.onclick = async () => {
-    window.__newNoteProposals.delete(rel); bar.remove();
+    window.__newNoteProposals.delete(rel); bar.remove(); unbind();
     try { await window.api.deleteNote(rel); if (rel === currentNote) currentNote = null; await refreshList(null, {}); } catch (_) {}
     pdfToast(t('ทิ้งโน้ตของ AI ลงถังขยะแล้ว'));
   };
+  document.addEventListener('keydown', onKey, true);
   btns.appendChild(keep); btns.appendChild(drop); bar.appendChild(txt); bar.appendChild(btns);
   const wrap = document.getElementById('editorWrap');
   if (wrap && wrap.parentElement) wrap.parentElement.insertBefore(bar, wrap);
@@ -2009,8 +2035,14 @@ try { applyKumikoTheme(); } catch (_) {}
 
 // Theme Studio v2 — two axes (mode × hue), palette-only colour, 4-step pattern intensity.
 // Every label goes through t() so the whole sheet is ONE language.
-const PATTERN_NAMES = { none: 'ไม่มีลาย', kazaguruma: '風車 คาซะกุรุมะ', shippou: '七宝 ชิปโป', asanoha: '麻の葉 อาซาโนฮะ', kagome: '籠目 คาโกเมะ',
-  kikko: '亀甲 คิกโก', sayagata: '紗綾形 ซายากาตะ', masu: '桝格子 มาสุ', seigaiha: '青海波 เซไกฮะ' };
+const PATTERN_NAMES = { none: 'ไม่มีลาย', sakura: '桜 ซากุระคุมิโกะ', kazaguruma: '風車 คาซะกุรุมะ', shippou: '七宝 ชิปโป', asanoha: '麻の葉 อาซาโนฮะ', kagome: '籠目 คาโกเมะ',
+  kikko: '亀甲 คิกโก', sayagata: '紗綾形 ซายากาตะ', masu: '桝格子 มาสุ', seigaiha: '青海波 เซไกฮะ',
+  // 2026-09-01 batch — drawn from the user's refs (hex sheet · sakura woodwork · Tanihata 18/18)
+  sakuragoshi: '桜格子 ซากุระโกชิ', hanaasa: '花麻 ฮานะอาสะ', yukiwa: '雪輪 ยูกิวะ', asanoha6: '麻の葉六角 อาสะโนฮะรังผึ้ง',
+  kiku: '菊 คิคุ', kumo: '蜘蛛の巣 คุโมะ', goma: '胡麻 โกมะ', shokko6: '蜀江六角 โชกโกหกเหลี่ยม', izutsu: '井筒 อิซุสึ',
+  hoshi: '星 โฮชิ', hikari: '光 ฮิคาริ', rindo: '竜胆 รินโด', kakuasa: '角麻 คาคุอาสะ', sanjubishi: '三重菱 ซันจูบิชิ',
+  tsumiishi: '積石 สึมิอิชิ', hanabishi: '花菱 ฮานะบิชิ', mitsukude: '三つ組手 มิสึคุเดะ', mikado: '帝 มิคาโดะ',
+  shokko8: '蜀江 โชกโก', fundo: '分銅繋ぎ ฟุนโดสึนางิ', senbon: '千本格子 เซ็นบงโกชิ' };
 const INTENSITY_NAMES = { off: 'ปิดลาย', faint: 'จาง', mid: 'กลาง', strong: 'ชัด' };
 // Theme Studio renders INTO a host (the Settings hub's appearance panel). All changes apply
 // instantly — there is no save step for appearance.
@@ -2789,7 +2821,10 @@ function updateSendButton(){
 }
 chatSend.onclick = () => {
   const s = activeSession();
-  if (isRunning(s.id)) { window.api.stopEngine(s.id); return; }   // STOP, don't send
+  // STOP, don't send — remember it was the USER who stopped, so the done-handler renders a
+  // calm "หยุดแล้ว" state instead of the engine-failure warning (exit 130 alone is ambiguous:
+  // the main process also aborts with 130 on timeout)
+  if (isRunning(s.id)) { s._stopReq = Date.now(); window.api.stopEngine(s.id); return; }
   sendChat();
 };
 chatInput.addEventListener('input', () => { chatInput.style.height = 'auto'; chatInput.style.height = Math.min(100, chatInput.scrollHeight) + 'px'; });
