@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('api', {
   listNotes: () => ipcRenderer.invoke('note:list'),
   openNote: (name) => ipcRenderer.invoke('note:open', name),
   readNote: (name) => ipcRenderer.invoke('note:read', name),
+  updateCheck: () => ipcRenderer.invoke('update:check'),
   readGlobalMemory: () => ipcRenderer.invoke('memory:global:read'),
   saveGlobalMemory: (content) => ipcRenderer.invoke('memory:global:save', content),
   importPdf: (dir) => ipcRenderer.invoke('pdf:import', { dir: dir || '' }),

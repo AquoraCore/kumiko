@@ -793,6 +793,38 @@ ipcMain.handle('note:read', (e, name) => {
   try { return fs.readFileSync(path.join(NOTES_DIR, name), 'utf8'); } catch (_) { return ''; }
 });
 
+// ---- update check: the app is distributed as a git clone (both machines pull with their own
+// credentials), so "a new version exists" = origin/main is ahead of the LOCAL repo the packaged
+// app was built from (app.asar lives at <repo>/dist/mac-arm64/…, so walk up to the repo root).
+// Every failure — no git, no repo, offline, detached — reports {behind: 0} and stays silent.
+function _repoRoot(){
+  let d = app.isPackaged ? path.join(app.getAppPath(), '..', '..', '..', '..', '..') : __dirname;
+  d = path.resolve(d);
+  for (let i = 0; i < 3; i++) {
+    if (fs.existsSync(path.join(d, '.git'))) return d;
+    d = path.dirname(d);
+  }
+  return null;
+}
+ipcMain.handle('update:check', async () => {
+  const root = _repoRoot();
+  if (!root) return { behind: 0 };
+  const run = (args) => new Promise((resolve) => {
+    let out = '';
+    let child;
+    try { child = spawn('git', args, { cwd: root, env: _richEnv() }); } catch (_) { resolve(null); return; }
+    child.stdout && child.stdout.on('data', (d) => { out += d.toString(); });
+    child.on('error', () => resolve(null));
+    child.on('close', (code) => resolve(code === 0 ? out.trim() : null));
+  });
+  if ((await run(['fetch', '--quiet', 'origin', 'main'])) === null) return { behind: 0 };
+  const behind = parseInt(await run(['rev-list', '--count', 'HEAD..origin/main']) || '0', 10) || 0;
+  if (!behind) return { behind: 0 };
+  const log = (await run(['log', '--pretty=%s', 'HEAD..origin/main', '-n', '5'])) || '';
+  const sha = (await run(['rev-parse', 'origin/main'])) || '';
+  return { behind, sha, subjects: log.split('\n').filter(Boolean), root };
+});
+
 // ---- global memory (cross-vault, per-user): KUMIKO-GLOBAL.md lives in userData, NOT in any
 // vault — the ผู้ใช้ (profile) memory cards follow the person across every vault on this machine.
 function globalMemFile(){ return path.join(app.getPath('userData'), 'KUMIKO-GLOBAL.md'); }

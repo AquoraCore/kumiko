@@ -3833,3 +3833,42 @@ async function renderTrashView(){
   }
   host.appendChild(scroll);
 }
+
+// ---- version-update notifier (2026-09-03) -------------------------------------------------
+// The app ships as a git clone, so "new version" = origin/main ahead of the local build.
+// Checked shortly after boot and every 6h; one STICKY toast per new tip (dismissing it
+// remembers the sha in localStorage, so the same update never nags twice).
+async function checkForUpdate(){
+  try {
+    if (!window.api.updateCheck) return;
+    const r = await window.api.updateCheck();
+    if (!r || !r.behind) return;
+    if (localStorage.getItem('kumikoUpdateSeen') === r.sha) return;
+    const openDetail = () => {
+      localStorage.setItem('kumikoUpdateSeen', r.sha || '');
+      const backdrop = document.createElement('div'); backdrop.className = 'modal-backdrop';
+      const card = document.createElement('div'); card.className = 'modal-card up-card';
+      const h = document.createElement('h3'); h.textContent = '🔄 ' + t('เวอร์ชันใหม่ — ') + r.behind + ' ' + t('จุดอัปเดต');
+      card.appendChild(h);
+      const ul = document.createElement('div'); ul.className = 'up-list';
+      ul.textContent = (r.subjects || []).map((s2) => '· ' + s2).join('\n') + (r.behind > (r.subjects || []).length ? '\n…' : '');
+      card.appendChild(ul);
+      const cmd = 'cd "' + (r.root || '') + '" && git pull && npm install --no-audit --no-fund && npm run dist';
+      const row = document.createElement('div'); row.className = 'modal-actions';
+      const copy = document.createElement('button'); copy.className = 'solid'; copy.textContent = t('คัดลอกคำสั่งอัปเดต');
+      copy.onclick = () => { try { navigator.clipboard.writeText(cmd); } catch (_) {} copy.textContent = t('คัดลอกแล้ว — วางใน Terminal'); };
+      const close = document.createElement('button'); close.className = 'ghost'; close.textContent = t('ปิด');
+      close.onclick = () => backdrop.remove();
+      row.appendChild(copy); row.appendChild(close); card.appendChild(row);
+      const hint = document.createElement('div'); hint.className = 'up-hint';
+      hint.textContent = t('อัปเดตเสร็จแล้วเปิดแอพใหม่จาก dist/mac-arm64/Kumiko.app');
+      card.appendChild(hint);
+      backdrop.appendChild(card);
+      backdrop.onmousedown = (e) => { if (e.target === backdrop) backdrop.remove(); };
+      document.body.appendChild(backdrop);
+    };
+    pdfToast('🔄 ' + t('มีเวอร์ชันใหม่ ') + r.behind + ' ' + t('จุดอัปเดต'), { sticky: true, action: { label: t('ดูรายละเอียด'), fn: openDetail } });
+  } catch (_) {}
+}
+setTimeout(() => { checkForUpdate(); }, 20000);
+setInterval(() => { checkForUpdate(); }, 6 * 3600 * 1000);

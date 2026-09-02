@@ -139,6 +139,7 @@ function createWebApi(opts) {
 
   // Global memory (KUMIKO-GLOBAL.md): per-USER, cross-vault — the profile cards that follow
   // the person across every vault. Never throws — failures read as an empty profile.
+  async function updateCheck() { return { behind: 0 }; }   // web = server-deployed, no git pull
   async function readGlobalMemory() {
     try {
       const res = await req('GET', '/memory/global');
@@ -852,7 +853,7 @@ function createWebApi(opts) {
   return {
     // storage (7d-1, real)
     listNotes, openNote, readNote, saveNote, createNote, renameNote, deleteNote,
-    readGlobalMemory, saveGlobalMemory,
+    updateCheck, readGlobalMemory, saveGlobalMemory,
     // state / vault
     vaultStateReadSync, vaultConfigRead, vaultConfigWrite, vaultList, vaultSwitch, vaultOpen, vaultCreate, vaultRename, vaultDelete,
     // auth
