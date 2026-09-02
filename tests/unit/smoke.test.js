@@ -37,6 +37,17 @@ describe('update notifier wiring', () => {
     expect(r).toContain('git pull && npm install --no-audit --no-fund && npm run dist');
     expect(r).toContain('6 * 3600 * 1000');
   });
+  it('two-step self-update: background run streams stages, relaunch swaps binaries', () => {
+    const m = read9('main.js');
+    expect(m).toContain("ipcMain.handle('update:run'");
+    expect(m).toMatch(/spawn\('\/bin\/bash', \['-lc'/);
+    expect(m).toContain("send({ done: true, ok: ok && code === 0, log })");
+    expect(m).toContain("ipcMain.handle('update:relaunch', () => { app.relaunch(); app.quit(); })");
+    const r = read9('renderer/renderer.js');
+    expect(r).toMatch(/อัปเดตเลย/);
+    expect(r).toMatch(/onUpdateProgress\(\(m\) =>/);
+    expect(r).toMatch(/sticky: true, action: \{ label: 'Relaunch', fn: \(\) => window\.api\.updateRelaunch\(\)/);
+  });
   it('preload + web shim expose updateCheck (web = permanent {behind: 0})', () => {
     expect(read9('preload.js')).toContain("updateCheck: () => ipcRenderer.invoke('update:check')");
     expect(read9('web/api-web.js')).toMatch(/async function updateCheck\(\) \{ return \{ behind: 0 \}; \}/);

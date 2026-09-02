@@ -825,6 +825,41 @@ ipcMain.handle('update:check', async () => {
   return { behind, sha, subjects: log.split('\n').filter(Boolean), root };
 });
 
+// One-click self-update, Claude-Code style — two stages: (1) "อัปเดต" pulls + rebuilds IN THE
+// BACKGROUND while the user keeps working (macOS lets electron-builder replace the .app of a
+// running process — the old inodes stay alive until quit), streaming stage lines to the
+// renderer; (2) when the fresh build is ready, a Relaunch button swaps to it (app.relaunch
+// re-executes the same path, which now holds the NEW binary). Full output → userData log.
+let _updJob = null;
+function _updLogFile(){ return path.join(app.getPath('userData'), 'kumiko-update.log'); }
+ipcMain.handle('update:run', async () => {
+  const root = _repoRoot();
+  if (!root) return { error: 'no-repo' };
+  if (_updJob) return { ok: true, already: true };
+  const log = _updLogFile();
+  try { fs.writeFileSync(log, '🔄 Kumiko update — ' + new Date().toISOString() + '\n'); } catch (_) {}
+  const send = (m) => { try { if (win && !win.isDestroyed()) win.webContents.send('update:progress', m); } catch (_) {} };
+  const cmd = 'set -e; echo "→ git pull"; git pull --ff-only; echo "→ npm install"; npm install --no-audit --no-fund; ' +
+              'echo "→ build เวอร์ชันใหม่ (~2 นาที)"; npm run dist; echo "__KUMIKO_UPDATE_DONE__"';
+  let child;
+  try { child = spawn('/bin/bash', ['-lc', cmd], { cwd: root, env: _richEnv() }); }
+  catch (e) { return { error: String(e && e.message || e) }; }
+  _updJob = child;
+  let ok = false;
+  child.stdout.on('data', (d) => {
+    const s2 = d.toString();
+    try { fs.appendFileSync(log, s2); } catch (_) {}
+    if (s2.includes('__KUMIKO_UPDATE_DONE__')) ok = true;
+    s2.split('\n').forEach((l) => { if (l.trim().startsWith('→')) send({ stage: l.trim() }); });
+  });
+  child.stderr.on('data', (d) => { try { fs.appendFileSync(log, d.toString()); } catch (_) {} });
+  child.on('error', () => { _updJob = null; send({ done: true, ok: false, log }); });
+  child.on('close', (code) => { _updJob = null; send({ done: true, ok: ok && code === 0, log }); });
+  return { ok: true };
+});
+ipcMain.handle('update:relaunch', () => { app.relaunch(); app.quit(); });
+ipcMain.handle('update:openlog', () => { try { shell.openPath(_updLogFile()); } catch (_) {} });
+
 // ---- global memory (cross-vault, per-user): KUMIKO-GLOBAL.md lives in userData, NOT in any
 // vault — the ผู้ใช้ (profile) memory cards follow the person across every vault on this machine.
 function globalMemFile(){ return path.join(app.getPath('userData'), 'KUMIKO-GLOBAL.md'); }

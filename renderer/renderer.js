@@ -3855,13 +3855,23 @@ async function checkForUpdate(){
       card.appendChild(ul);
       const cmd = 'cd "' + (r.root || '') + '" && git pull && npm install --no-audit --no-fund && npm run dist';
       const row = document.createElement('div'); row.className = 'modal-actions';
-      const copy = document.createElement('button'); copy.className = 'solid'; copy.textContent = t('คัดลอกคำสั่งอัปเดต');
+      // Claude-Code-style two-step: อัปเดต (background download+build, keep working) → Relaunch
+      if (window.api.updateRun) {
+        const go = document.createElement('button'); go.className = 'solid'; go.textContent = t('อัปเดตเลย');
+        go.onclick = async () => {
+          backdrop.remove();
+          _updStatus(t('เริ่มอัปเดต…'));
+          try { await window.api.updateRun(); } catch (_) { _updStatusRemove(); }
+        };
+        row.appendChild(go);
+      }
+      const copy = document.createElement('button'); copy.className = 'ghost'; copy.textContent = t('คัดลอกคำสั่ง (ทำเองใน Terminal)');
       copy.onclick = () => { try { navigator.clipboard.writeText(cmd); } catch (_) {} copy.textContent = t('คัดลอกแล้ว — วางใน Terminal'); };
       const close = document.createElement('button'); close.className = 'ghost'; close.textContent = t('ปิด');
       close.onclick = () => backdrop.remove();
       row.appendChild(copy); row.appendChild(close); card.appendChild(row);
       const hint = document.createElement('div'); hint.className = 'up-hint';
-      hint.textContent = t('อัปเดตเสร็จแล้วเปิดแอพใหม่จาก dist/mac-arm64/Kumiko.app');
+      hint.textContent = t('กด "อัปเดตเลย" แล้วใช้แอพต่อได้ — build เสร็จจะมีปุ่ม Relaunch ให้สลับเป็นเวอร์ชันใหม่');
       card.appendChild(hint);
       backdrop.appendChild(card);
       backdrop.onmousedown = (e) => { if (e.target === backdrop) backdrop.remove(); };
@@ -3872,3 +3882,19 @@ async function checkForUpdate(){
 }
 setTimeout(() => { checkForUpdate(); }, 20000);
 setInterval(() => { checkForUpdate(); }, 6 * 3600 * 1000);
+
+// live update-progress strip (its own sticky element — pdfToast would spawn one per stage)
+function _updStatus(stage){
+  let el = document.getElementById('updProg');
+  if (!el) { el = document.createElement('div'); el.id = 'updProg'; el.className = 'toast show'; document.body.appendChild(el); }
+  el.textContent = '🔄 ' + t('กำลังอัปเดต ') + stage;
+}
+function _updStatusRemove(){ const el = document.getElementById('updProg'); if (el) el.remove(); }
+if (window.api.onUpdateProgress) window.api.onUpdateProgress((m) => {
+  if (m && m.stage) _updStatus(m.stage);
+  if (m && m.done) {
+    _updStatusRemove();
+    if (m.ok) pdfToast('✅ ' + t('เวอร์ชันใหม่พร้อมแล้ว'), { sticky: true, action: { label: 'Relaunch', fn: () => window.api.updateRelaunch() } });
+    else pdfToast('⚠ ' + t('อัปเดตไม่สำเร็จ'), { sticky: true, action: { label: t('เปิด log'), fn: () => window.api.updateOpenLog && window.api.updateOpenLog() } });
+  }
+});

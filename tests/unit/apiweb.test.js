@@ -25,7 +25,7 @@ function memStore() {
 // if the shim is missing any of these, the renderer hits an undefined call at boot.
 const PRELOAD_METHODS = [
   'startPty', 'ptyInput', 'ptyResize', 'ptyRestart', 'onPtyData',
-  'listNotes', 'openNote', 'readNote', 'updateCheck', 'readGlobalMemory', 'saveGlobalMemory', 'importPdf', 'readPdf', 'renamePdf', 'readAnnots', 'saveAnnots',
+  'listNotes', 'openNote', 'readNote', 'updateCheck', 'updateRun', 'updateRelaunch', 'updateOpenLog', 'onUpdateProgress', 'readGlobalMemory', 'saveGlobalMemory', 'importPdf', 'readPdf', 'renamePdf', 'readAnnots', 'saveAnnots',
   'saveNote', 'onNoteChanged', 'onNoteFlagged', 'createNote', 'renameNote', 'deleteNote', 'searchNotes', 'backlinks',
   'crdtLoad', 'crdtSave', 'noteTable', 'graphData',
   'dbList', 'dbRead', 'dbSave', 'dbCreate', 'dbDelete', 'folderCreate', 'folderRename', 'folderDelete',
@@ -188,11 +188,11 @@ describe('web api shim', () => {
     }
   }, 20000);
 
-  it('exposes every method the Electron preload defines (contract parity, 60)', () => {
+  it('exposes every method the Electron preload defines (contract parity, 64)', () => {
     const api = createWebApi({ baseUrl: 'http://x', getToken: () => null, store: memStore() });
     const missing = PRELOAD_METHODS.filter((n) => typeof api[n] !== 'function');
     expect(missing).toEqual([]);
-    expect(PRELOAD_METHODS.length).toBe(60);
+    expect(PRELOAD_METHODS.length).toBe(64);
   });
 
   it('vault state round-trips through store (vaultStateReadSync is sync)', async () => {
