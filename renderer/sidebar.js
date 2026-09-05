@@ -193,6 +193,29 @@ function highlightActiveNote(name){
   document.querySelectorAll('#noteList .note-item').forEach((el) => { el.classList.toggle('active', el.dataset.name === name); });
 }
 
+// Expand every ancestor box of a note/PDF and scroll its row into view — for opens that come
+// from OUTSIDE the tree (search results), where the item may sit in a collapsed box far away
+// (user request 2026-09-05). A short pulse marks which row it landed on.
+function revealInSidebar(rel, kind){
+  try {
+    if (!rel) return;
+    const parts = String(rel).split('/'); parts.pop();
+    let changed = false, p = '';
+    for (const seg of parts) {
+      p = p ? p + '/' + seg : seg;
+      if (collapsedFolders.has(p)) { collapsedFolders.delete(p); changed = true; }
+    }
+    if (changed) { persistCollapsed(); renderTree(); }
+    const esc = (window.CSS && CSS.escape) ? CSS.escape(rel) : rel;
+    const el = document.querySelector('#noteList .' + (kind === 'pdf' ? 'pdf-item[data-pdf="' + esc + '"]' : 'note-item[data-name="' + esc + '"]'));
+    if (el) {
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      el.classList.add('reveal-flash');
+      setTimeout(() => { try { el.classList.remove('reveal-flash'); } catch (_) {} }, 1300);
+    }
+  } catch (_) {}
+}
+
 // root of the list = drop target to move a note to the top level (handled by dragdrop.js)
 
 // ---- folder actions ----

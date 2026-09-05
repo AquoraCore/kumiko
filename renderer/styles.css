@@ -2479,3 +2479,7 @@ button.tg-chip { cursor: pointer; text-align: left; }
 .hist-row.on { border-color: var(--accent); background: var(--accent-bg); }
 .hist-prev { flex: 1; min-width: 0; max-height: 340px; overflow: auto; font: 11.5px/1.6 ui-monospace, monospace; color: var(--muted); background: var(--wash); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
 .hist-empty { color: var(--muted); font-size: 12.5px; padding: 8px 0; }
+
+/* ---- search → open: pulse the revealed sidebar row ---- */
+.note-item.reveal-flash, .pdf-item.reveal-flash { animation: reveal-pulse 1.2s ease; }
+@keyframes reveal-pulse { 0%, 55% { background: var(--accent-bg); box-shadow: inset 2px 0 0 var(--accent); } }

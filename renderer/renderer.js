@@ -548,8 +548,10 @@ searchInput.addEventListener('input', () => {
         if (hit.pdf) {
           const rel = (window.__wlPdfRel || {})[hit.pdf.toLowerCase()];
           if (rel) { try { await window.__wikiNav(rel + (hit.page ? '#p' + hit.page : '')); } catch (_) { await openPdf(rel); } }
+          if (rel && typeof revealInSidebar === 'function') revealInSidebar(rel, 'pdf');
         } else {
           await openNote(hit.name);
+          if (typeof revealInSidebar === 'function') revealInSidebar(hit.name, 'note');
         }
         searchResults.hidden = true;
         searchResults.innerHTML = '';

@@ -85,3 +85,22 @@ describe('collapsible slide images (8)', () => {
     expect(css).toMatch(/\.milkdown img\.kz-clip\.kz-open \{[^}]*height: auto !important/);
   });
 });
+
+// 2026-09-05: opening from SEARCH now reveals the item in the sidebar — ancestors expanded,
+// row scrolled to centre, brief pulse. Notes AND pdf search hits.
+describe('search reveals the opened item in the sidebar', () => {
+  const sb = read('renderer/sidebar.js');
+  const r = read('renderer/renderer.js');
+  it('revealInSidebar expands every collapsed ancestor then scrolls + pulses', () => {
+    expect(sb).toContain('function revealInSidebar');
+    expect(sb).toMatch(/collapsedFolders\.delete\(p\); changed = true/);
+    expect(sb).toMatch(/if \(changed\) \{ persistCollapsed\(\); renderTree\(\); \}/);
+    expect(sb).toContain("scrollIntoView({ block: 'center', behavior: 'smooth' })");
+    expect(sb).toMatch(/CSS\.escape/);   // rels can contain quotes/anything
+  });
+  it('both search-hit kinds route through it', () => {
+    expect(r).toMatch(/openNote\(hit\.name\);\s+if \(typeof revealInSidebar === 'function'\) revealInSidebar\(hit\.name, 'note'\)/);
+    expect(r).toMatch(/revealInSidebar\(rel, 'pdf'\)/);
+    expect(read('renderer/styles.css')).toMatch(/reveal-pulse/);
+  });
+});
