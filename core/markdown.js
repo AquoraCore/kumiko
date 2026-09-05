@@ -367,6 +367,32 @@
   // Make chat references clickable: @[Name] mentions and [source: Name] citations become
   // <a class="at-ref" data-ref="Name"> anchors the chat click-handler resolves to a note/PDF.
   // Runs on ALREADY-ESCAPED html (mdToHtml output or escaped user text) — never on raw input.
+
+  // Resolve a chat [source:]/@ ref string to a concrete target. Model-written refs are messy:
+  // "Name หน้า 17", "A, B หน้า 14–17", several names in one bracket — take the FIRST segment
+  // that resolves; a trailing page marker becomes the PDF page to open at. Pure: the caller
+  // hands in plain-name→rel maps (notes win over PDFs) and the pdf family-key fn.
+  function resolveRefTarget(raw, noteMap, pdfMap, famKey) {
+    var segs = String(raw == null ? '' : raw).split(/[,;·|]|\u0e41\u0e25\u0e30/).map(function (x) { return x.trim(); }).filter(Boolean);
+    if (!segs.length) return null;
+    for (var i = 0; i < segs.length; i++) {
+      var m = segs[i].match(/^(.*?)(?:\s*[\u2014\u00b7-]?\s*(?:\u0e2b\u0e19\u0e49\u0e32|p\.?|\u0e19\.)\s*(\d+)(?:\s*[\u2013\u2014-]\s*\d+)?)?\s*$/i);
+      var name = ((m && m[1]) || segs[i]).trim().replace(/[.:]+$/, '');
+      var page = (m && m[2]) ? parseInt(m[2], 10) : null;
+      var plain = name.split('/').pop().replace(/\.(md|pdf)$/i, '').trim().toLowerCase();
+      if (!plain) continue;
+      var noteRel = (noteMap && noteMap[plain]) || null;
+      // a PDF's SHADOW note (PDF-Text/) shares its name — the reader wants the real PDF,
+      // never the raw extract, so the shadow only wins when no actual pdf matches
+      if (noteRel && !/^PDF-Text\//.test(noteRel)) return { kind: 'note', rel: noteRel };
+      var fam = famKey ? famKey(name) : plain;
+      var pdfRel = (pdfMap && (pdfMap[plain] || pdfMap[fam])) || null;
+      if (pdfRel) return { kind: 'pdf', rel: pdfRel, page: page };
+      if (noteRel) return { kind: 'note', rel: noteRel };
+    }
+    return null;
+  }
+
   function linkifyRefs(html, names) {
     var s = String(html == null ? '' : html);
     var q = function (n) { return n.replace(/"/g, '&quot;'); };
@@ -419,6 +445,6 @@
   }
   return {
     mdToHtml: mdToHtml, _mdInline: _mdInline, _mdEsc: _mdEsc, stripMdFence: stripMdFence,
-    extractNoteUpdate: extractNoteUpdate, extractPdfClips: extractPdfClips, extractNewNotes: extractNewNotes, extractSectionUpdates: extractSectionUpdates, replaceSection: replaceSection, stripNoteBlocks: stripNoteBlocks, extractKumikoRules: extractKumikoRules, extractMemories: extractMemories, extractActions: extractActions, ensureSlideClips: ensureSlideClips, linkifyRefs: linkifyRefs, historyText: historyText, NOTE_OPEN: NOTE_OPEN, NOTE_CLOSE: NOTE_CLOSE
+    extractNoteUpdate: extractNoteUpdate, extractPdfClips: extractPdfClips, extractNewNotes: extractNewNotes, extractSectionUpdates: extractSectionUpdates, replaceSection: replaceSection, stripNoteBlocks: stripNoteBlocks, extractKumikoRules: extractKumikoRules, extractMemories: extractMemories, extractActions: extractActions, ensureSlideClips: ensureSlideClips, linkifyRefs: linkifyRefs, resolveRefTarget: resolveRefTarget, historyText: historyText, NOTE_OPEN: NOTE_OPEN, NOTE_CLOSE: NOTE_CLOSE
   };
 });

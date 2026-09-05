@@ -485,12 +485,20 @@ window.api.onEngineDone(async (payload) => {
     const a = e.target.closest && e.target.closest('.at-ref');
     if (!a) return;
     const raw = a.dataset.ref || '';
-    const plain = raw.split('/').pop().replace(/\.(md|pdf)$/i, '').trim().toLowerCase();
-    const noteRel = (window.__wlNoteRel || {})[plain];
-    if (noteRel && typeof openNote === 'function') { openNote(noteRel); return; }
-    const fam = (window.CoreRag && window.CoreRag.docFamilyKey) ? window.CoreRag.docFamilyKey(raw) : plain;
-    const pdfRel = (window.__wlPdfRel || {})[plain] || (window.__wlPdfRel || {})[fam];
-    if (pdfRel && typeof openPdf === 'function') openPdf(pdfRel);
+    // model-written refs are messy ("Name หน้า 17", "A, B หน้า 14–17") — the old exact lookup
+    // silently did NOTHING on those (log 2026-09-05). resolveRefTarget picks the first
+    // resolvable segment and carries the page; unresolvable refs now SAY so.
+    const hit = window.CoreMarkdown.resolveRefTarget(raw, window.__wlNoteRel || {}, window.__wlPdfRel || {},
+      (window.CoreRag && window.CoreRag.docFamilyKey) ? window.CoreRag.docFamilyKey : null);
+    if (!hit) { if (typeof pdfToast === 'function') pdfToast(t('หาโน้ต/เอกสารของลิงก์นี้ไม่เจอ: ') + raw.slice(0, 40)); return; }
+    if (hit.kind === 'note') {
+      if (typeof openNote === 'function') openNote(hit.rel);
+      if (typeof revealInSidebar === 'function') revealInSidebar(hit.rel, 'note');
+    } else {
+      if (hit.page && typeof window.__wikiNav === 'function') window.__wikiNav(hit.rel + '#p' + hit.page);
+      else if (typeof openPdf === 'function') openPdf(hit.rel);
+      if (typeof revealInSidebar === 'function') revealInSidebar(hit.rel, 'pdf');
+    }
   });
 })();
 

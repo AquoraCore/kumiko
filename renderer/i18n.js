@@ -111,6 +111,7 @@ const I18N_EN = {
   'เวอร์ชันใหม่พร้อมแล้ว': 'New version is ready',
   'อัปเดตไม่สำเร็จ': 'Update failed',
   'เปิด log': 'Open log',
+  'หาโน้ต/เอกสารของลิงก์นี้ไม่เจอ: ': 'Could not find this link target: ',
   'ประวัติเวอร์ชัน': 'Version history',
   'ประวัติเวอร์ชัน — ': 'Version history — ',
   'ยังไม่มี snapshot — ระบบเก็บเวอร์ชันเดิมให้อัตโนมัติเมื่อโน้ตถูกแก้ (สูงสุดทุก 10 นาที)': 'No snapshots yet — previous versions are kept automatically when the note changes (at most every 10 min)',

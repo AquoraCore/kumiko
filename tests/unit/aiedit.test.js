@@ -218,10 +218,11 @@ describe('clickable refs + @-menu keyboard', () => {
     expect(chat3).toContain('_linkify(window.CoreMarkdown._mdEsc(m.text))');   // user bubble, escaped first
   });
 
-  it('clicking a ref navigates: note first, PDF fallback', () => {
+  it('clicking a ref navigates via resolveRefTarget (messy model refs, page-aware, miss toast)', () => {
     expect(chat3).toContain("closest('.at-ref')");
-    expect(chat3).toContain('openNote(noteRel)');
-    expect(chat3).toContain('openPdf(pdfRel)');
+    expect(chat3).toContain('window.CoreMarkdown.resolveRefTarget(raw');
+    expect(chat3).toContain('openNote(hit.rel)');
+    expect(chat3).toMatch(/__wikiNav\(hit\.rel \+ '#p' \+ hit\.page\)/);
     expect(sidebar3).toContain('window.__wlPdfRel');
   });
 

@@ -104,3 +104,36 @@ describe('search reveals the opened item in the sidebar', () => {
     expect(read('renderer/styles.css')).toMatch(/reveal-pulse/);
   });
 });
+
+// 2026-09-05: chat [source:]/@ refs from the model are messy — "Name หน้า 17", several names
+// in one bracket. The exact-match click resolver silently did nothing; resolveRefTarget now
+// picks the first resolvable segment, extracts the page, and misses produce a toast.
+describe('chat ref click resolution', () => {
+  const CM = require('../../core/markdown.js');
+  const notes = { 'b ar cr': 'N/B AR CR.md' };
+  const pdfs = { 'org chaert context': 'P/Org Chaert Context.pdf' };
+  it('happy: page suffix → pdf target with page; bare name → note first', () => {
+    expect(CM.resolveRefTarget('Org Chaert Context หน้า 17', notes, pdfs, null)).toEqual({ kind: 'pdf', rel: 'P/Org Chaert Context.pdf', page: 17 });
+    expect(CM.resolveRefTarget('B AR CR', notes, pdfs, null)).toEqual({ kind: 'note', rel: 'N/B AR CR.md' });
+  });
+  it('edge: composite lists fall through to the first RESOLVABLE segment; ranges take the first page', () => {
+    expect(CM.resolveRefTarget('ไม่มีจริง, Org Chaert Context หน้า 14–17', notes, pdfs, null)).toEqual({ kind: 'pdf', rel: 'P/Org Chaert Context.pdf', page: 14 });
+  });
+  it('edge: a PDF beats its own PDF-Text shadow note (raw extract is never the destination)', () => {
+    const shadow = { 'org chaert context': 'PDF-Text/Org Chaert Context.md' };
+    expect(CM.resolveRefTarget('Org Chaert Context หน้า 17', shadow, pdfs, null)).toEqual({ kind: 'pdf', rel: 'P/Org Chaert Context.pdf', page: 17 });
+    // ...but with no pdf candidate, the shadow is still better than nothing
+    expect(CM.resolveRefTarget('Org Chaert Context', shadow, {}, null)).toEqual({ kind: 'note', rel: 'PDF-Text/Org Chaert Context.md' });
+  });
+  it('edge: unresolvable/empty → null (UI toasts instead of silence)', () => {
+    expect(CM.resolveRefTarget('ไม่มีจริง', notes, pdfs, null)).toBe(null);
+    expect(CM.resolveRefTarget('', notes, pdfs, null)).toBe(null);
+  });
+  it('chat wiring: resolver + page nav + sidebar reveal + miss toast', () => {
+    const chat2 = read('renderer/chat.js');
+    expect(chat2).toContain('window.CoreMarkdown.resolveRefTarget(raw');
+    expect(chat2).toMatch(/__wikiNav\(hit\.rel \+ '#p' \+ hit\.page\)/);
+    expect(chat2).toContain("revealInSidebar(hit.rel, 'pdf')");
+    expect(chat2).toContain('หาโน้ต/เอกสารของลิงก์นี้ไม่เจอ');
+  });
+});
