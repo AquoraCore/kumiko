@@ -25,7 +25,7 @@ function memStore() {
 // if the shim is missing any of these, the renderer hits an undefined call at boot.
 const PRELOAD_METHODS = [
   'startPty', 'ptyInput', 'ptyResize', 'ptyRestart', 'onPtyData',
-  'listNotes', 'openNote', 'readNote', 'updateCheck', 'updateRun', 'updateRelaunch', 'updateOpenLog', 'onUpdateProgress', 'readGlobalMemory', 'saveGlobalMemory', 'importPdf', 'readPdf', 'renamePdf', 'readAnnots', 'saveAnnots',
+  'listNotes', 'openNote', 'readNote', 'updateCheck', 'updateRun', 'updateRelaunch', 'updateOpenLog', 'onUpdateProgress', 'saveAsset', 'readAsset', 'pruneAssets', 'historyList', 'historyRead', 'historySnap', 'readGlobalMemory', 'saveGlobalMemory', 'importPdf', 'readPdf', 'renamePdf', 'readAnnots', 'saveAnnots',
   'saveNote', 'onNoteChanged', 'onNoteFlagged', 'createNote', 'renameNote', 'deleteNote', 'searchNotes', 'backlinks',
   'crdtLoad', 'crdtSave', 'noteTable', 'graphData',
   'dbList', 'dbRead', 'dbSave', 'dbCreate', 'dbDelete', 'folderCreate', 'folderRename', 'folderDelete',
@@ -188,11 +188,11 @@ describe('web api shim', () => {
     }
   }, 20000);
 
-  it('exposes every method the Electron preload defines (contract parity, 64)', () => {
+  it('exposes every method the Electron preload defines (contract parity, 70)', () => {
     const api = createWebApi({ baseUrl: 'http://x', getToken: () => null, store: memStore() });
     const missing = PRELOAD_METHODS.filter((n) => typeof api[n] !== 'function');
     expect(missing).toEqual([]);
-    expect(PRELOAD_METHODS.length).toBe(64);
+    expect(PRELOAD_METHODS.length).toBe(70);
   });
 
   it('vault state round-trips through store (vaultStateReadSync is sync)', async () => {
@@ -488,6 +488,34 @@ describe('web api shim', () => {
       expect(kidney.backlinks).toBe(1);
       const nephron = rows.find(r => r.name === 'Nephron.md');
       expect(nephron.backlinks).toBe(0);
+    } finally {
+      await s.close();
+    }
+  }, 20000);
+  it('note image assets: save → read → <img> URL token access · isolated per user', async () => {
+    const s = await startServer({ port: 0, dataDir: tmpDir() });
+    const base = 'http://127.0.0.1:' + s.port;
+    const signup = async (email) => {
+      const r = await fetch(base + '/auth/signup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password: 'password123' }) });
+      return (await r.json()).token;
+    };
+    try {
+      const tokA = await signup('asset-a@b.com');
+      const tokB = await signup('asset-b@b.com');
+      const apiA = createWebApi({ baseUrl: base, getToken: () => tokA, store: memStore() });
+      const px = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+      // happy: save (name sanitized) → read back a data URI → tokenized URL loads without headers
+      const r = await apiA.saveAsset('สไลด์/ทดสอบ p1', px);
+      expect(r.rel).toMatch(/^assets\/.+\.png$/);
+      expect(r.rel).not.toContain('/ทดสอบ');   // "/" sanitized out of the NAME half
+      expect(await apiA.readAsset(r.rel)).toMatch(/^data:image\/png;base64,/);
+      expect((await fetch(apiA.assetUrl(r.rel))).status).toBe(200);
+      // edge: another user's token cannot reach it (per-user vault dirs) → 404
+      expect((await fetch(base + '/assets/content?name=' + encodeURIComponent(r.rel) + '&t=' + encodeURIComponent(tokB))).status).toBe(404);
+      // edge: no token → 401 · traversal-shaped name → 400 · junk uri → error
+      expect((await fetch(base + '/assets/content?name=' + encodeURIComponent(r.rel))).status).toBe(401);
+      expect((await fetch(base + '/assets/content?name=' + encodeURIComponent('assets/../x.md') + '&t=' + encodeURIComponent(tokA))).status).toBe(400);
+      expect((await apiA.saveAsset('x', 'not-a-uri')).error).toBeTruthy();
     } finally {
       await s.close();
     }

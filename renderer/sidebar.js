@@ -174,8 +174,9 @@ async function refreshList(selectName, opts){
   // PDF-Text/ is the auto-extracted "shadow text" of every PDF — machinery for RAG, not a box
   // the user works in. HIDDEN from the tree + box lists (like KUMIKO.md) but kept in the name
   // maps and RAG so the AI can still read PDF content.
-  const treeNotes = notes.filter((n) => !n.startsWith('PDF-Text/'));
-  const treeFolders = folders.filter((f) => f !== 'PDF-Text' && !f.startsWith('PDF-Text/'));
+  // assets/ (note-image files, 2026-09-05) is machinery too — never a box in the tree
+  const treeNotes = notes.filter((n) => !n.startsWith('PDF-Text/') && !n.startsWith('assets/'));
+  const treeFolders = folders.filter((f) => f !== 'PDF-Text' && !f.startsWith('PDF-Text/') && f !== 'assets' && !f.startsWith('assets/'));
   window.__wlFolders = treeFolders.slice();   // folder rel paths — AI folder-aware note creation
   window.__wlPdfRel = {};    // pdf basename -> rel, so [source: <pdf>] chat refs can open the PDF
   pdfs.forEach((p) => { const k = p.replace(/\.pdf$/i, '').split('/').pop().toLowerCase(); if (!(k in window.__wlPdfRel)) window.__wlPdfRel[k] = p; });

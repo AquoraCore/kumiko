@@ -50,13 +50,22 @@ function renderAttachBar(){
   if (btn) { const b = btn.querySelector('.att-badge'); if (b) { b.hidden = !__chatImages.length; b.textContent = String(__chatImages.length); } }
 }
 
-// data-URI images embedded in the open note (PDF clips live there as base64)
-function noteImageUris(limit){
+// images in the open note: legacy inline base64 AND assets/ file refs (loaded back to data
+// URIs so the picker thumbnails + the engine attach path keep working after migration)
+async function noteImageUris(limit){
   if (!currentNote || typeof getBody !== 'function') return [];
   const out = [];
-  const re = /!\[([^\]]*)\]\((data:image\/[a-z+.-]+;base64,[^)\s]+)\)/g;
-  let m; const body = getBody();
-  while ((m = re.exec(body)) && out.length < (limit || 6)) out.push({ uri: m[2], label: m[1] || t('รูปในโน้ต') });
+  const body = getBody();
+  const re = /!\[([^\]]*)\]\((data:image\/[a-z+.-]+;base64,[^)\s]+|assets\/[^)\s]+)\)/g;
+  let m;
+  while ((m = re.exec(body)) && out.length < (limit || 6)) {
+    let uri = m[2];
+    if (uri.startsWith('assets/')) {
+      try { uri = window.api.readAsset ? await window.api.readAsset(uri) : null; } catch (_) { uri = null; }
+      if (!uri) continue;
+    }
+    out.push({ uri, label: m[1] || t('รูปในโน้ต') });
+  }
   return out;
 }
 
@@ -88,7 +97,7 @@ async function openAttachMenu(anchor){
     });
   }
   // 2 · images already in the open note
-  const noteImgs = noteImageUris(6);
+  const noteImgs = await noteImageUris(6);
   if (noteImgs.length) {
     mi('gallery', t('รูปในโน้ตที่เปิดอยู่'), noteImgs.length + ' ' + t('รูป'), null);
     const row = document.createElement('div'); row.className = 'att-row';

@@ -116,7 +116,7 @@ let liveBubble = null;     // ai bubble DOM element of the active session's runn
 function persistSessions(){
   try {
     const slim = sessions.map((s) => ({ id: s.id, name: s.name, icon: s.icon, engine: s.engine, model: s.model, scope: s.scope,
-      messages: s.messages.map((m) => ({ role: m.role, text: m.text, thumbs: m.thumbs })) }));
+      messages: s.messages.map((m) => ({ role: m.role, text: m.text, thumbs: m.thumbs, stopped: m.stopped || undefined, think: m.think || undefined, visionModel: m.visionModel || undefined })) }));
     vsSet('aiSessions', { sessions: slim, activeId });
   } catch (_) {}
 }
@@ -235,6 +235,26 @@ function renderChat(){
         tx.textContent = t(emptyStop ? 'หยุดการตอบแล้ว' : 'หยุดโดยคุณ — ตอบไม่จบ');
         st.appendChild(tx);
         b.appendChild(st);
+      }
+      // hover actions on finished AI bubbles (2026-09-05): ↻ resend for failures/stops,
+      // 📥 append-to-note for real answers — the human fallback for the GLM habit of SAYING
+      // "จัดให้ครับ" without emitting the note block (log 2026-09-03)
+      if (!running) {
+        const failed = /^⚠/.test(m.text || '');
+        const acts = document.createElement('div'); acts.className = 'm-bacts';
+        if (failed || m.stopped) {
+          const rb = document.createElement('button'); rb.type = 'button'; rb.className = 'm-bact';
+          rb.innerHTML = '↻ '; rb.appendChild(document.createTextNode(t('ส่งใหม่'))); rb.title = t('ส่งคำถามเดิมอีกครั้ง');
+          rb.onclick = () => resendFrom(s, i);
+          acts.appendChild(rb);
+        }
+        if (!failed && (m.text || '').trim() && typeof openNotePicker === 'function') {
+          const nb = document.createElement('button'); nb.type = 'button'; nb.className = 'm-bact';
+          nb.innerHTML = '📥 '; nb.appendChild(document.createTextNode(t('ส่งเข้าโน้ต'))); nb.title = t('ต่อท้ายคำตอบนี้ลงโน้ต (ผ่านหน้ารีวิว)');
+          nb.onclick = () => openNotePicker(nb, (rel) => sendBubbleToNote(m, rel));
+          acts.appendChild(nb);
+        }
+        if (acts.children.length) b.appendChild(acts);
       }
       if (running) liveBubble = b;
     }
@@ -473,3 +493,18 @@ window.api.onEngineDone(async (payload) => {
     if (pdfRel && typeof openPdf === 'function') openPdf(pdfRel);
   });
 })();
+
+// ↻ resend: drop the failed user→ai pair (and anything after it) and re-send the same text.
+// Attachments from the original message are NOT re-sent (only thumbnails survive persistence).
+function resendFrom(s, i){
+  let ui = i;
+  while (ui >= 0 && s.messages[ui].role !== 'user') ui--;
+  if (ui < 0) return;
+  const text = s.messages[ui].text || '';
+  if (!text.trim()) return;
+  s.messages.splice(ui);
+  persistSessions(); renderChat();
+  const inp = document.getElementById('chatInput');
+  if (inp) { inp.value = text; }
+  if (typeof sendChat === 'function') sendChat();
+}

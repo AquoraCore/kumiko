@@ -512,7 +512,7 @@ async function deleteNoteAt(rel){
 function openNoteMenu(x, y, rel){
   if (typeof closeFolderMenu === 'function') closeFolderMenu();
   const menu = document.createElement('div'); menu.className = 'db-menu'; menu.id = 'folderMenu';
-  [[t('เปลี่ยนชื่อ'), () => renameNoteAt(rel)], [t('ลบ (ไปถังขยะ)'), () => deleteNoteAt(rel)]].forEach(([label, fn]) => {
+  [[t('เปลี่ยนชื่อ'), () => renameNoteAt(rel)], [t('ประวัติเวอร์ชัน'), () => openHistoryModal(rel)], [t('ลบ (ไปถังขยะ)'), () => deleteNoteAt(rel)]].forEach(([label, fn]) => {
     const it = document.createElement('div'); it.className = 'db-mi' + (label.startsWith(t('ลบ')) ? ' db-mi-del' : '');
     it.textContent = label; it.onclick = () => { if (typeof closeFolderMenu === 'function') closeFolderMenu(); fn(); }; menu.appendChild(it);
   });
@@ -1330,6 +1330,19 @@ async function buildToolResults(acts){
       if (cfg.readNoteImages !== false && (window.__toolImages = window.__toolImages || []).length < 4) window.__toolImages.push(uri);
       return '[ภาพที่ ' + imgN + (alt ? ': ' + alt : '') + (imgN <= 4 ? ' — แนบมาให้ดูด้วย' : '') + ']';
     });
+    // assets/ file images (post-migration form): same placeholder + vision attach treatment
+    const assetRels = [];
+    body = body.replace(/!\[([^\]]*)\]\((assets\/[^)\s]+)\)/g, (_, alt, rel2) => {
+      imgN++;
+      assetRels.push(rel2);
+      return '[ภาพที่ ' + imgN + (alt ? ': ' + alt : '') + (imgN <= 4 ? ' — แนบมาให้ดูด้วย' : '') + ']';
+    });
+    for (const ar of assetRels) {
+      const cfg = window.__aiCfg || {};
+      if (cfg.readNoteImages !== false && (window.__toolImages = window.__toolImages || []).length < 4) {
+        try { const du = window.api.readAsset && await window.api.readAsset(ar); if (du) window.__toolImages.push(du); } catch (_) {}
+      }
+    }
     if (body.length > 6000) body = body.slice(0, 6000) + '\n…(ตัดที่ 6,000 ตัวอักษร)';
     parts.push('[เนื้อหาโน้ต ' + rel.replace(/\.md$/i, '') + ']\n' + (body.trim() || '(โน้ตว่าง)'));
   }
@@ -2631,6 +2644,13 @@ async function openAiSettings(tab){
   const _v=(window.KUMIKO_VERSION && window.KUMIKO_VERSION.indexOf('__')!==0) ? window.KUMIKO_VERSION : '';
   ver.textContent=(_v?'v'+_v+' · ':'')+t('รุ่น')+' '+_b+' · assets '+_a;
   panelAbout.appendChild(ver);
+  // maintenance: pull legacy inline base64 images out of note bodies into assets/ files
+  { const mrow=document.createElement('div'); mrow.className='ai-note';
+    mrow.textContent=t('บำรุงรักษา: โน้ตเก่าที่ฝังภาพเป็น base64 ทำให้ไฟล์ใหญ่/ช้า — ย้ายออกเป็นไฟล์ใน assets/ (ภาพแสดงเหมือนเดิม, มี snapshot ก่อนแก้ทุกโน้ต)');
+    panelAbout.appendChild(mrow);
+    const mbtn=document.createElement('button'); mbtn.className='solid sm'; mbtn.textContent='🖼 '+t('ย้ายภาพในโน้ตออกเป็นไฟล์');
+    mbtn.onclick=async()=>{ mbtn.disabled=true; try { await migrateImagesToAssets(); } catch(_){} mbtn.disabled=false; };
+    panelAbout.appendChild(mbtn); }
 
   _showPanel(_panels[tab] ? tab : 'appearance');   // gear → appearance; AI doorways pass their tab
   ov.appendChild(card); ov.hidden=false;
@@ -3898,3 +3918,176 @@ if (window.api.onUpdateProgress) window.api.onUpdateProgress((m) => {
     else pdfToast('⚠ ' + t('อัปเดตไม่สำเร็จ'), { sticky: true, action: { label: t('เปิด log'), fn: () => window.api.updateOpenLog && window.api.updateOpenLog() } });
   }
 });
+
+// ============================================================
+// NOTE IMAGE ASSETS + COLLAPSIBLE SLIDES (2026-09-05)
+// Markdown keeps portable rels (assets/x.jpg); only the DOM's <img src> is rewritten to a
+// loadable URL (file:// into the vault on desktop, an authed URL on web). ProseMirror
+// serializes from node attrs, not the DOM, so the fixup never leaks into saved markdown.
+// ============================================================
+window.__vaultBase = null;
+async function _refreshVaultBase(){
+  try { const v = await window.api.vaultList(); window.__vaultBase = (v && v.current && v.current.path) || null; } catch (_) {}
+}
+function resolveAssetSrc(rel){
+  if (window.KUMIKO_WEB) return (window.api.assetUrl ? window.api.assetUrl(rel) : rel);
+  return window.__vaultBase ? ('file://' + encodeURI(window.__vaultBase + '/' + rel)) : rel;
+}
+function _fixupEditorImgs(){
+  const host = document.getElementById('editorHost'); if (!host) return;
+  host.querySelectorAll('img').forEach((im) => {
+    const src = im.getAttribute('src') || '';
+    if (src.startsWith('assets/')) { im.dataset.kzRel = src; im.src = resolveAssetSrc(src); }
+    // huge slide images collapse to a strip (click = expand) so long notes stay scannable
+    if (im.dataset.kzClipped) return;
+    const judge = () => {
+      if (im.naturalHeight > 360 && !im.dataset.kzClipped) { im.dataset.kzClipped = '1'; im.classList.add('kz-clip'); im.title = t('คลิกเพื่อขยาย/ย่อภาพ'); }
+    };
+    if (im.complete) judge(); else im.addEventListener('load', judge, { once: true });
+  });
+}
+(function initAssetImgs(){
+  const boot = () => {
+    _refreshVaultBase();
+    const host = document.getElementById('editorHost'); if (!host) return;
+    let _ft = null;
+    new MutationObserver(() => { clearTimeout(_ft); _ft = setTimeout(_fixupEditorImgs, 120); })
+      .observe(host, { childList: true, subtree: true });
+    host.addEventListener('click', (e) => {
+      const im = e.target;
+      if (im && im.tagName === 'IMG' && im.classList.contains('kz-clip')) im.classList.toggle('kz-open');
+    }, true);
+  };
+  if (document.readyState !== 'loading') boot(); else document.addEventListener('DOMContentLoaded', boot);
+})();
+
+// ---- one-shot migration: pull inline base64 images out of every note into assets/ ---------
+async function migrateImagesToAssets(){
+  const ls = await window.api.listNotes();
+  const notes = (ls.notes || []).filter((n) => !n.startsWith('PDF-Text/'));
+  let files = 0, movedImgs = 0, savedBytes = 0;
+  const re = /!\[([^\]]*)\]\((data:image\/[a-z+.-]+;base64,[^)\s]+)\)/g;
+  for (let i = 0; i < notes.length; i++) {
+    const rel = notes[i];
+    let body = '';
+    try { body = String(await window.api.readNote(rel) || ''); } catch (_) { continue; }
+    if (!re.test(body)) { re.lastIndex = 0; continue; }
+    re.lastIndex = 0;
+    pdfToast(t('กำลังย้ายภาพ… ') + (i + 1) + '/' + notes.length);
+    const jobs = [];
+    body.replace(re, (full, alt, uri) => { jobs.push({ full, alt, uri }); return full; });
+    let out = body, changed = 0;
+    for (const j of jobs) {
+      try {
+        const r = await window.api.saveAsset((rel.split('/').pop().replace(/\.md$/i, '') + '-' + (j.alt || 'img')).slice(0, 50), j.uri);
+        if (r && r.rel) { out = out.replace(j.full, '![' + j.alt + '](' + r.rel + ')'); changed++; savedBytes += j.uri.length; }
+      } catch (_) {}
+    }
+    if (changed) {
+      try { await window.api.historySnap(rel); } catch (_) {}
+      await window.api.saveNote(rel, out);
+      files++; movedImgs += changed;
+      if (rel === currentNote) { try { await openNote(rel); } catch (_) {} }
+    }
+  }
+  pdfToast(files
+    ? '🖼 ' + t('ย้ายแล้ว ') + movedImgs + t(' ภาพจาก ') + files + t(' โน้ต — ประหยัด ~') + (savedBytes / 1048576).toFixed(1) + ' MB'
+    : t('ไม่มีภาพฝังในโน้ตแล้ว'), { sticky: true, action: { label: t('ตกลง'), fn: () => {} } });
+}
+
+// ---- note version history (list · preview · restore) --------------------------------------
+async function openHistoryModal(rel){
+  const snaps = await window.api.historyList(rel);
+  const backdrop = document.createElement('div'); backdrop.className = 'modal-backdrop';
+  backdrop.onmousedown = (e) => { if (e.target === backdrop) backdrop.remove(); };
+  const card = document.createElement('div'); card.className = 'modal-card hist-card';
+  const h = document.createElement('h3'); h.textContent = '🕰 ' + t('ประวัติเวอร์ชัน — ') + rel.replace(/\.md$/i, '').split('/').pop();
+  card.appendChild(h);
+  if (!snaps.length) {
+    const e2 = document.createElement('div'); e2.className = 'hist-empty';
+    e2.textContent = t('ยังไม่มี snapshot — ระบบเก็บเวอร์ชันเดิมให้อัตโนมัติเมื่อโน้ตถูกแก้ (สูงสุดทุก 10 นาที)');
+    card.appendChild(e2);
+  } else {
+    const wrap2 = document.createElement('div'); wrap2.className = 'hist-wrap';
+    const list = document.createElement('div'); list.className = 'hist-list';
+    const prev = document.createElement('pre'); prev.className = 'hist-prev'; prev.textContent = t('เลือกเวอร์ชันทางซ้ายเพื่อดู');
+    let selTs = null; const rows = [];
+    snaps.forEach((s2) => {
+      const row = document.createElement('button'); row.type = 'button'; row.className = 'hist-row';
+      const d = new Date(s2.ts);
+      row.textContent = d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }) + ' ' +
+        d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' · ' + (s2.size / 1024).toFixed(1) + ' KB';
+      row.onclick = async () => {
+        rows.forEach((r2) => r2.classList.remove('on')); row.classList.add('on');
+        selTs = s2.ts;
+        prev.textContent = String(await window.api.historyRead(rel, s2.ts) || t('(อ่านไม่ได้)'));
+      };
+      rows.push(row); list.appendChild(row);
+    });
+    wrap2.appendChild(list); wrap2.appendChild(prev); card.appendChild(wrap2);
+    const acts = document.createElement('div'); acts.className = 'modal-actions';
+    const rest = document.createElement('button'); rest.className = 'solid'; rest.textContent = t('กู้คืนเวอร์ชันนี้');
+    rest.onclick = async () => {
+      if (selTs == null) return;
+      const old = String(await window.api.historyRead(rel, selTs) || '');
+      if (!old) return;
+      await window.api.historySnap(rel);   // current state becomes a snapshot before the swap
+      await window.api.saveNote(rel, old);
+      backdrop.remove();
+      if (rel === currentNote) { try { await openNote(rel); } catch (_) {} }
+      pdfToast('🕰 ' + t('กู้คืนเวอร์ชันเดิมแล้ว (สถานะก่อนหน้าถูกเก็บเป็น snapshot)'));
+    };
+    const close = document.createElement('button'); close.className = 'ghost'; close.textContent = t('ปิด');
+    close.onclick = () => backdrop.remove();
+    acts.appendChild(rest); acts.appendChild(close); card.appendChild(acts);
+  }
+  backdrop.appendChild(card); document.body.appendChild(backdrop);
+}
+
+// ---- generic note picker (search + list) — the ส่งเข้าโน้ต target chooser ------------------
+function openNotePicker(anchor, onPick){
+  const old = document.getElementById('npMenu'); if (old) { old.remove(); return; }
+  const menu = document.createElement('div'); menu.className = 'ct-menu'; menu.id = 'npMenu';
+  const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'ct-inp';
+  inp.placeholder = t('ค้นหาโน้ตปลายทาง…');
+  const list = document.createElement('div'); list.className = 'ct-list';
+  menu.appendChild(inp); menu.appendChild(list);
+  const close = () => { menu.remove(); document.removeEventListener('mousedown', onOut, true); };
+  const onOut = (e) => { if (!menu.contains(e.target) && e.target !== anchor) close(); };
+  const render = () => {
+    const q = inp.value.trim().toLowerCase();
+    list.innerHTML = '';
+    const rels = Object.values(window.__wlNoteRel || {}).filter((r) => !String(r).startsWith('PDF-Text/'));
+    rels.filter((r) => !q || r.toLowerCase().includes(q)).slice(0, 12).forEach((rel) => {
+      const it = document.createElement('div'); it.className = 'ct-item';
+      it.textContent = rel.replace(/\.md$/i, '');
+      it.onmousedown = (e) => { e.preventDefault(); close(); onPick(rel); };
+      list.appendChild(it);
+    });
+  };
+  inp.addEventListener('input', render);
+  render();
+  document.body.appendChild(menu);
+  const r = anchor.getBoundingClientRect();
+  menu.style.top = Math.min(r.bottom + 6, window.innerHeight - 300) + 'px';
+  menu.style.left = Math.max(8, Math.min(r.left - 120, window.innerWidth - 300)) + 'px';
+  setTimeout(() => { document.addEventListener('mousedown', onOut, true); inp.focus(); }, 0);
+}
+// Append an AI bubble's visible text into a note, through the SAME review gate as AI edits.
+async function sendBubbleToNote(m, rel){
+  const content = (typeof chatDisplayText === 'function' ? chatDisplayText(m.text, false) : (m.text || '')).trim();
+  if (!content) return;
+  let raw = '';
+  try { raw = String(await window.api.readNote(rel) || ''); } catch (_) {}
+  const body0 = parseFrontmatter(raw).body || '';
+  const merged = (body0.trim() ? body0.replace(/\s*$/, '') + '\n\n' : '') + content + '\n';
+  if (rel === currentNote && typeof applyReplyToNote === 'function') {
+    applyReplyToNote(merged, { silent: true, baseRaw: raw });
+  } else {
+    window.__pendingReviews.set(rel, merged);
+    window.__flaggedNotes.add(rel);
+    try { renderTree(); } catch (_) {}
+    pdfToast('📥 ' + t('เตรียมเนื้อหาต่อท้าย ') + rel.replace(/\.md$/i, '').split('/').pop(),
+      { sticky: true, action: { label: t('เปิดรีวิว'), fn: () => openNote(rel) } });
+  }
+}

@@ -1505,8 +1505,15 @@ async function renderPdfClipMarkdown(pageNum){
     // snapshot "ณ เวลานั้น": the user's stickies + highlights are part of the picture
     try { drawPageAnnotsToCanvas(canvas.getContext('2d'), n, canvas.width, canvas.height); } catch (_) {}
     const uri = canvas.toDataURL('image/jpeg', 0.85);
+    // clips land as FILES under assets/ (2026-09-05) — inline base64 once grew a note to
+    // 3.4MB. Falls back to the data URI if the asset write fails, so a clip never vanishes.
+    let ref = uri;
+    try {
+      const r2 = window.api.saveAsset && await window.api.saveAsset(currentPdf.split('/').pop().replace(/\.pdf$/i, '') + '-p' + n, uri);
+      if (r2 && r2.rel) ref = r2.rel;
+    } catch (_) {}
     const notes = pageNotesMarkdown(n);
-    return { ok: true, page: n, md: '![สไลด์หน้า ' + n + '](' + uri + ')' + (notes ? '\n\n' + notes : '') };
+    return { ok: true, page: n, md: '![สไลด์หน้า ' + n + '](' + ref + ')' + (notes ? '\n\n' + notes : '') };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }

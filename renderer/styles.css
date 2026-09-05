@@ -2462,3 +2462,20 @@ button.tg-chip { cursor: pointer; text-align: left; }
 .up-list { font: 12px/1.7 var(--font); color: var(--muted); white-space: pre-wrap; max-height: 160px; overflow-y: auto; margin: 4px 0 10px; overflow-wrap: anywhere; }
 .up-hint { margin-top: 10px; font-size: 11.5px; color: var(--muted); }
 .up-card { max-width: 480px; }
+
+/* ---- AI bubble hover actions (resend / send-to-note) ---- */
+.m-bacts { display: flex; gap: 6px; margin-top: 8px; opacity: 0; transition: opacity .15s ease; }
+.m.ai:hover .m-bacts, .m-bacts:focus-within { opacity: 1; }
+.m-bact { border: 1px solid var(--line-strong); background: var(--sheet); color: var(--muted); border-radius: 6px; font: 600 11.5px var(--font); padding: 3px 9px; cursor: pointer; }
+.m-bact:hover { color: var(--text); border-color: var(--accent); }
+/* ---- collapsible slide images in the editor ---- */
+.milkdown img.kz-clip { height: 96px !important; width: 100%; max-width: 560px; object-fit: cover; object-position: top; cursor: zoom-in; border-radius: 6px; filter: saturate(.9); border: 1px solid var(--line); }
+.milkdown img.kz-clip.kz-open { height: auto !important; max-width: 100%; object-fit: contain; cursor: zoom-out; filter: none; }
+/* ---- version history modal ---- */
+.hist-card { max-width: 720px; width: min(720px, 92vw); }
+.hist-wrap { display: flex; gap: 10px; min-height: 0; }
+.hist-list { flex: 0 0 190px; display: flex; flex-direction: column; gap: 4px; max-height: 340px; overflow-y: auto; }
+.hist-row { text-align: left; border: 1px solid var(--line); background: var(--sheet); color: var(--text); border-radius: 6px; font: 12px var(--font); padding: 6px 8px; cursor: pointer; }
+.hist-row.on { border-color: var(--accent); background: var(--accent-bg); }
+.hist-prev { flex: 1; min-width: 0; max-height: 340px; overflow: auto; font: 11.5px/1.6 ui-monospace, monospace; color: var(--muted); background: var(--wash); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+.hist-empty { color: var(--muted); font-size: 12.5px; padding: 8px 0; }

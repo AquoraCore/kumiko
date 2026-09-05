@@ -664,7 +664,7 @@ describe('PDF-Text is hidden from the user, visible to RAG', () => {
   const webP = read('web/api-web.js');
 
   it('sidebar tree + box lists filter it; name maps stay intact for the AI', () => {
-    expect(sidebarP).toMatch(/treeNotes = notes\.filter\(\(n\) => !n\.startsWith\('PDF-Text\/'\)\)/);
+    expect(sidebarP).toMatch(/treeNotes = notes\.filter\(\(n\) => !n\.startsWith\('PDF-Text\/'\) && !n\.startsWith\('assets\/'\)\)/);   // assets/ hidden too (2026-09-05)
     expect(sidebarP).toContain("f !== 'PDF-Text'");
     expect(sidebarP).toContain('buildNoteTree(treeNotes, treeFolders, pdfs)');
     expect(sidebarP).toContain('window.__wlFolders = treeFolders.slice()');
@@ -880,7 +880,7 @@ describe('new-note notification carries a jump-to-review button', () => {
     const r = read3('renderer/renderer.js');
     expect(r).toMatch(/firstRel && currentNote !== firstRel[\s\S]{0,300}เปิดรีวิว[\s\S]{0,60}openNote\(firstRel\)/);
     expect(r).toMatch(/AI สร้างโน้ตใหม่: /);
-    expect((r.match(/sticky: true, action: \{ label: t\('เปิดรีวิว'\)/g) || []).length).toBe(2);
+    expect((r.match(/sticky: true, action: \{ label: t\('เปิดรีวิว'\)/g) || []).length).toBe(3);   // + sendBubbleToNote (2026-09-05)
     // the overwrite-proposal toast got the same button
     expect(r).toMatch(/เสนอเขียนทับ[\s\S]{0,200}เปิดรีวิว[\s\S]{0,60}openNote\(rel0\)/);
   });

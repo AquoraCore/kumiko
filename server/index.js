@@ -439,6 +439,42 @@ async function startServer(opts = {}) {
 
   // ---- pdfs (per-vault cloud PDF binary + annot storage) ----
   // GET /pdfs -> { pdfs: [...] } (sorted filenames, excludes *.annot.json sidecars)
+  // ---- note image assets (2026-09-05): binary files under <vault>/assets/, parity with the
+  // desktop asset:save/asset:read pair. Names are server-generated (sanitized + suffixed).
+  const _assetVaultDir = (req) => path.join(dataDir, 'vaults', encodeURIComponent(String(req.user.sub)), encodeURIComponent(String(vaultOf(req))));
+  app.post('/assets', requireAuth, (req, res) => {
+    try {
+      const { name, dataUri } = req.body || {};
+      const m = /^data:image\/([a-z0-9+.-]+);base64,(.+)$/i.exec(String(dataUri || ''));
+      if (!m) return res.json({ error: 'bad-uri' });
+      const ext = m[1].toLowerCase() === 'jpeg' ? 'jpg' : m[1].toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 4);
+      const safe = String(name || 'img').replace(/[\/\\:*?"<>|#()\[\]]/g, '-').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'img';   // markdown ](…) breaks on ")" and spaces
+      const rel = 'assets/' + safe + '-' + Date.now().toString(36) + Math.floor(Math.random() * 46656).toString(36) + '.' + ext;
+      const full = path.join(_assetVaultDir(req), rel);
+      fs.mkdirSync(path.dirname(full), { recursive: true });
+      fs.writeFileSync(full, Buffer.from(m[2], 'base64'));
+      res.json({ rel });
+    } catch (e) { res.json({ error: 'failed' }); }
+  });
+  // <img> tags cannot send Authorization headers, so this route ALSO accepts the token as
+  // ?t= (same JWT the header would carry) + ?v= for the vault. Name shape is a strict
+  // whitelist (assets/<safe>.<img-ext>) — no traversal surface.
+  app.get('/assets/content', (req, res) => {
+    try {
+      const h = req.headers.authorization || '';
+      const token = h.startsWith('Bearer ') ? h.slice(7) : String(req.query.t || '');
+      const p0 = auth.verifyToken(token, app.locals.secret);
+      if (!p0) return res.status(401).end();
+      req.user = p0;
+      if (req.query.v) req.headers['x-vault'] = String(req.query.v);
+      const rel = String(req.query.name || '');
+      if (!/^assets\/[A-Za-z0-9 ._฀-๿-]+\.(jpg|png|webp|gif)$/i.test(rel)) return res.status(400).end();
+      const full = path.join(_assetVaultDir(req), rel);
+      const ext = rel.split('.').pop().toLowerCase();
+      res.type(ext === 'jpg' ? 'jpeg' : ext).send(fs.readFileSync(full));
+    } catch (_) { res.status(404).end(); }
+  });
+
   app.get('/pdfs', requireAuth, (req, res) => {
     const v = vaultOf(req);
     res.json({ pdfs: pdfs.list(req.user.sub, v) });

@@ -781,12 +781,108 @@ ipcMain.handle('note:open', (e, name) => {
   return content;
 });
 
+// ---- note version history: silent snapshots under .washi/history/<rel>/<ms>.md ------------
+// The PREVIOUS content is snapshotted right before an overwrite — at most once per SNAP_GAP
+// per note (autosave fires constantly), capped at SNAP_KEEP. .washi/ is already invisible to
+// the walker and the chokidar watcher. PDF-Text shadows are excluded (regenerated, worthless).
+const SNAP_GAP = 10 * 60 * 1000, SNAP_KEEP = 20;
+function _histDir(rel){ return path.join(NOTES_DIR, '.washi', 'history', rel); }
+function maybeSnapshotNote(rel, force){
+  try {
+    const r = safeRel(rel); if (!r || r.startsWith('PDF-Text/')) return;
+    const p = path.join(NOTES_DIR, r);
+    if (!fs.existsSync(p)) return;
+    const dir = _histDir(r);
+    let snaps = [];
+    try { snaps = fs.readdirSync(dir).filter((f) => /^\d+\.md$/.test(f)).sort((a, b) => parseInt(a) - parseInt(b)); } catch (_) {}
+    const last = snaps.length ? parseInt(snaps[snaps.length - 1], 10) : 0;
+    if (!force && Date.now() - last < SNAP_GAP) return;
+    fs.mkdirSync(dir, { recursive: true });
+    fs.copyFileSync(p, path.join(dir, Date.now() + '.md'));
+    while (snaps.length + 1 > SNAP_KEEP) { const f = snaps.shift(); try { fs.unlinkSync(path.join(dir, f)); } catch (_) {} }
+  } catch (_) {}
+}
+ipcMain.handle('history:list', (e, rel) => {
+  try {
+    const r = safeRel(rel); if (!r) return [];
+    const dir = _histDir(r);
+    return fs.readdirSync(dir).filter((f) => /^\d+\.md$/.test(f))
+      .map((f) => ({ ts: parseInt(f, 10), size: fs.statSync(path.join(dir, f)).size }))
+      .sort((a, b) => b.ts - a.ts);
+  } catch (_) { return []; }
+});
+ipcMain.handle('history:read', (e, { rel, ts }) => {
+  try {
+    const r = safeRel(rel); if (!r || !/^\d+$/.test(String(ts))) return '';
+    return fs.readFileSync(path.join(_histDir(r), ts + '.md'), 'utf8');
+  } catch (_) { return ''; }
+});
+ipcMain.handle('history:snap', (e, rel) => { maybeSnapshotNote(rel, true); return true; });
+
 ipcMain.handle('note:save', (e, payload) => {
   const p = path.join(NOTES_DIR, payload.name);
   fs.mkdirSync(path.dirname(p), { recursive: true });   // AI NEW-NOTE may name a brand-new folder
+  maybeSnapshotNote(payload.name);                      // keep the outgoing version (rate-limited)
   fs.writeFileSync(p, payload.content, 'utf8');
   lastKnownContent = payload.content;
   return true;
+});
+
+// ---- note image assets: pictures live as FILES under assets/, not base64 in the body ------
+// (a slide-clipped note once grew to 3.4MB of inline JPEG — the editor, autosave, RAG and
+// every AI read paid for it). asset:save writes a data URI to assets/<safe>-<ts>.<ext> and
+// returns the rel; asset:read turns a rel back into a data URI (vision attachments).
+ipcMain.handle('asset:save', (e, { name, dataUri }) => {
+  try {
+    const m = /^data:image\/([a-z0-9+.-]+);base64,(.+)$/i.exec(String(dataUri || ''));
+    if (!m) return { error: 'bad-uri' };
+    const ext = m[1].toLowerCase() === 'jpeg' ? 'jpg' : m[1].toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 4);
+    const safe = String(name || 'img').replace(/[\/\\:*?"<>|#()\[\]]/g, '-').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'img';   // markdown ](…) breaks on ")" and spaces
+    const rel = 'assets/' + safe + '-' + Date.now().toString(36) + Math.floor(Math.random() * 46656).toString(36) + '.' + ext;
+    const p = path.join(NOTES_DIR, rel);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, Buffer.from(m[2], 'base64'));
+    return { rel };
+  } catch (e2) { return { error: String(e2 && e2.message || e2) }; }
+});
+// Delete asset files no note references any more (orphans from deleted notes, failed
+// migrations, restores). Walks every .md for ](assets/…) refs, removes the rest.
+ipcMain.handle('asset:prune', () => {
+  try {
+    const adir = path.join(NOTES_DIR, 'assets');
+    let files = [];
+    try { files = fs.readdirSync(adir).filter((f) => !f.startsWith('.')); } catch (_) { return { removed: 0 }; }
+    const referenced = new Set();
+    const walk = (dir) => {
+      let ents = [];
+      try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+      for (const ent of ents) {
+        if (ent.name.startsWith('.')) continue;
+        const p = path.join(dir, ent.name);
+        if (ent.isDirectory()) walk(p);
+        else if (ent.name.endsWith('.md')) {
+          const body = fs.readFileSync(p, 'utf8');
+          const re = /\]\((assets\/[^)\n]+)\)/g; let m;
+          while ((m = re.exec(body))) referenced.add(m[1].slice('assets/'.length));
+        }
+      }
+    };
+    walk(NOTES_DIR);
+    let removed = 0;
+    for (const f of files) {
+      if (!referenced.has(f)) { try { fs.unlinkSync(path.join(adir, f)); removed++; } catch (_) {} }
+    }
+    return { removed };
+  } catch (_) { return { removed: 0 }; }
+});
+ipcMain.handle('asset:read', (e, rel) => {
+  try {
+    const r = safeRel(rel); if (!r || !r.startsWith('assets/')) return null;
+    const buf = fs.readFileSync(path.join(NOTES_DIR, r));
+    const ext = r.split('.').pop().toLowerCase();
+    const mime = ext === 'png' ? 'image/png' : (ext === 'webp' ? 'image/webp' : (ext === 'gif' ? 'image/gif' : 'image/jpeg'));
+    return 'data:' + mime + ';base64,' + buf.toString('base64');
+  } catch (_) { return null; }
 });
 
 ipcMain.handle('note:read', (e, name) => {

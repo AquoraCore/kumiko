@@ -141,6 +141,35 @@ function createWebApi(opts) {
   // the person across every vault. Never throws — failures read as an empty profile.
   async function updateCheck() { return { behind: 0 }; }   // web = server-deployed, no git pull
   async function updateRun() { return { error: 'unsupported' }; }
+  // note image assets — server-side files under <vault>/assets/
+  async function saveAsset(name, dataUri) {
+    try {
+      const res = await req('POST', '/assets', { name, dataUri });
+      return (res && res.ok) ? await res.json() : { error: 'failed' };
+    } catch (_) { return { error: 'failed' }; }
+  }
+  async function readAsset(rel) {
+    try {
+      const res = await req('GET', '/assets/content?name=' + encodeURIComponent(rel));
+      if (!res || !res.ok) return null;
+      const buf = await res.arrayBuffer();
+      const mime = res.headers.get('content-type') || 'image/jpeg';
+      let b64;
+      if (typeof Buffer !== 'undefined') b64 = Buffer.from(buf).toString('base64');
+      else { let bin = ''; const bytes = new Uint8Array(buf); for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]); b64 = btoa(bin); }
+      return 'data:' + mime + ';base64,' + b64;
+    } catch (_) { return null; }
+  }
+  // URL form for <img> tags (headers unavailable there): token + vault ride as query params
+  async function pruneAssets() { return { removed: 0 }; }   // server-side prune = later
+  function assetUrl(rel) {
+    const v = _curVault();
+    return baseUrl + '/assets/content?name=' + encodeURIComponent(rel) +
+      '&t=' + encodeURIComponent(getToken() || '') + (v ? '&v=' + encodeURIComponent(v) : '');
+  }
+  async function historyList() { return []; }        // history is desktop-side for now
+  async function historyRead() { return ''; }
+  async function historySnap() { return true; }
   async function updateRelaunch() { return { ok: false }; }
   async function updateOpenLog() { return { ok: false }; }
   function onUpdateProgress() {}
@@ -858,6 +887,7 @@ function createWebApi(opts) {
     // storage (7d-1, real)
     listNotes, openNote, readNote, saveNote, createNote, renameNote, deleteNote,
     updateCheck, updateRun, updateRelaunch, updateOpenLog, onUpdateProgress, readGlobalMemory, saveGlobalMemory,
+    saveAsset, readAsset, assetUrl, pruneAssets, historyList, historyRead, historySnap,
     // state / vault
     vaultStateReadSync, vaultConfigRead, vaultConfigWrite, vaultList, vaultSwitch, vaultOpen, vaultCreate, vaultRename, vaultDelete,
     // auth
