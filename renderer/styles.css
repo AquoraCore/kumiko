@@ -2493,3 +2493,5 @@ button.tg-chip { cursor: pointer; text-align: left; }
 #kzLightbox .kz-lb-x { position: absolute; top: 16px; right: 20px; width: 36px; height: 36px; border: none; border-radius: 50%; background: rgba(255,255,255,.14); color: #fff; font-size: 15px; cursor: pointer; }
 #kzLightbox .kz-lb-x:hover { background: rgba(255,255,255,.28); }
 #kzLightbox .kz-lb-hint { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); color: rgba(255,255,255,.55); font: 12px var(--font); }
+#kzZoomBtn { position: fixed; z-index: 900; width: 30px; height: 30px; border: none; border-radius: 7px; background: rgba(30, 28, 26, .62); color: #fff; font-size: 14px; cursor: pointer; display: grid; place-items: center; backdrop-filter: blur(2px); }
+#kzZoomBtn:hover { background: rgba(30, 28, 26, .85); }

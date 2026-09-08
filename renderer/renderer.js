@@ -4149,10 +4149,47 @@ function _lightboxFrom(target){
   return null;
 }
 (function wireLightbox(){
+  // single click already means EDIT in the editor (select image / open mermaid code), so
+  // fullscreen opens via (a) a floating ⛶ button that appears on hover, or (b) ⌘/Ctrl+click —
+  // neither collides with editing (user feedback 2026-09-08; dblclick was unusable).
+  const _targetOf = (t) => {
+    const im = t.closest && t.closest('img');
+    if (im) return im;
+    const mm = t.closest && t.closest('.md-mermaid-render, .milkdown .mermaid, pre.mermaid');
+    return (mm && mm.querySelector('svg')) ? mm : null;
+  };
   const boot = () => {
+    const btn = document.createElement('button');
+    btn.id = 'kzZoomBtn'; btn.type = 'button'; btn.textContent = '⛶'; btn.hidden = true;
+    btn.title = t('ดูเต็มจอ (หรือ ⌘+คลิก)');
+    document.body.appendChild(btn);
+    let target = null, hideT = null;
+    const hide = () => { hideT = setTimeout(() => { btn.hidden = true; target = null; }, 250); };
+    const show = (el) => {
+      clearTimeout(hideT); target = el;
+      const r = el.getBoundingClientRect();
+      btn.style.top = Math.max(6, r.top + 8) + 'px';
+      btn.style.left = (r.right - 40) + 'px';
+      btn.hidden = false;
+    };
+    btn.addEventListener('mouseenter', () => clearTimeout(hideT));
+    btn.addEventListener('mouseleave', hide);
+    btn.addEventListener('mousedown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const node = target && _lightboxFrom(target);
+      if (node) openLightbox(node);
+      btn.hidden = true;
+    });
     ['editorHost', 'chatMessages'].forEach((id) => {
       const host = document.getElementById(id); if (!host) return;
-      host.addEventListener('dblclick', (e) => {
+      host.addEventListener('mouseover', (e) => {
+        const el = _targetOf(e.target);
+        if (el) show(el); else if (!btn.contains(e.target)) hide();
+      });
+      host.addEventListener('scroll', () => { btn.hidden = true; }, { passive: true });
+      // power shortcut: ⌘/Ctrl+click opens fullscreen without touching edit-selection
+      host.addEventListener('click', (e) => {
+        if (!(e.metaKey || e.ctrlKey)) return;
         const node = _lightboxFrom(e.target);
         if (node) { e.preventDefault(); e.stopPropagation(); openLightbox(node); }
       }, true);

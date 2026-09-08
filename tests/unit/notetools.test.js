@@ -142,11 +142,13 @@ describe('chat ref click resolution', () => {
 describe('fullscreen lightbox for images + diagrams', () => {
   const r = read('renderer/renderer.js');
   const css = read('renderer/styles.css');
-  it('opens from editor AND chat, images AND mermaid svgs (cloned, size-freed)', () => {
+  it('opens via hover ⛶ button or ⌘/Ctrl+click — NEVER plain/double click (click = edit)', () => {
     expect(r).toContain('function openLightbox');
     expect(r).toMatch(/\['editorHost', 'chatMessages'\]\.forEach/);
+    expect(r).toContain("btn.id = 'kzZoomBtn'");
+    expect(r).toMatch(/if \(!\(e\.metaKey \|\| e\.ctrlKey\)\) return;/);
+    expect(r).not.toMatch(/addEventListener\('dblclick'[\s\S]{0,120}openLightbox/);
     expect(r).toMatch(/closest\('\.md-mermaid-render, \.milkdown \.mermaid, pre\.mermaid'\)/);
-    expect(r).toMatch(/c\.removeAttribute\('width'\); c\.removeAttribute\('height'\)/);
     expect(r).toContain("c.setAttribute('preserveAspectRatio', 'xMidYMid meet')");
   });
   it('zoom clamps 0.2–8, drag pans, dblclick resets, Esc/✕/backdrop close', () => {
