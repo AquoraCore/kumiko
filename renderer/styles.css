@@ -780,8 +780,10 @@ table.tbl td { padding:7px 10px; border-bottom:1px solid var(--line); color:var(
 #left.view-table #editorWrap, #left.view-table #propsBar, #left.view-table #backlinks, #left.view-table .action-bar,
 #left.view-dash #editorWrap, #left.view-dash #propsBar, #left.view-dash #backlinks, #left.view-dash .action-bar,
 #left.view-crate #editorWrap, #left.view-crate #propsBar, #left.view-crate #backlinks, #left.view-crate .action-bar,
-#left.view-trash #editorWrap, #left.view-trash #propsBar, #left.view-trash #backlinks, #left.view-trash .action-bar { display: none !important; }
+#left.view-trash #editorWrap, #left.view-trash #propsBar, #left.view-trash #backlinks, #left.view-trash .action-bar,
+#left.view-canvas #editorWrap, #left.view-canvas #propsBar, #left.view-canvas #backlinks, #left.view-canvas .action-bar { display: none !important; }
 #left.view-graph #graphView { display: flex; }
+#left.view-canvas #canvasView { display: flex; }
 #left.view-table #tableView { display: flex; }
 #left.view-dash #dashView { display: flex; }
 #left.view-crate #crateView { display: flex; }
@@ -999,7 +1001,7 @@ table.db tr:hover .db-delrow { opacity: 1; }
    AUTO-LINK BAR (🧵 ร้อยเชือก)
    ============================================================ */
 #autolinkBar { background: var(--side); background-image: var(--wa-shippo-chat); border-top: 1px solid var(--cut-seam); padding: 10px 14px 12px; }
-#left.view-graph #autolinkBar, #left.view-table #autolinkBar, #left.view-crate #autolinkBar, #left.view-trash #autolinkBar { display: none !important; }
+#left.view-graph #autolinkBar, #left.view-table #autolinkBar, #left.view-crate #autolinkBar, #left.view-trash #autolinkBar, #left.view-canvas #autolinkBar { display: none !important; }
 .al-hd { display: flex; align-items: center; gap: 8px; font: 700 12.5px/1.3 var(--font); color: var(--muted); margin-bottom: 8px; }
 .al-hd b { color: var(--accent); }
 .al-x { margin-left: auto; border: none; background: transparent; color: var(--muted); cursor: pointer; font-size: 14px; line-height: 1; padding: 2px 4px; }
@@ -2514,3 +2516,59 @@ button.tg-chip { cursor: pointer; text-align: left; }
 /* crepe's add-caption bubble on images sits exactly under our ⛶ zoom button — captions are
    written in markdown anyway (![caption](...)), so the widget is removed (user, 2026-09-08) */
 .milkdown .image-wrapper .operation { display: none !important; }
+
+/* ================= Kumiko Canvas (แคนวาสสรุปงาน) ================= */
+#canvasView { flex-direction: column; }
+.kv-bar { flex: none; display: flex; gap: 8px; align-items: center; padding: 8px 12px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.kv-bar #kvBoardSel { border: 1px solid var(--line-strong); background: var(--surface); color: var(--text); border-radius: 7px; font: 700 13px inherit; padding: 5px 9px; max-width: 280px; }
+.kv-cnt { color: var(--muted); font-size: 11.5px; margin-right: auto; }
+.kv-world { flex: 1; position: relative; overflow: hidden; cursor: grab; background-image: radial-gradient(circle, var(--line-strong) 1px, transparent 1px); background-size: 26px 26px; background-color: var(--bg); }
+.kv-world.kv-grabbing { cursor: grabbing; }
+.kv-pz { position: absolute; transform-origin: 0 0; }
+.kv-wires { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
+.kv-card { position: absolute; width: 264px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 10px; box-shadow: 0 3px 14px rgba(90, 70, 50, .12); user-select: none; }
+.kv-hd { display: flex; align-items: center; gap: 6px; padding: 7px 10px; border-bottom: 1px solid var(--line); cursor: grab; font-weight: 700; font-size: 12.5px; }
+.kv-hd:active { cursor: grabbing; }
+.kv-hd .kv-ttl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kv-hd .kv-x { margin-left: auto; border: none; background: none; color: var(--muted); cursor: pointer; font-size: 12px; }
+.kv-hd .kv-x:hover { color: var(--accent); }
+/* ท่อน (segment): กล่องข้อความเต็มของหัวข้อ — เส้นเกาะที่ท่อนของมันเอง */
+.kv-seg { position: relative; border-bottom: 1px dashed var(--line); padding: 7px 11px 9px; }
+.kv-seg:last-of-type { border-bottom: none; }
+.kv-seg.kv-linked { background: var(--accent-bg); }
+.kv-sn { font-weight: 700; font-size: 11px; color: var(--accent-strong); margin-bottom: 3px; display: flex; align-items: center; gap: 5px; }
+.kv-sn .kv-sx { margin-left: auto; border: none; background: none; color: var(--muted); cursor: pointer; font-size: 10px; opacity: .6; }
+.kv-sn .kv-sx:hover { color: var(--accent); opacity: 1; }
+.kv-tx { font-size: 11.8px; line-height: 1.6; color: var(--text); user-select: text; }
+.kv-tx.md p { margin: 0 0 6px; }
+.kv-tx.md p:last-child { margin-bottom: 0; }
+.kv-tx.md ul, .kv-tx.md ol { margin: 0 0 6px; padding-left: 18px; }
+.kv-tx.md table { border-collapse: collapse; font-size: 11px; }
+.kv-tx.md th, .kv-tx.md td { border: 1px solid var(--line); padding: 2px 6px; }
+.kv-tx .kv-miss { color: var(--muted); font-style: italic; }
+.kv-sticky { width: 190px; background: var(--ic-wood-bg); border-color: var(--ic-wood); }
+.kv-sticky .kv-tx { color: var(--ic-ink); min-height: 34px; outline: none; white-space: pre-wrap; }
+.kv-sticky .kv-tx:empty::before { content: attr(data-ph); color: var(--muted); }
+.kv-port { position: absolute; right: -7px; top: 50%; transform: translateY(-50%); width: 12px; height: 12px; border-radius: 50%; background: var(--surface); border: 2px solid var(--accent); cursor: crosshair; opacity: 0; transition: opacity .15s; }
+.kv-seg:hover .kv-port { opacity: 1; }
+.kv-addseg { display: block; width: calc(100% - 16px); margin: 6px 8px 8px; font-size: 11.5px; color: var(--muted); border: 1px dashed var(--line-strong); border-radius: 5px; background: var(--bg); padding: 4px 6px; }
+.kv-rs { position: absolute; right: -2px; bottom: -2px; width: 16px; height: 16px; cursor: nwse-resize; border-right: 3px solid var(--line-strong); border-bottom: 3px solid var(--line-strong); border-bottom-right-radius: 9px; opacity: 0; transition: opacity .15s; }
+.kv-card:hover .kv-rs { opacity: 1; }
+.kv-rs:hover { border-color: var(--accent); }
+/* media (ภาพ/diagram) capped at 340px; การ์ดกว้าง ≥560px = โหมดแสดงเต็ม */
+.kv-media { position: relative; margin: 4px 0; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); overflow: hidden; max-height: 340px; }
+.kv-media img, .kv-media .md-mermaid-render svg { display: block; width: 100%; height: auto; }
+.kv-card:not(.kv-wide) .kv-media::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 40px; background: linear-gradient(transparent, var(--surface)); pointer-events: none; }
+.kv-card.kv-wide .kv-media { max-height: none; }
+.kv-card.kv-wide .kv-media::after { display: none; }
+.kv-picker { position: absolute; top: 10px; left: 12px; width: 280px; max-height: 70%; overflow: auto; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 9px; box-shadow: 0 10px 34px rgba(60, 45, 30, .2); padding: 9px; z-index: 50; }
+.kv-picker input { width: 100%; box-sizing: border-box; font: 12.5px inherit; padding: 6px 9px; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 6px; background: var(--bg); color: var(--text); }
+.kv-pit { padding: 5px 8px; border-radius: 6px; font-size: 12.5px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kv-pit:hover { background: var(--hover); }
+.kv-pit.kv-used { opacity: .4; pointer-events: none; }
+.kv-fh { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 6px; font-weight: 700; font-size: 12px; color: var(--ic-wood-strong); cursor: pointer; }
+.kv-fh:hover { background: var(--hover); }
+.kv-fh .kv-tri { font-size: 9px; color: var(--muted); width: 10px; }
+.kv-fh .kv-fn { color: var(--muted); font-weight: 400; }
+.kv-fh + .kv-pit, .kv-fh ~ .kv-pit { padding-left: 24px; }
+.kv-hint { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); color: var(--muted); font-size: 11px; background: color-mix(in srgb, var(--surface) 90%, transparent); padding: 3px 12px; border-radius: 99px; pointer-events: none; white-space: nowrap; max-width: 95%; overflow: hidden; text-overflow: ellipsis; }

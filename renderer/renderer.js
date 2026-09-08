@@ -1921,7 +1921,7 @@ window.addEventListener('keydown', (e) => {
   if(dov && !dov.hidden && diffRevertCb){ const fn=diffRevertCb; diffRevertCb=null; fn(); return; }
   const sov=document.getElementById('settingsOverlay');
   if(sov && !sov.hidden){ sov.hidden=true; sov.innerHTML=''; return; }
-  if(mainView==='graph' || mainView==='table'){ setMainView('note'); return; }
+  if(mainView==='graph' || mainView==='canvas' || mainView==='table'){ setMainView('note'); return; }
 });
 
 // ---------- Main-area views (note / graph / table) + force-directed graph ----------
@@ -1981,6 +1981,7 @@ function setMainView(v){
   if(mainView==='graph' && v!=='graph') closeGraph();
   mainView=v;
   left.classList.toggle('view-graph', v==='graph');
+  left.classList.toggle('view-canvas', v==='canvas');
   left.classList.toggle('view-table', v==='table');
   left.classList.toggle('view-dash', v==='dash');
   left.classList.toggle('view-pdf', v==='pdf');
@@ -1990,6 +1991,7 @@ function setMainView(v){
   if (v!=='note') left.classList.remove('rules-mode');
   document.querySelectorAll('.sb-views .sbv').forEach((b) => b.classList.toggle('active', b.dataset.view === v));
   if(v==='graph') renderGraph();
+  else if(v==='canvas' && typeof renderCanvas === 'function') renderCanvas();
   else if(v==='table') renderTable();
   else if(v==='dash') renderDash();
   else if(v==='trash') renderTrashView();
@@ -1997,7 +1999,7 @@ function setMainView(v){
   // Remember the last-open PAGE so a reload restores it (note/pdf/crate are saved by
   // openNote/openPdf/openCrate; here we cover the standalone views).
   try {
-    if (v==='graph' || v==='table' || v==='dash' || v==='trash') vsSet('lastOpen', { type:'view', view:v });
+    if (v==='graph' || v==='canvas' || v==='table' || v==='dash' || v==='trash') vsSet('lastOpen', { type:'view', view:v });
   } catch (_) {}
 }
 document.querySelectorAll('.sb-views .sbv').forEach((b) => { b.onclick = () => setMainView(b.dataset.view); });
@@ -3781,6 +3783,8 @@ function renderSidebar(){
   if (!b.collapsed) renderSbDashList(b.body);
   const g = sbGroup('graph', 'graph', t('กราฟ'), { leaf: true, leafView: 'graph', onLeafClick: () => setMainView('graph') });
   host.appendChild(g.group);
+  const kv = sbGroup('canvas', 'graph', t('แคนวาส'), { leaf: true, leafView: 'canvas', onLeafClick: () => setMainView('canvas') });
+  host.appendChild(kv.group);
 }
 
 /* ================= Trash view (ถังขยะ): list + restore + delete-forever ================= */
@@ -4192,7 +4196,7 @@ function _lightboxFrom(target){
       if (node) openLightbox(node);
       btn.hidden = true;
     });
-    ['editorWrap', 'chatMessages'].forEach((id) => {   // editorWrap = editor + diff review
+    ['editorWrap', 'chatMessages', 'canvasView'].forEach((id) => {   // editorWrap = editor + diff review; canvasView = Canvas cards
       const host = document.getElementById(id); if (!host) return;
       host.addEventListener('mouseover', (e) => {
         const el = _targetOf(e.target);

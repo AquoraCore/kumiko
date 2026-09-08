@@ -166,7 +166,7 @@ describe('fullscreen lightbox for images + diagrams', () => {
   const css = read('renderer/styles.css');
   it('opens via hover ⛶ button or ⌘/Ctrl+click — NEVER plain/double click (click = edit)', () => {
     expect(r).toContain('function openLightbox');
-    expect(r).toMatch(/\['editorWrap', 'chatMessages'\]\.forEach/);   // review images get ⛶ too
+    expect(r).toMatch(/\['editorWrap', 'chatMessages', 'canvasView'\]\.forEach/);   // review images + Canvas cards get ⛶ too
     expect(r).toContain("btn.id = 'kzZoomBtn'");
     expect(r).toMatch(/if \(!\(e\.metaKey \|\| e\.ctrlKey\)\) return;/);
     expect(r).not.toMatch(/addEventListener\('dblclick'[\s\S]{0,120}openLightbox/);
