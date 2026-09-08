@@ -55,6 +55,15 @@ describe('mdToHtml / _mdInline (edge)', () => {
     expect(mdToHtml('')).toBe('');
   });
 
+  it('underscored filenames in image urls never get <em> injected (canvas/review 404, 2026-09-08)', () => {
+    // "chapter13_69_Accounts_Payable-…" contains _…_ pairs; the emphasis pass used to rewrite
+    // the src attribute itself. The <img> tag is parked in a placeholder through formatting.
+    const h = mdToHtml('ดู ![สไลด์](assets/chapter13_69_Accounts_Payable-838596-p2.jpg) และ _เอียง_');
+    expect(h).toContain('src="assets/chapter13_69_Accounts_Payable-838596-p2.jpg"');
+    expect(h).not.toMatch(/src="[^"]*<em>/);
+    expect(h).toContain('<em>เอียง</em>');   // emphasis elsewhere still works
+  });
+
   it('returns "" for null input', () => {
     expect(mdToHtml(null)).toBe('');
   });

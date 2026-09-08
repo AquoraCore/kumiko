@@ -17,7 +17,14 @@
     s = s.replace(/\\(&lt;|&gt;|&amp;|&quot;|[\\`*_{}\[\]()#+\-.!~|=:;,\/?@^$%'])/g, function (_, c) {   // full CommonMark escapable set — '\=' at line start (setext guard) used to survive as a visible backslash
       _escd.push(c); return '' + (_escd.length - 1) + '';
     });
-    s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, '<img class="md-img" src="$2" alt="$1">');   // images render as images, not stray text
+    // images render as images, not stray text — and the WHOLE tag is parked in a placeholder:
+    // filenames like "chapter13_69_Accounts_Payable-…" contain _…_ pairs, and the emphasis
+    // pass below used to inject <em> INSIDE the src attribute (canvas/review images 404'd)
+    var _prot = [];
+    s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, function (_, alt, url) {
+      _prot.push('<img class="md-img" src="' + url + '" alt="' + alt + '">');
+      return '' + (_prot.length - 1) + '';
+    });
 
     s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
     s = s.replace(/\{c:([a-z]+)\}([\s\S]*?)\{\/c\}/g, (m,name,inner)=> '<span class="tcolor tcolor-'+name+'">'+inner+'</span>');   // inline text colour
@@ -26,6 +33,7 @@
     s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
     s = s.replace(/(^|[^_])_([^_\n]+)_/g, '$1<em>$2</em>');
+    s = s.replace(/\uE002(\d+)\uE003/g, function (_, i) { return _prot[+i]; });   // restore parked <img> tags first — their urls may hold escd tokens
     s = s.replace(/(\d+)/g, function (_, i) { return _escd[+i]; });   // restore escaped chars
     return s;
   }
