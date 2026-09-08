@@ -267,6 +267,8 @@ const I18N_EN = {
   'แคนวาส': 'Canvas',
   'เปิดแคนวาส': 'Open canvas',
   'จัดเรียง': 'Arrange',
+  'ศูนย์กลาง': 'Hub',
+  'ภาพรวมอยู่กลาง รายละเอียดกระจายรอบ (การ์ดที่มีเส้นมากสุดเป็นศูนย์กลาง)': 'Overview in the middle, details around it (the most-wired card becomes the hub)',
   'จัดตำแหน่งการ์ดใหม่ตามขนาดจริง ไม่ให้ซ้อนกัน': 'Re-place cards from real sizes so nothing overlaps',
   'ดูบอร์ดแคนวาส': 'Inspect canvas board',
   'จัดแคนวาส': 'Arrange canvas',

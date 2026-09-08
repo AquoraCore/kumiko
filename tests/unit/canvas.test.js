@@ -294,7 +294,20 @@ describe('auto-arrange (2026-09-09: tall cards overlapped the fixed-stride guess
     expect(c).toMatch(/n \? n\.offsetHeight : 220/);                      // REAL heights, not a stride guess
     expect(c).toMatch(/others\.map\(\(c\) => c\.y \+ hOf\(c\)\)/);        // id-list mode stacks below existing content
     expect(c).toContain("getElementById('kvArr').onclick = () => kvArrangeSettled(null)");
-    expect(c).toMatch(/sig !== prev && tries\+\+ < 7/);   // re-runs until heights settle (late mermaid growth)
+    expect(c).toMatch(/sig !== prev && tries\+\+ < 12/);   // re-runs until heights settle (late mermaid growth)
     expect(c).toMatch(/r\.addedIds \|\| \[\]\)\.length[\s\S]{0,200}kvArrangeSettled\(r\.addedIds\)/);
+  });
+});
+
+describe('hub layout (2026-09-09: overview card centred, details flank it)', () => {
+  it('renderer: kvHubArrange picks the most-wired card as hub, balances left/right by height', () => {
+    const c = read('renderer/canvas.js');
+    expect(c).toContain('function kvHubArrange()');
+    expect(c).toMatch(/\(deg\[b\.id\] \|\| 0\) - \(deg\[a\.id\] \|\| 0\)\) \|\| \(b\.w - a\.w\)/);   // degree, tie-break width
+    expect(c).toMatch(/leftH <= rightH/);                                                            // height-balanced columns
+    expect(c).toMatch(/linkedToHub\(b\) - linkedToHub\(a\)/);                                        // hub-wired cards sit nearest
+    expect(c).toContain("getElementById('kvHub').onclick = () => kvArrangeSettled(null, true)");
+    expect(c).toMatch(/hub \? kvHubArrange\(\) : kvAutoArrange\(ids\)/);                             // settle loop covers both modes
+    expect(c).toMatch(/!host \|\| !host\.offsetParent/);   // hidden view measures 0 — wait, don't arrange garbage
   });
 });

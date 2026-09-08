@@ -81,6 +81,7 @@ function kvBuild(host) {
     '<button id="kvAddN" class="ghost sm">＋ ' + t('เพิ่มโน้ต') + '</button>' +
     '<button id="kvAddS" class="ghost sm">＋ ' + t('สติกกี้') + '</button>' +
     '<button id="kvArr" class="ghost sm" title="' + t('จัดตำแหน่งการ์ดใหม่ตามขนาดจริง ไม่ให้ซ้อนกัน') + '">⊞ ' + t('จัดเรียง') + '</button>' +
+    '<button id="kvHub" class="ghost sm" title="' + t('ภาพรวมอยู่กลาง รายละเอียดกระจายรอบ (การ์ดที่มีเส้นมากสุดเป็นศูนย์กลาง)') + '">☉ ' + t('ศูนย์กลาง') + '</button>' +
     '<button id="kvRz" class="ghost sm">' + t('รีเซ็ตซูม') + '</button>' +
     '</div>' +
     '<div class="kv-world" id="kvWorld">' +
@@ -115,6 +116,7 @@ function kvBuild(host) {
 
   document.getElementById('kvRz').onclick = () => { const st = kvState(); st.view = { tx: 40, ty: 30, scale: 1 }; kvApplyView(); kvSave(); };
   document.getElementById('kvArr').onclick = () => kvArrangeSettled(null);
+  document.getElementById('kvHub').onclick = () => kvArrangeSettled(null, true);
   document.getElementById('kvBoardSel').onchange = (e) => kvSwitchBoard(+e.target.value);
   document.getElementById('kvAddB').onclick = () => {
     const n = prompt(t('ชื่อบอร์ดใหม่'), t('บอร์ดใหม่')); if (!n) return;
@@ -417,17 +419,49 @@ function kvAutoArrange(ids) {
   kvDrawWires(); kvSave();
 }
 
+// Hub layout (user idea 2026-09-09): the OVERVIEW card sits in the middle and detail cards
+// flank it left/right in height-balanced columns — hub = the most-wired card (suggestions
+// count too), tie-broken by width, so the board's own link structure picks the centre.
+// Cards wired to the hub come first (nearest), stickies and strays fill after.
+function kvHubArrange() {
+  const st = kvState(), GAP = 70, VGAP = 40;
+  if (st.cards.length < 3) { kvAutoArrange(null); return; }
+  const hOf = (c) => { const n = kvCardEl(c.id); return n ? n.offsetHeight : 220; };
+  const edges = kvAllEdges(), deg = {};
+  edges.forEach((e) => { deg[e.a] = (deg[e.a] || 0) + 1; deg[e.b] = (deg[e.b] || 0) + 1; });
+  const notes = st.cards.filter((c) => c.type === 'note');
+  const hub = (notes.length ? notes : st.cards).slice()
+    .sort((a, b) => ((deg[b.id] || 0) - (deg[a.id] || 0)) || (b.w - a.w))[0];
+  const linkedToHub = (c) => edges.some((e) => (e.a === hub.id && e.b === c.id) || (e.b === hub.id && e.a === c.id));
+  const rest = st.cards.filter((c) => c.id !== hub.id)
+    .sort((a, b) => (linkedToHub(b) - linkedToHub(a)) || ((deg[b.id] || 0) - (deg[a.id] || 0)));
+  const maxSideW = Math.max(200, ...rest.map((c) => c.w));
+  hub.x = 60 + maxSideW + GAP; hub.y = 60;
+  let leftH = 0, rightH = 0;
+  for (const c of rest) {
+    const h = hOf(c);
+    if (leftH <= rightH) { c.x = hub.x - GAP - c.w; c.y = 60 + leftH; leftH += h + VGAP; }
+    else { c.x = hub.x + hub.w + GAP; c.y = 60 + rightH; rightH += h + VGAP; }
+  }
+  st.cards.forEach((c) => { const n = kvCardEl(c.id); if (n) { n.style.left = c.x + 'px'; n.style.top = c.y + 'px'; } });
+  kvDrawWires(); kvSave();
+}
+
 // Arrange keeps re-running until measured heights STOP CHANGING: a big mermaid card can take
 // seconds to render, and a single pass taken too early measures bare headers, packs tightly,
 // then the late diagrams grow into their neighbours (log 2026-09-09, Cheat Sheet board).
 let kvArrT = null;
-function kvArrangeSettled(ids) {
+function kvArrangeSettled(ids, hub) {
   clearTimeout(kvArrT);
   let tries = 0, prev = '';
   const pass = () => {
-    kvAutoArrange(ids);
+    // view hidden (boot restore raced the switch) -> nodes measure 0 and the layout collapses;
+    // wait instead of arranging garbage, and never let a 0-height pass count as "settled"
+    const host = document.getElementById('canvasView');
+    if (!host || !host.offsetParent) { if (tries++ < 12) kvArrT = setTimeout(pass, 700); return; }
+    hub ? kvHubArrange() : kvAutoArrange(ids);
     const sig = kvState().cards.map((c) => { const n = kvCardEl(c.id); return n ? n.offsetHeight : 0; }).join(',');
-    if (sig !== prev && tries++ < 7) { prev = sig; kvArrT = setTimeout(pass, 700); }
+    if (sig !== prev && tries++ < 12) { prev = sig; kvArrT = setTimeout(pass, 700); }
   };
   pass();
 }
