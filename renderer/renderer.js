@@ -1619,6 +1619,11 @@ function applyReplyToNote(replyText, opts){
   if (before.trim() === after.trim()) { if (!silent) alert(t('เนื้อหาเหมือนเดิม ไม่มีอะไรต้องแทนที่')); return; }
   openDiffReview(currentNote, before, after);   // user reviews (accept/edit/discard) then applies
 }
+// mdToHtml + assets src resolved INLINE — review hunks must not fire a doomed relative
+// fetch before the observer catches up (console error + broken-icon flash, 2026-09-08)
+function mdToHtmlAssets(md){
+  return mdToHtml(md).replace(/src="(assets\/[^"]+)"/g, (m, rel) => 'src="' + resolveAssetSrc(rel) + '"');
+}
 function openDiffReview(name, before, after){
   const segs = diffSegments(before, after);
   const hunkSegs = segs.filter((s) => s.type === 'hunk');
@@ -1631,7 +1636,7 @@ function openDiffReview(name, before, after){
   segs.forEach((seg) => {
     if (seg.type === 'same'){
       const rich = document.createElement('div'); rich.className = 'sg-rich';
-      rich.innerHTML = mdToHtml(seg.lines.join('\n'));
+      rich.innerHTML = mdToHtmlAssets(seg.lines.join('\n'));
       doc.appendChild(rich);
       return;
     }
@@ -1656,13 +1661,13 @@ function openDiffReview(name, before, after){
       if (seg.del.length){
         const del = document.createElement('div');
         del.className = 'sg-rich sg-del-block' + (state.accept ? ' struck' : '');
-        del.innerHTML = mdToHtml(seg.del.join('\n'));
+        del.innerHTML = mdToHtmlAssets(seg.del.join('\n'));
         flow.appendChild(del);
       }
       if (state.accept){
         const add = document.createElement('div');
         add.className = 'sg-rich sg-add-block';
-        add.innerHTML = mdToHtml(state.value);
+        add.innerHTML = mdToHtmlAssets(state.value);
         flow.appendChild(add);
       } else if (!seg.del.length){
         const ph = document.createElement('div'); ph.className = 'sg-rich sg-ph'; ph.textContent = t('(ทิ้งการเพิ่มนี้)');
@@ -3936,7 +3941,9 @@ function resolveAssetSrc(rel){
   return window.__vaultBase ? ('file://' + encodeURI(window.__vaultBase + '/' + rel)) : rel;
 }
 function _fixupEditorImgs(){
-  const host = document.getElementById('editorHost'); if (!host) return;
+  // editorWrap covers BOTH the live editor and the diff-review view (#suggestView) — review
+  // hunks with assets/ images used to resolve against the app bundle and break (2026-09-08)
+  const host = document.getElementById('editorWrap') || document.getElementById('editorHost'); if (!host) return;
   host.querySelectorAll('img').forEach((im) => {
     const src = im.getAttribute('src') || '';
     if (src.startsWith('assets/')) { im.dataset.kzRel = src; im.src = resolveAssetSrc(src); }
@@ -3951,7 +3958,7 @@ function _fixupEditorImgs(){
 (function initAssetImgs(){
   const boot = () => {
     _refreshVaultBase();
-    const host = document.getElementById('editorHost'); if (!host) return;
+    const host = document.getElementById('editorWrap') || document.getElementById('editorHost'); if (!host) return;
     let _ft = null;
     new MutationObserver(() => { clearTimeout(_ft); _ft = setTimeout(_fixupEditorImgs, 120); })
       .observe(host, { childList: true, subtree: true });
@@ -4185,7 +4192,7 @@ function _lightboxFrom(target){
       if (node) openLightbox(node);
       btn.hidden = true;
     });
-    ['editorHost', 'chatMessages'].forEach((id) => {
+    ['editorWrap', 'chatMessages'].forEach((id) => {   // editorWrap = editor + diff review
       const host = document.getElementById(id); if (!host) return;
       host.addEventListener('mouseover', (e) => {
         const el = _targetOf(e.target);

@@ -30,6 +30,12 @@ describe('note image assets (1)', () => {
     expect(main).toMatch(/asset:save[\s\S]{0,600}#\(\)\\\[\\\]\]\/g/);   // parens+brackets+spaces sanitized — ](…) breaks on ")" 
     expect(main).toMatch(/asset:read[\s\S]{0,200}startsWith\('assets\/'\)\) return null/);
   });
+  it('src fixup covers the DIFF REVIEW too (assets imgs resolved against the app bundle broke there)', () => {
+    expect(r).toMatch(/_fixupEditorImgs[\s\S]{0,400}getElementById\('editorWrap'\)/);
+    // review hunks resolve assets INLINE (no doomed relative fetch before the observer runs)
+    expect(r).toContain('function mdToHtmlAssets');
+    expect((r.match(/mdToHtmlAssets\(/g) || []).length).toBeGreaterThanOrEqual(4);
+  });
   it('DOM-only src fixup (markdown keeps portable rels) + web/desktop resolver split', () => {
     expect(r).toContain('function resolveAssetSrc');
     expect(r).toMatch(/KUMIKO_WEB\) return \(window\.api\.assetUrl/);
@@ -144,7 +150,7 @@ describe('fullscreen lightbox for images + diagrams', () => {
   const css = read('renderer/styles.css');
   it('opens via hover ⛶ button or ⌘/Ctrl+click — NEVER plain/double click (click = edit)', () => {
     expect(r).toContain('function openLightbox');
-    expect(r).toMatch(/\['editorHost', 'chatMessages'\]\.forEach/);
+    expect(r).toMatch(/\['editorWrap', 'chatMessages'\]\.forEach/);   // review images get ⛶ too
     expect(r).toContain("btn.id = 'kzZoomBtn'");
     expect(r).toMatch(/if \(!\(e\.metaKey \|\| e\.ctrlKey\)\) return;/);
     expect(r).not.toMatch(/addEventListener\('dblclick'[\s\S]{0,120}openLightbox/);
