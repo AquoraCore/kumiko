@@ -2483,3 +2483,13 @@ button.tg-chip { cursor: pointer; text-align: left; }
 /* ---- search → open: pulse the revealed sidebar row ---- */
 .note-item.reveal-flash, .pdf-item.reveal-flash { animation: reveal-pulse 1.2s ease; }
 @keyframes reveal-pulse { 0%, 55% { background: var(--accent-bg); box-shadow: inset 2px 0 0 var(--accent); } }
+
+/* ---- fullscreen lightbox for images + mermaid diagrams ---- */
+#kzLightbox { position: fixed; inset: 0; z-index: 12000; background: rgba(24, 22, 20, .88); display: grid; place-items: center; overflow: hidden; }
+#kzLightbox .kz-lb-stage { cursor: grab; transition: transform .08s linear; max-width: 92vw; max-height: 92vh; display: grid; place-items: center; }
+#kzLightbox .kz-lb-stage:active { cursor: grabbing; }
+#kzLightbox .kz-lb-img { max-width: 92vw; max-height: 92vh; object-fit: contain; border-radius: 8px; box-shadow: 0 12px 60px rgba(0,0,0,.5); }
+#kzLightbox .kz-lb-svg { max-width: 92vw; max-height: 92vh; width: 88vw; height: auto; background: #fefdfb; border-radius: 8px; padding: 18px; box-shadow: 0 12px 60px rgba(0,0,0,.5); }
+#kzLightbox .kz-lb-x { position: absolute; top: 16px; right: 20px; width: 36px; height: 36px; border: none; border-radius: 50%; background: rgba(255,255,255,.14); color: #fff; font-size: 15px; cursor: pointer; }
+#kzLightbox .kz-lb-x:hover { background: rgba(255,255,255,.28); }
+#kzLightbox .kz-lb-hint { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); color: rgba(255,255,255,.55); font: 12px var(--font); }

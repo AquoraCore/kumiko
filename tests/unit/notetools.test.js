@@ -137,3 +137,23 @@ describe('chat ref click resolution', () => {
     expect(chat2).toContain('หาโน้ต/เอกสารของลิงก์นี้ไม่เจอ');
   });
 });
+
+// 2026-09-08: double-click any image / mermaid diagram → fullscreen lightbox with zoom + pan.
+describe('fullscreen lightbox for images + diagrams', () => {
+  const r = read('renderer/renderer.js');
+  const css = read('renderer/styles.css');
+  it('opens from editor AND chat, images AND mermaid svgs (cloned, size-freed)', () => {
+    expect(r).toContain('function openLightbox');
+    expect(r).toMatch(/\['editorHost', 'chatMessages'\]\.forEach/);
+    expect(r).toMatch(/closest\('\.md-mermaid-render, \.milkdown \.mermaid, pre\.mermaid'\)/);
+    expect(r).toMatch(/c\.removeAttribute\('width'\); c\.removeAttribute\('height'\)/);
+    expect(r).toContain("c.setAttribute('preserveAspectRatio', 'xMidYMid meet')");
+  });
+  it('zoom clamps 0.2–8, drag pans, dblclick resets, Esc/✕/backdrop close', () => {
+    expect(r).toMatch(/Math\.min\(8, Math\.max\(0\.2, scale \* f\)\)/);
+    expect(r).toMatch(/scale = 1; tx = 0; ty = 0; apply\(\)/);
+    expect(r).toMatch(/e\.key === 'Escape'[\s\S]{0,60}close\(\)/);
+    expect(r).toMatch(/if \(e\.target === ov\) close\(\)/);
+    expect(css).toMatch(/#kzLightbox \{[^}]*z-index: 12000/);
+  });
+});

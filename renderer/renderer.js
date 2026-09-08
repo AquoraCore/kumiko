@@ -4093,3 +4093,70 @@ async function sendBubbleToNote(m, rel){
       { sticky: true, action: { label: t('เปิดรีวิว'), fn: () => openNote(rel) } });
   }
 }
+
+// ============================================================
+// LIGHTBOX (2026-09-08): double-click any image or mermaid diagram → fullscreen viewer with
+// scroll-zoom + drag-pan. Esc / ✕ / backdrop click closes. Works on editor images (clipped
+// strips open the FULL picture — same src), chat images, and rendered mermaid SVGs.
+// ============================================================
+function openLightbox(node){
+  const old = document.getElementById('kzLightbox'); if (old) old.remove();
+  const ov = document.createElement('div'); ov.id = 'kzLightbox';
+  const stage = document.createElement('div'); stage.className = 'kz-lb-stage';
+  stage.appendChild(node);
+  const x = document.createElement('button'); x.className = 'kz-lb-x'; x.textContent = '✕';
+  const hint = document.createElement('div'); hint.className = 'kz-lb-hint';
+  hint.textContent = t('เลื่อนเมาส์ = ซูม · ลาก = เลื่อน · ดับเบิลคลิก = รีเซ็ต · Esc ปิด');
+  ov.appendChild(stage); ov.appendChild(x); ov.appendChild(hint);
+  let scale = 1, tx = 0, ty = 0;
+  const apply = () => { stage.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')'; };
+  const close = () => { ov.remove(); document.removeEventListener('keydown', onKey, true); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } };
+  x.onclick = close;
+  ov.onmousedown = (e) => { if (e.target === ov) close(); };
+  ov.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const f = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+    scale = Math.min(8, Math.max(0.2, scale * f));
+    apply();
+  }, { passive: false });
+  stage.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const sx = e.clientX - tx, sy = e.clientY - ty;
+    const mm = (ev) => { tx = ev.clientX - sx; ty = ev.clientY - sy; apply(); };
+    const mu = () => { window.removeEventListener('mousemove', mm, true); window.removeEventListener('mouseup', mu, true); };
+    window.addEventListener('mousemove', mm, true);
+    window.addEventListener('mouseup', mu, true);
+  });
+  stage.addEventListener('dblclick', (e) => { e.stopPropagation(); scale = 1; tx = 0; ty = 0; apply(); });
+  document.addEventListener('keydown', onKey, true);
+  document.body.appendChild(ov);
+}
+function _lightboxFrom(target){
+  const im = target.closest && target.closest('img');
+  if (im && im.src) { const c = new Image(); c.src = im.src; c.className = 'kz-lb-img'; return c; }
+  const mm = target.closest && target.closest('.md-mermaid-render, .milkdown .mermaid, pre.mermaid');
+  const svg = mm && mm.querySelector('svg');
+  if (svg) {
+    const c = svg.cloneNode(true); c.classList.add('kz-lb-svg');
+    // mermaid pins its own width/height (attrs AND inline style) — clear both and let the
+    // viewBox scale the whole diagram into the stage box
+    c.removeAttribute('width'); c.removeAttribute('height');
+    c.style.width = '88vw'; c.style.height = '86vh'; c.style.maxWidth = 'none';
+    c.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    return c;
+  }
+  return null;
+}
+(function wireLightbox(){
+  const boot = () => {
+    ['editorHost', 'chatMessages'].forEach((id) => {
+      const host = document.getElementById(id); if (!host) return;
+      host.addEventListener('dblclick', (e) => {
+        const node = _lightboxFrom(e.target);
+        if (node) { e.preventDefault(); e.stopPropagation(); openLightbox(node); }
+      }, true);
+    });
+  };
+  if (document.readyState !== 'loading') boot(); else document.addEventListener('DOMContentLoaded', boot);
+})();
