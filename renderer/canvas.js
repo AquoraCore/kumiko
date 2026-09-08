@@ -390,6 +390,50 @@ function kvStartWire(c, si) {
   addEventListener('mousemove', mm, true); addEventListener('mouseup', mu, true);
 }
 
+// ---------- AI verbs (===CANVAS-*===) ----------
+// Executes the ordered op list from an AI reply: resolve note names with the same resolver
+// the other verbs use, warm the section cache so the pure applier can validate seg names,
+// then apply + save + repaint. A sticky toast summarizes what changed (with a jump button).
+async function kvApplyAiOps(ops) {
+  if (!KV) await kvLoad();
+  const resolveNote = (nm) => { try { return (typeof _resolveNoteRel === 'function' && _resolveNoteRel(nm)) || null; } catch (_) { return null; } };
+  for (const o of ops) {
+    for (const nm of [o.name, o.from, o.to]) {
+      const rel = nm && resolveNote(nm);
+      if (rel) { try { await kvSectionsOf(rel); } catch (_) {} }
+    }
+  }
+  const r = window.CoreCanvas.applyVerbOps(KV, ops, { resolveNote, sectionsOf: kvSectionsSync });
+  kvSave();
+  if (typeof mainView !== 'undefined' && mainView === 'canvas') { try { await kvPaintBoard(); } catch (_) {} }
+  const msg = '🖼 ' + t('แคนวาส') + ': ' + (r.applied.length ? r.applied.join(' · ') : t('ไม่มีอะไรเปลี่ยน')) +
+    (r.errors.length ? ' — ⚠ ' + r.errors.join(' · ') : '');
+  if (typeof pdfToast === 'function') {
+    pdfToast(msg.slice(0, 300), { sticky: true, action: { label: t('เปิดแคนวาส'), fn: () => setMainView('canvas') } });
+  }
+  return r;
+}
+
+// ===CANVAS-LIST=== -> the board state fed back to the AI (boards, cards with their CHOSEN
+// segs, edges, plus each note's full section-name list so the AI can pick segs correctly).
+async function kvCanvasToolResult() {
+  if (!KV) await kvLoad();
+  const st = kvState(), lines = [];
+  lines.push('บอร์ดทั้งหมด: ' + KV.boards.map((b, i) => (i === KV.cur ? '▶ ' : '') + b.name).join(' · '));
+  lines.push('บอร์ดปัจจุบัน "' + st.name + '" — ' + st.cards.length + ' การ์ด, ' + st.edges.length + ' เส้น');
+  for (const c of st.cards) {
+    if (c.type === 'sticky') { lines.push('- สติกกี้: ' + String(c.body || '').slice(0, 80)); continue; }
+    const secs = await kvSectionsOf(c.rel);
+    lines.push('- การ์ด "' + window.CoreCanvas.titleOfRel(c.rel) + '" ท่อนที่แสดง: ' + (c.segs.join(' | ') || '(ไม่มี)') +
+      ' | หัวข้อทั้งหมดในโน้ต: ' + secs.map((s) => s.name).join(' | ').slice(0, 500));
+  }
+  for (const e of st.edges) {
+    const ca = st.cards.find((x) => x.id === e.a), cb = st.cards.find((x) => x.id === e.b);
+    if (ca && cb) lines.push('- เส้น: ' + window.CoreCanvas.titleOfRel(ca.rel || 'สติกกี้') + ' → ' + window.CoreCanvas.titleOfRel(cb.rel || 'สติกกี้'));
+  }
+  return '[สถานะแคนวาส]\n' + lines.join('\n').slice(0, 4000);
+}
+
 // ---------- note picker: drill-down by folder like the sidebar; typing flattens to search ----------
 async function kvRenderPicker() {
   const plist = document.getElementById('kvPlist'), q = document.getElementById('kvPq').value.trim().toLowerCase();

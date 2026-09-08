@@ -110,6 +110,91 @@ describe('CoreCanvas.normState / normBoard', () => {
   });
 });
 
+describe('AI canvas verbs — extractActions parsing', () => {
+  const CM = require('../../core/markdown.js');
+  it('parses the whole verb family, ordered, and strips them from chat', () => {
+    const ac = CM.extractActions(
+      'จัดให้ครับ\n' +
+      '===CANVAS-BOARD name=สรุป BSS===\n' +
+      '===CANVAS-ADD name=B AR CR segs=หัวข้อ A | หัวข้อ B w=640===\n' +
+      '===CANVAS-ADD name=OES Process===\n' +
+      '===CANVAS-WIRE from=B AR CR fromseg=หัวข้อ A to=OES Process===\n' +
+      '===CANVAS-UNWIRE from=B AR CR to=OES Process===\n' +
+      '===CANVAS-REMOVE name=OES Process seg=หัวข้อแรก===\n' +
+      '===CANVAS-STICKY text=ออกสอบชัวร์===\nเสร็จแล้ว');
+    expect(ac.canvasOps.map((o) => o.op)).toEqual(['board', 'add', 'add', 'wire', 'unwire', 'remove', 'sticky']);
+    expect(ac.canvasOps[1]).toEqual({ op: 'add', name: 'B AR CR', segs: ['หัวข้อ A', 'หัวข้อ B'], w: 640 });
+    expect(ac.canvasOps[2].segs).toEqual([]);
+    expect(ac.canvasOps[3]).toEqual({ op: 'wire', from: 'B AR CR', fromSeg: 'หัวข้อ A', to: 'OES Process', toSeg: '' });
+    expect(ac.canvasWrites).toBe(7);
+    expect(ac.any).toBe(true);
+    expect(ac.chat).toBe('จัดให้ครับ\n\nเสร็จแล้ว');
+  });
+  it('CANVAS-LIST is an ask verb (needsContinue), and edge: malformed lines are ignored', () => {
+    const ac = CM.extractActions('===CANVAS-LIST===\n===CANVAS-ADD segs=x===\n===CANVAS-WIRE from=a===');
+    expect(ac.canvasList).toBe(true);
+    expect(ac.needsContinue).toBe(true);
+    expect(ac.canvasOps).toEqual([]);   // both write lines malformed -> dropped
+  });
+});
+
+describe('CoreCanvas.applyVerbOps', () => {
+  const mkCtx = () => ({
+    resolveNote: (nm) => ({ 'B AR CR': 'A/B AR CR.md', 'OES Process': 'A/OES Process.md' }[nm] || null),
+    sectionsOf: (rel) => rel === 'A/B AR CR.md'
+      ? [{ name: 'ภาพใหญ่', text: 'x' }, { name: 'Lapping', text: 'y' }]
+      : [{ name: 'ขั้นตอน', text: 'z' }],
+  });
+  it('happy path: board -> add (named + default segs + w) -> wire by seg name -> sticky', () => {
+    const st = CC.normState(null);
+    const r = CC.applyVerbOps(st, [
+      { op: 'board', name: 'สรุป BSS' },
+      { op: 'add', name: 'B AR CR', segs: ['ภาพใหญ่', 'Lapping'], w: 640 },
+      { op: 'add', name: 'OES Process', segs: [], w: 0 },
+      { op: 'wire', from: 'B AR CR', fromSeg: 'Lapping', to: 'OES Process', toSeg: '' },
+      { op: 'sticky', text: 'จำ!' },
+    ], mkCtx());
+    expect(r.errors).toEqual([]);
+    expect(st.boards.length).toBe(2);            // default board + created one
+    const b = st.boards[st.cur];
+    expect(b.name).toBe('สรุป BSS');
+    expect(b.cards.length).toBe(3);
+    expect(b.cards[0].w).toBe(640);
+    expect(b.cards[1].segs).toEqual(['ขั้นตอน']);   // default = first section
+    expect(b.edges).toEqual([{ a: b.cards[0].id, aSeg: 1, b: b.cards[1].id, bSeg: null }]);
+  });
+  it('edge: unknown note, bad seg names, wire to card not on board -> errors not crashes', () => {
+    const st = CC.normState(null);
+    const r = CC.applyVerbOps(st, [
+      { op: 'add', name: 'ไม่มีจริง', segs: [] },
+      { op: 'add', name: 'B AR CR', segs: ['ผิดชื่อ'] },
+      { op: 'wire', from: 'B AR CR', fromSeg: '', to: 'OES Process', toSeg: '' },
+    ], mkCtx());
+    expect(r.errors.length).toBe(3);
+    const b = st.boards[st.cur];
+    expect(b.cards.length).toBe(1);
+    expect(b.cards[0].segs).toEqual(['ภาพใหญ่']);   // bad seg name -> falls back to first section
+    expect(b.edges).toEqual([]);
+  });
+  it('edge: re-add merges segs; remove seg remaps edge indexes; remove card drops its edges', () => {
+    const st = CC.normState(null), ctx = mkCtx();
+    CC.applyVerbOps(st, [
+      { op: 'add', name: 'B AR CR', segs: ['ภาพใหญ่'] },
+      { op: 'add', name: 'B AR CR', segs: ['Lapping'] },     // merge, not duplicate card
+      { op: 'add', name: 'OES Process', segs: [] },
+      { op: 'wire', from: 'B AR CR', fromSeg: 'Lapping', to: 'OES Process', toSeg: '' },
+    ], ctx);
+    let b = st.boards[st.cur];
+    expect(b.cards.length).toBe(2);
+    expect(b.cards[0].segs).toEqual(['ภาพใหญ่', 'Lapping']);
+    CC.applyVerbOps(st, [{ op: 'remove', name: 'B AR CR', seg: 'ภาพใหญ่' }], ctx);
+    expect(b.edges[0].aSeg).toBe(0);              // Lapping shifted 1 -> 0, edge follows
+    CC.applyVerbOps(st, [{ op: 'remove', name: 'OES Process', seg: '' }], ctx);
+    expect(b.cards.length).toBe(1);
+    expect(b.edges).toEqual([]);
+  });
+});
+
 describe('Canvas wiring (renderer + view plumbing)', () => {
   it('index.html: canvasView container + core/canvas.js + canvas.js loaded after renderer.js', () => {
     const html = read('renderer/index.html');
@@ -146,6 +231,17 @@ describe('Canvas wiring (renderer + view plumbing)', () => {
     expect(css).toMatch(/#left\.view-canvas #editorWrap[\s\S]{0,120}display: none !important/);
     expect(css).toMatch(/\.kv-media \{[^}]*max-height: 340px/);
     expect(css).toMatch(/\.kv-card\.kv-wide \.kv-media \{ max-height: none; \}/);
+  });
+  it('AI pipeline: verbs execute via runKumikoVerbs, CANVAS-LIST feeds buildToolResults, prompt documents them', () => {
+    const r = read('renderer/renderer.js');
+    expect(r).toMatch(/acts\.canvasOps \|\| \[\]\)\.length && typeof kvApplyAiOps === 'function'/);
+    expect(r).toMatch(/acts\.canvasList && typeof kvCanvasToolResult === 'function'/);
+    expect(r).toContain('===CANVAS-ADD name=ชื่อโน้ต segs=');
+    const c = read('renderer/canvas.js');
+    expect(c).toContain('async function kvApplyAiOps(');
+    expect(c).toContain("action: { label: t('เปิดแคนวาส'), fn: () => setMainView('canvas') }");
+    const ch = read('renderer/chat.js');
+    expect(ch).toContain("t('จัดแคนวาส')");
   });
   it('i18n: canvas strings have EN entries (sidebar leaf + hint)', () => {
     const i = read('renderer/i18n.js');

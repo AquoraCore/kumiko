@@ -265,6 +265,10 @@ const I18N_EN = {
   'เพิ่มโน้ต…': 'Add note…',
   // ---- Kumiko Canvas (แคนวาสสรุปงาน) ----
   'แคนวาส': 'Canvas',
+  'เปิดแคนวาส': 'Open canvas',
+  'ดูบอร์ดแคนวาส': 'Inspect canvas board',
+  'จัดแคนวาส': 'Arrange canvas',
+  'ไม่มีอะไรเปลี่ยน': 'Nothing changed',
   'เลือกบอร์ด': 'Choose board',
   'สร้างบอร์ดใหม่': 'Create new board',
   'ลบบอร์ดนี้': 'Delete this board',

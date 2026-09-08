@@ -247,8 +247,9 @@
   function extractActions(text) {
     var s = String(text == null ? '' : text);
     var out = { reads: [], searches: [], renames: [], deletes: [], targets: [],
-      listTags: false, notesByTag: [], setTags: [], addTags: [], removeTags: [], renameTags: [] };
-    var chat = s.replace(/^[ \t]*===(READ-NOTE|SEARCH|RENAME-NOTE|DELETE-NOTE|SET-CAPTURE-TARGET|LIST-TAGS|NOTES-BY-TAG|SET-TAGS|ADD-TAGS|REMOVE-TAGS|RENAME-TAG)(?: (.+?))?===[ \t]*$/gm, function (_, verb, arg) {
+      listTags: false, notesByTag: [], setTags: [], addTags: [], removeTags: [], renameTags: [],
+      canvasList: false, canvasOps: [] };
+    var chat = s.replace(/^[ \t]*===(READ-NOTE|SEARCH|RENAME-NOTE|DELETE-NOTE|SET-CAPTURE-TARGET|LIST-TAGS|NOTES-BY-TAG|SET-TAGS|ADD-TAGS|REMOVE-TAGS|RENAME-TAG|CANVAS-LIST|CANVAS-BOARD|CANVAS-ADD|CANVAS-REMOVE|CANVAS-WIRE|CANVAS-UNWIRE|CANVAS-STICKY)(?: (.+?))?===[ \t]*$/gm, function (_, verb, arg) {
       arg = (arg || '').trim();
       var m;
       if (verb === 'READ-NOTE') { m = arg.match(/^name=(.+)$/); if (m) out.reads.push(m[1].trim()); }
@@ -264,6 +265,23 @@
         if (m) (verb === 'SET-TAGS' ? out.setTags : verb === 'ADD-TAGS' ? out.addTags : out.removeTags).push({ name: m[1].trim(), tags: m[2].trim() });
       }
       else if (verb === 'RENAME-TAG') { m = arg.match(/^from=(.+?)(?: to=(.*))?$/); if (m) out.renameTags.push({ from: m[1].trim(), to: (m[2] || '').trim() }); }
+      // ---- Canvas verbs (ask: CANVAS-LIST · write: BOARD/ADD/REMOVE/WIRE/UNWIRE/STICKY) ----
+      // Writes stay ONE ordered list — CANVAS-BOARD selects the board the following ops land on.
+      else if (verb === 'CANVAS-LIST') { out.canvasList = true; }
+      else if (verb === 'CANVAS-BOARD') { m = arg.match(/^name=(.+)$/); if (m) out.canvasOps.push({ op: 'board', name: m[1].trim() }); }
+      else if (verb === 'CANVAS-ADD') {
+        m = arg.match(/^name=(.+?)(?: segs=(.+?))?(?: w=(\d+))?$/);
+        if (m) out.canvasOps.push({ op: 'add', name: m[1].trim(),
+          segs: m[2] ? m[2].split('|').map(function (x) { return x.trim(); }).filter(Boolean) : [],
+          w: m[3] ? parseInt(m[3], 10) : 0 });
+      }
+      else if (verb === 'CANVAS-REMOVE') { m = arg.match(/^name=(.+?)(?: seg=(.+))?$/); if (m) out.canvasOps.push({ op: 'remove', name: m[1].trim(), seg: m[2] ? m[2].trim() : '' }); }
+      else if (verb === 'CANVAS-WIRE') {
+        m = arg.match(/^from=(.+?)(?: fromseg=(.+?))? to=(.+?)(?: toseg=(.+))?$/);
+        if (m) out.canvasOps.push({ op: 'wire', from: m[1].trim(), fromSeg: m[2] ? m[2].trim() : '', to: m[3].trim(), toSeg: m[4] ? m[4].trim() : '' });
+      }
+      else if (verb === 'CANVAS-UNWIRE') { m = arg.match(/^from=(.+?) to=(.+)$/); if (m) out.canvasOps.push({ op: 'unwire', from: m[1].trim(), to: m[2].trim() }); }
+      else if (verb === 'CANVAS-STICKY') { m = arg.match(/^text=(.+)$/); if (m) out.canvasOps.push({ op: 'sticky', text: m[1].trim() }); }
       return '';
     }).replace(/\n{3,}/g, '\n\n').trim();
     out.reads = out.reads.slice(0, 3);
@@ -274,10 +292,12 @@
     out.notesByTag = out.notesByTag.slice(0, 3);
     out.setTags = out.setTags.slice(0, 5); out.addTags = out.addTags.slice(0, 5); out.removeTags = out.removeTags.slice(0, 5);
     out.renameTags = out.renameTags.slice(0, 2);
+    out.canvasOps = out.canvasOps.slice(0, 20);
     out.chat = chat;
-    out.needsContinue = !!(out.reads.length || out.searches.length || out.listTags || out.notesByTag.length);
+    out.needsContinue = !!(out.reads.length || out.searches.length || out.listTags || out.notesByTag.length || out.canvasList);
     out.tagWrites = out.setTags.length + out.addTags.length + out.removeTags.length + out.renameTags.length;
-    out.any = out.needsContinue || !!(out.renames.length || out.deletes.length || out.targets.length || out.tagWrites);
+    out.canvasWrites = out.canvasOps.length;
+    out.any = out.needsContinue || !!(out.renames.length || out.deletes.length || out.targets.length || out.tagWrites || out.canvasWrites);
     return out;
   }
 

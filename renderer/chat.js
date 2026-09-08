@@ -63,6 +63,8 @@ function chatDisplayText(s, streaming){
       const tw = [].concat(ac.addTags || [], ac.setTags || [], ac.removeTags || []);
       if (tw.length) bits.push('🏷 ' + t('แก้แท็ก') + ': ' + tw.map((x) => x.name + (x.tags ? ' → ' + x.tags : '')).join(', '));
       if ((ac.renameTags || []).length) bits.push('🏷 ' + t('เปลี่ยนชื่อแท็ก') + ': ' + ac.renameTags.map((x) => '#' + x.from + (x.to ? ' → #' + x.to : ' (เอาออก)')).join(', '));
+      if (ac.canvasList) bits.push('🖼 ' + t('ดูบอร์ดแคนวาส'));
+      if ((ac.canvasOps || []).length) bits.push('🖼 ' + t('จัดแคนวาส') + ': ' + ac.canvasOps.length);
       createdLine += '\n\n*' + bits.join(' · ') + '*';
     }
   } catch (_) {}

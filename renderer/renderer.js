@@ -1082,6 +1082,11 @@ function kumikoToolsPrompt(){
     '===LIST-TAGS=== — ขอรายการแท็กทั้ง vault พร้อมจำนวน · ===NOTES-BY-TAG tags=a, b=== — ขอรายชื่อโน้ตที่ติดแท็กครบทุกตัว (ผลส่งกลับมาให้คุณตอบต่อ)\n' +
     '===ADD-TAGS name=ชื่อโน้ต tags=a, b/c=== · ===REMOVE-TAGS name=… tags=…=== · ===SET-TAGS name=… tags=…=== — ติด/ถอด/แทนที่แท็กของโน้ต (ทำทันที แท็กซ้อนชั้นใช้ / เช่น exam/midterm; ใช้ชื่อแท็กที่มีอยู่ก่อนสร้างใหม่)\n' +
     '===RENAME-TAG from=เก่า to=ใหม่=== — เปลี่ยนชื่อแท็กทั้ง vault รวมทั้ง #แท็กที่พิมพ์ในเนื้อหา (ระบบถามยืนยันผู้ใช้ก่อน เลิกทำได้)\n' +
+    '===CANVAS-LIST=== — ขอดูสถานะบอร์ดแคนวาส (การ์ด/ท่อน/เส้น + หัวข้อทั้งหมดของแต่ละโน้ต ผลส่งกลับมาให้คุณ)\n' +
+    '===CANVAS-BOARD name=ชื่อบอร์ด=== — เลือกหรือสร้างบอร์ด (คำสั่งแคนวาสบรรทัดถัด ๆ ไปลงบอร์ดนี้)\n' +
+    '===CANVAS-ADD name=ชื่อโน้ต segs=หัวข้อ A | หัวข้อ B w=640=== — วางโน้ตเป็นการ์ดโชว์ท่อนเต็มของหัวข้อที่เลือก (segs ต้องเป็นชื่อหัวข้อจริงในโน้ต — ใช้ CANVAS-LIST/READ-NOTE ดูก่อน; ไม่ใส่ segs=หัวข้อแรก; w กว้าง≥560 แสดง diagram เต็ม) · ===CANVAS-REMOVE name=… seg=…===\n' +
+    '===CANVAS-WIRE from=โน้ต fromseg=หัวข้อ to=โน้ต toseg=หัวข้อ=== — โยงเส้นถาวรระหว่างท่อน (fromseg/toseg ไม่บังคับ) · ===CANVAS-UNWIRE from=… to=…=== · ===CANVAS-STICKY text=โน้ตแปะสั้น ๆ===\n' +
+    'เส้นแนะนำจาก [[ลิงก์]] ในเนื้อหาเกิดเองบนแคนวาส — WIRE เฉพาะคู่ที่ไม่มีลิงก์ถึงกัน\n' +
     'ข้อห้าม: KUMIKO.md แก้ผ่านบล็อก KUMIKO-RULE และ KUMIKO-MEMORY.md แก้ผ่าน REMEMBER/FORGET เท่านั้น — ห้ามใช้ช่องทางแก้/สร้าง/ลบโน้ตกับสองไฟล์นี้\n' +
     (list ? 'โน้ตทั้งหมดใน vault: ' + list + '\n' : '') +
     _folderListLine() + ((typeof tagPromptLine === 'function') ? tagPromptLine() : '');
@@ -1310,6 +1315,7 @@ async function runKumikoVerbs(acts){
     try { await refreshList(currentNote); } catch (_) {}
   }
   if (acts.tagWrites && typeof runTagVerbs === 'function') { try { await runTagVerbs(acts); } catch (_) {} }
+  if ((acts.canvasOps || []).length && typeof kvApplyAiOps === 'function') { try { await kvApplyAiOps(acts.canvasOps); } catch (_) {} }
 }
 // READ/SEARCH results → the text block fed back to the AI in the continuation turn.
 async function buildToolResults(acts){
@@ -1357,6 +1363,7 @@ async function buildToolResults(acts){
     parts.push('[ผลค้นหา "' + q + '"]\n' + (ctx.trim() || '(ไม่พบผลลัพธ์)'));
   }
   if ((acts.listTags || (acts.notesByTag || []).length) && typeof buildTagToolResults === 'function') { try { parts.push(...(await buildTagToolResults(acts))); } catch (_) {} }
+  if (acts.canvasList && typeof kvCanvasToolResult === 'function') { try { parts.push(await kvCanvasToolResult()); } catch (_) {} }
   return parts.join('\n\n');
 }
 // The continuation prompt: tool results + the original question + full write capabilities,

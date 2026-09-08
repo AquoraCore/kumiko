@@ -145,10 +145,116 @@
     return { boards: boards, cur: cur };
   }
 
+  // ---- AI verb ops (===CANVAS-*=== lines, parsed by CoreMarkdown.extractActions) ----------
+  // Applies an ORDERED op list to the state in place (op 'board' redirects the ops after it).
+  // ctx = { resolveNote(nameOrTitle) -> rel|null, sectionsOf(rel) -> sections[] } — the caller
+  // resolves names and supplies content; this stays pure/deterministic for tests.
+  // Returns { applied: [thai strings], errors: [thai strings] }.
+  function applyVerbOps(state, ops, ctx) {
+    var applied = [], errors = [];
+    var board = state.boards[state.cur];
+    var findCard = function (rel) {
+      for (var i = 0; i < board.cards.length; i++) if (board.cards[i].rel === rel) return board.cards[i];
+      return null;
+    };
+    var segIdx = function (card, name) {
+      if (!name) return null;
+      var i = (card.segs || []).indexOf(name);
+      return i >= 0 ? i : -1;
+    };
+    // flow layout: place each new card after the previous one, wrapping by real widths so a
+    // wide (w=640) diagram card never sits under its neighbour
+    var nextPos = function () {
+      if (!board.cards.length) return { x: 60, y: 60 };
+      var last = board.cards[board.cards.length - 1];
+      var x = last.x + last.w + 40, y = last.y;
+      if (x > 1100) { x = 60; y += 360; }
+      return { x: x, y: y };
+    };
+    (ops || []).forEach(function (o) {
+      if (o.op === 'board') {
+        var i = state.boards.findIndex(function (b) { return b.name.trim().toLowerCase() === o.name.trim().toLowerCase(); });
+        if (i < 0) { state.boards.push(newBoard(o.name)); i = state.boards.length - 1; applied.push('สร้างบอร์ด "' + o.name + '"'); }
+        state.cur = i; board = state.boards[i];
+        applied.push('ใช้บอร์ด "' + board.name + '"');
+        return;
+      }
+      if (o.op === 'sticky') {
+        var p0 = nextPos();
+        board.cards.push({ id: board.seq++, type: 'sticky', body: o.text, x: p0.x, y: p0.y, w: 200 });
+        applied.push('แปะสติกกี้');
+        return;
+      }
+      if (o.op === 'add' || o.op === 'remove') {
+        var rel = ctx.resolveNote(o.name);
+        if (!rel) { errors.push('ไม่พบโน้ต "' + o.name + '"'); return; }
+        if (o.op === 'add') {
+          var secs = ctx.sectionsOf(rel) || [];
+          if (!secs.length) { errors.push('โน้ต "' + o.name + '" ไม่มีเนื้อหาให้วาง'); return; }
+          var want = [], bad = [];
+          (o.segs || []).forEach(function (s) { (sectionByName(secs, s) ? want : bad).push(s); });
+          bad.forEach(function (s) { errors.push('ไม่พบหัวข้อ "' + s + '" ในโน้ต "' + o.name + '"'); });
+          var card = findCard(rel);
+          if (!card) {
+            if (!want.length) want = [secs[0].name];
+            var p = nextPos();
+            card = { id: board.seq++, type: 'note', rel: rel, x: p.x, y: p.y,
+              w: Math.min(1400, Math.max(200, o.w || 264)), segs: want };
+            board.cards.push(card);
+            applied.push('วาง "' + titleOfRel(rel) + '" (' + want.length + ' ท่อน)');
+          } else {
+            var added = 0;
+            want.forEach(function (s) { if (card.segs.indexOf(s) < 0) { card.segs.push(s); added++; } });
+            if (o.w) card.w = Math.min(1400, Math.max(200, o.w));
+            applied.push('เพิ่ม ' + added + ' ท่อนใน "' + titleOfRel(rel) + '"');
+          }
+        } else {
+          var card2 = findCard(rel);
+          if (!card2) { errors.push('"' + o.name + '" ไม่ได้อยู่บนบอร์ด'); return; }
+          if (o.seg) {
+            var si = segIdx(card2, o.seg);
+            if (si == null || si < 0) { errors.push('ไม่พบท่อน "' + o.seg + '" บนการ์ด "' + o.name + '"'); return; }
+            card2.segs.splice(si, 1);
+            board.edges = board.edges.filter(function (e) { return !((e.a === card2.id && e.aSeg === si) || (e.b === card2.id && e.bSeg === si)); });
+            board.edges.forEach(function (e) {
+              if (e.a === card2.id && e.aSeg != null && e.aSeg > si) e.aSeg--;
+              if (e.b === card2.id && e.bSeg != null && e.bSeg > si) e.bSeg--;
+            });
+            applied.push('เอาท่อน "' + o.seg + '" ออกจาก "' + titleOfRel(rel) + '"');
+          } else {
+            board.cards = board.cards.filter(function (c) { return c.id !== card2.id; });
+            board.edges = board.edges.filter(function (e) { return e.a !== card2.id && e.b !== card2.id; });
+            applied.push('เอา "' + titleOfRel(rel) + '" ออกจากบอร์ด');
+          }
+        }
+        return;
+      }
+      if (o.op === 'wire' || o.op === 'unwire') {
+        var ra = ctx.resolveNote(o.from), rb = ctx.resolveNote(o.to);
+        var ca = ra && findCard(ra), cb = rb && findCard(rb);
+        if (!ca || !cb) { errors.push('โยงไม่ได้ — "' + (!ca ? o.from : o.to) + '" ไม่ได้อยู่บนบอร์ด'); return; }
+        if (o.op === 'unwire') {
+          var before = board.edges.length;
+          board.edges = board.edges.filter(function (e) { return !((e.a === ca.id && e.b === cb.id) || (e.a === cb.id && e.b === ca.id)); });
+          applied.push('ตัดเส้น "' + titleOfRel(ra) + '" ↔ "' + titleOfRel(rb) + '" (' + (before - board.edges.length) + ' เส้น)');
+          return;
+        }
+        var ai = segIdx(ca, o.fromSeg), bi = segIdx(cb, o.toSeg);
+        if (ai === -1) { errors.push('ไม่พบท่อน "' + o.fromSeg + '" บนการ์ด "' + o.from + '"'); return; }
+        if (bi === -1) { errors.push('ไม่พบท่อน "' + o.toSeg + '" บนการ์ด "' + o.to + '"'); return; }
+        var dup = board.edges.some(function (e) { return e.a === ca.id && e.b === cb.id && e.aSeg === ai && e.bSeg === bi; });
+        if (!dup) board.edges.push({ a: ca.id, aSeg: ai, b: cb.id, bSeg: bi });
+        applied.push('โยง "' + titleOfRel(ra) + '" → "' + titleOfRel(rb) + '"');
+        return;
+      }
+    });
+    return { applied: applied, errors: errors };
+  }
+
   return {
     INTRO: INTRO,
     parseSections: parseSections, sectionByName: sectionByName, sectionLinks: sectionLinks,
     titleOfRel: titleOfRel, covered: covered, suggestEdges: suggestEdges,
-    newBoard: newBoard, normBoard: normBoard, normState: normState,
+    newBoard: newBoard, normBoard: normBoard, normState: normState, applyVerbOps: applyVerbOps,
   };
 });
