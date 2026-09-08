@@ -157,10 +157,23 @@
       for (var i = 0; i < board.cards.length; i++) if (board.cards[i].rel === rel) return board.cards[i];
       return null;
     };
+    // AI-written names are often clipped ("2. หน่วยงานที่เกี่ยวข้อง" vs the real
+    // "…(6 หน่วย)") — accept a UNIQUE prefix, then a UNIQUE substring, before failing.
+    var pickName = function (names, want) {
+      if (names.indexOf(want) >= 0) return want;
+      var w = String(want).toLowerCase(), st = [], hs = [];
+      names.forEach(function (n) {
+        var l = n.toLowerCase();
+        if (l.indexOf(w) === 0) st.push(n); else if (l.indexOf(w) >= 0) hs.push(n);
+      });
+      if (st.length === 1) return st[0];
+      if (!st.length && hs.length === 1) return hs[0];
+      return null;
+    };
     var segIdx = function (card, name) {
       if (!name) return null;
-      var i = (card.segs || []).indexOf(name);
-      return i >= 0 ? i : -1;
+      var hit = pickName(card.segs || [], name);
+      return hit == null ? -1 : (card.segs || []).indexOf(hit);
     };
     // flow layout: place each new card after the previous one, wrapping by real widths so a
     // wide (w=640) diagram card never sits under its neighbour
@@ -191,8 +204,12 @@
         if (o.op === 'add') {
           var secs = ctx.sectionsOf(rel) || [];
           if (!secs.length) { errors.push('โน้ต "' + o.name + '" ไม่มีเนื้อหาให้วาง'); return; }
+          var names = secs.map(function (s) { return s.name; });
           var want = [], bad = [];
-          (o.segs || []).forEach(function (s) { (sectionByName(secs, s) ? want : bad).push(s); });
+          (o.segs || []).forEach(function (s) {
+            var hit = pickName(names, s);
+            if (hit && want.indexOf(hit) < 0) want.push(hit); else if (!hit) bad.push(s);
+          });
           bad.forEach(function (s) { errors.push('ไม่พบหัวข้อ "' + s + '" ในโน้ต "' + o.name + '"'); });
           var card = findCard(rel);
           if (!card) {

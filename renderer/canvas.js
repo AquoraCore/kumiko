@@ -394,9 +394,28 @@ function kvStartWire(c, si) {
 // Executes the ordered op list from an AI reply: resolve note names with the same resolver
 // the other verbs use, warm the section cache so the pure applier can validate seg names,
 // then apply + save + repaint. A sticky toast summarizes what changed (with a jump button).
+// AI-written note names come clipped ("AP-CD Process" for the full dashed title) — after the
+// exact resolver, accept a UNIQUE title prefix, then a UNIQUE substring (log 2026-09-08:
+// GLM's first real board lost 2 of 3 cards to short names).
+function kvResolveNoteLoose(nm) {
+  try {
+    const exact = (typeof _resolveNoteRel === 'function' && _resolveNoteRel(nm)) || null;
+    if (exact) return exact;
+    const key = String(nm || '').trim().replace(/\.md$/i, '').split('/').pop().toLowerCase();
+    if (!key) return null;
+    const map = window.__wlNoteRel || {}, st = [], hs = [];
+    for (const k of Object.keys(map)) {
+      if (k.startsWith(key)) st.push(map[k]); else if (k.includes(key)) hs.push(map[k]);
+    }
+    if (st.length === 1) return st[0];
+    if (!st.length && hs.length === 1) return hs[0];
+    return null;
+  } catch (_) { return null; }
+}
+
 async function kvApplyAiOps(ops) {
   if (!KV) await kvLoad();
-  const resolveNote = (nm) => { try { return (typeof _resolveNoteRel === 'function' && _resolveNoteRel(nm)) || null; } catch (_) { return null; } };
+  const resolveNote = kvResolveNoteLoose;
   for (const o of ops) {
     for (const nm of [o.name, o.from, o.to]) {
       const rel = nm && resolveNote(nm);

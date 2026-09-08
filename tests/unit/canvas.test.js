@@ -163,6 +163,32 @@ describe('CoreCanvas.applyVerbOps', () => {
     expect(b.cards[1].segs).toEqual(['ขั้นตอน']);   // default = first section
     expect(b.edges).toEqual([{ a: b.cards[0].id, aSeg: 1, b: b.cards[1].id, bSeg: null }]);
   });
+  it('AI-clipped names: unique section-name prefix/substring resolves (GLM board 2026-09-08)', () => {
+    const st = CC.normState(null);
+    const ctx = {
+      resolveNote: (nm) => nm === 'OES Process' ? 'A/OES Process.md' : null,
+      sectionsOf: () => [
+        { name: '1. ภาพรวมกระบวนการ', text: '' },
+        { name: '2. หน่วยงานที่เกี่ยวข้อง (6 หน่วย)', text: '' },
+        { name: '3. ลำดับการทำงาน (9 ขั้นตอน)', text: '' },
+      ],
+    };
+    const r = CC.applyVerbOps(st, [
+      { op: 'add', name: 'OES Process', segs: ['2. หน่วยงานที่เกี่ยวข้อง', 'ลำดับการทำงาน'] },
+    ], ctx);
+    expect(r.errors).toEqual([]);
+    expect(st.boards[0].cards[0].segs).toEqual(['2. หน่วยงานที่เกี่ยวข้อง (6 หน่วย)', '3. ลำดับการทำงาน (9 ขั้นตอน)']);
+  });
+  it('edge: ambiguous clipped seg name (matches 2 sections) errors instead of guessing', () => {
+    const st = CC.normState(null);
+    const ctx = {
+      resolveNote: () => 'A/x.md',
+      sectionsOf: () => [{ name: 'Level 1 DFD', text: '' }, { name: 'Level 1 DFD รายละเอียด', text: '' }],
+    };
+    const r = CC.applyVerbOps(st, [{ op: 'add', name: 'x', segs: ['Level 1'] }], ctx);
+    expect(r.errors.length).toBe(1);
+    expect(st.boards[0].cards[0].segs).toEqual(['Level 1 DFD']);   // fallback = first section (prefix hit is ambiguous)
+  });
   it('edge: unknown note, bad seg names, wire to card not on board -> errors not crashes', () => {
     const st = CC.normState(null);
     const r = CC.applyVerbOps(st, [
