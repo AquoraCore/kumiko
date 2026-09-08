@@ -275,3 +275,26 @@ describe('Canvas wiring (renderer + view plumbing)', () => {
     expect(i).toMatch(/'ลากหัวการ์ด = ย้าย[^']*': 'Drag header = move/);
   });
 });
+
+describe('auto-arrange (2026-09-09: tall cards overlapped the fixed-stride guess)', () => {
+  it('applyVerbOps reports addedIds so the renderer can re-place ONLY new cards later', () => {
+    const st = CC.normState(null);
+    const ctx = { resolveNote: () => 'A/x.md', sectionsOf: () => [{ name: 's', text: '' }] };
+    const r = CC.applyVerbOps(st, [
+      { op: 'add', name: 'x', segs: [] },
+      { op: 'sticky', text: 'y' },
+      { op: 'add', name: 'x', segs: [] },   // merge into existing card -> NOT re-added
+    ], ctx);
+    expect(r.addedIds.length).toBe(2);
+    expect(r.addedIds).toEqual(st.boards[st.cur].cards.map((c) => c.id));
+  });
+  it('renderer: shelf layout from measured heights + toolbar button + post-AI re-place', () => {
+    const c = read('renderer/canvas.js');
+    expect(c).toContain('function kvAutoArrange(ids)');
+    expect(c).toMatch(/n \? n\.offsetHeight : 220/);                      // REAL heights, not a stride guess
+    expect(c).toMatch(/others\.map\(\(c\) => c\.y \+ hOf\(c\)\)/);        // id-list mode stacks below existing content
+    expect(c).toContain("getElementById('kvArr').onclick = () => kvArrangeSettled(null)");
+    expect(c).toMatch(/sig !== prev && tries\+\+ < 7/);   // re-runs until heights settle (late mermaid growth)
+    expect(c).toMatch(/r\.addedIds \|\| \[\]\)\.length[\s\S]{0,200}kvArrangeSettled\(r\.addedIds\)/);
+  });
+});

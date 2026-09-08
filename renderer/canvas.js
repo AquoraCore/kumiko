@@ -80,6 +80,7 @@ function kvBuild(host) {
     '<span class="kv-cnt" id="kvCnt"></span>' +
     '<button id="kvAddN" class="ghost sm">＋ ' + t('เพิ่มโน้ต') + '</button>' +
     '<button id="kvAddS" class="ghost sm">＋ ' + t('สติกกี้') + '</button>' +
+    '<button id="kvArr" class="ghost sm" title="' + t('จัดตำแหน่งการ์ดใหม่ตามขนาดจริง ไม่ให้ซ้อนกัน') + '">⊞ ' + t('จัดเรียง') + '</button>' +
     '<button id="kvRz" class="ghost sm">' + t('รีเซ็ตซูม') + '</button>' +
     '</div>' +
     '<div class="kv-world" id="kvWorld">' +
@@ -113,6 +114,7 @@ function kvBuild(host) {
   }, { passive: false });
 
   document.getElementById('kvRz').onclick = () => { const st = kvState(); st.view = { tx: 40, ty: 30, scale: 1 }; kvApplyView(); kvSave(); };
+  document.getElementById('kvArr').onclick = () => kvArrangeSettled(null);
   document.getElementById('kvBoardSel').onchange = (e) => kvSwitchBoard(+e.target.value);
   document.getElementById('kvAddB').onclick = () => {
     const n = prompt(t('ชื่อบอร์ดใหม่'), t('บอร์ดใหม่')); if (!n) return;
@@ -390,6 +392,46 @@ function kvStartWire(c, si) {
   addEventListener('mousemove', mm, true); addEventListener('mouseup', mu, true);
 }
 
+// ---------- auto-arrange: shelf layout from MEASURED heights ----------
+// The op-time layout can only guess (content heights are unknown until render), so tall
+// cards could overlap. This packs cards row-by-row using the real node heights. ids=null
+// arranges the whole board; an id list re-places ONLY those cards below the existing
+// content (AI additions never disturb a hand-arranged board).
+function kvAutoArrange(ids) {
+  const st = kvState(), GAP = 36, MAXW = 1300;
+  const hOf = (c) => { const n = kvCardEl(c.id); return n ? n.offsetHeight : 220; };
+  let targets = st.cards, x = 40, y = 40, rowH = 0;
+  if (Array.isArray(ids)) {
+    targets = st.cards.filter((c) => ids.includes(c.id));
+    if (!targets.length) return;
+    const others = st.cards.filter((c) => !ids.includes(c.id));
+    y = others.length ? Math.max(...others.map((c) => c.y + hOf(c))) + GAP : 40;
+  }
+  for (const c of targets) {
+    if (x > 40 && x + c.w > MAXW) { x = 40; y += rowH + GAP; rowH = 0; }
+    c.x = x; c.y = y;
+    const n = kvCardEl(c.id);
+    if (n) { n.style.left = c.x + 'px'; n.style.top = c.y + 'px'; }
+    x += c.w + GAP; rowH = Math.max(rowH, hOf(c));
+  }
+  kvDrawWires(); kvSave();
+}
+
+// Arrange keeps re-running until measured heights STOP CHANGING: a big mermaid card can take
+// seconds to render, and a single pass taken too early measures bare headers, packs tightly,
+// then the late diagrams grow into their neighbours (log 2026-09-09, Cheat Sheet board).
+let kvArrT = null;
+function kvArrangeSettled(ids) {
+  clearTimeout(kvArrT);
+  let tries = 0, prev = '';
+  const pass = () => {
+    kvAutoArrange(ids);
+    const sig = kvState().cards.map((c) => { const n = kvCardEl(c.id); return n ? n.offsetHeight : 0; }).join(',');
+    if (sig !== prev && tries++ < 7) { prev = sig; kvArrT = setTimeout(pass, 700); }
+  };
+  pass();
+}
+
 // ---------- AI verbs (===CANVAS-*===) ----------
 // Executes the ordered op list from an AI reply: resolve note names with the same resolver
 // the other verbs use, warm the section cache so the pure applier can validate seg names,
@@ -425,6 +467,12 @@ async function kvApplyAiOps(ops) {
   const r = window.CoreCanvas.applyVerbOps(KV, ops, { resolveNote, sectionsOf: kvSectionsSync });
   kvSave();
   if (typeof mainView !== 'undefined' && mainView === 'canvas') { try { await kvPaintBoard(); } catch (_) {} }
+  // re-place ONLY the new cards from measured heights once media has settled (mermaid/images
+  // grow after paint; the op-time guess can overlap tall neighbours). Runs even while the
+  // view is closed — next open paints, then the timer measures real nodes.
+  if ((r.addedIds || []).length) {
+    setTimeout(() => { try { if (typeof mainView !== 'undefined' && mainView === 'canvas') kvArrangeSettled(r.addedIds); } catch (_) {} }, 900);
+  }
   const msg = '🖼 ' + t('แคนวาส') + ': ' + (r.applied.length ? r.applied.join(' · ') : t('ไม่มีอะไรเปลี่ยน')) +
     (r.errors.length ? ' — ⚠ ' + r.errors.join(' · ') : '');
   if (typeof pdfToast === 'function') {

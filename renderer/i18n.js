@@ -266,6 +266,8 @@ const I18N_EN = {
   // ---- Kumiko Canvas (แคนวาสสรุปงาน) ----
   'แคนวาส': 'Canvas',
   'เปิดแคนวาส': 'Open canvas',
+  'จัดเรียง': 'Arrange',
+  'จัดตำแหน่งการ์ดใหม่ตามขนาดจริง ไม่ให้ซ้อนกัน': 'Re-place cards from real sizes so nothing overlaps',
   'ดูบอร์ดแคนวาส': 'Inspect canvas board',
   'จัดแคนวาส': 'Arrange canvas',
   'ไม่มีอะไรเปลี่ยน': 'Nothing changed',

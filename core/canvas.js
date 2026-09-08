@@ -151,7 +151,7 @@
   // resolves names and supplies content; this stays pure/deterministic for tests.
   // Returns { applied: [thai strings], errors: [thai strings] }.
   function applyVerbOps(state, ops, ctx) {
-    var applied = [], errors = [];
+    var applied = [], errors = [], addedIds = [];
     var board = state.boards[state.cur];
     var findCard = function (rel) {
       for (var i = 0; i < board.cards.length; i++) if (board.cards[i].rel === rel) return board.cards[i];
@@ -194,7 +194,9 @@
       }
       if (o.op === 'sticky') {
         var p0 = nextPos();
-        board.cards.push({ id: board.seq++, type: 'sticky', body: o.text, x: p0.x, y: p0.y, w: 200 });
+        var sid = board.seq++;
+        board.cards.push({ id: sid, type: 'sticky', body: o.text, x: p0.x, y: p0.y, w: 200 });
+        addedIds.push(sid);
         applied.push('แปะสติกกี้');
         return;
       }
@@ -218,6 +220,7 @@
             card = { id: board.seq++, type: 'note', rel: rel, x: p.x, y: p.y,
               w: Math.min(1400, Math.max(200, o.w || 264)), segs: want };
             board.cards.push(card);
+            addedIds.push(card.id);
             applied.push('วาง "' + titleOfRel(rel) + '" (' + want.length + ' ท่อน)');
           } else {
             var added = 0;
@@ -265,7 +268,7 @@
         return;
       }
     });
-    return { applied: applied, errors: errors };
+    return { applied: applied, errors: errors, addedIds: addedIds };
   }
 
   return {
