@@ -4106,7 +4106,7 @@ function openLightbox(node){
   stage.appendChild(node);
   const x = document.createElement('button'); x.className = 'kz-lb-x'; x.textContent = '✕';
   const hint = document.createElement('div'); hint.className = 'kz-lb-hint';
-  hint.textContent = t('เลื่อนเมาส์ = ซูม · ลาก = เลื่อน · ดับเบิลคลิก = รีเซ็ต · Esc ปิด');
+  hint.textContent = t('2 นิ้วเลื่อน/ลาก = เลื่อนดู · บีบนิ้วหรือ ⌘+scroll = ซูม · ดับเบิลคลิก = รีเซ็ต · Esc ปิด');
   ov.appendChild(stage); ov.appendChild(x); ov.appendChild(hint);
   let scale = 1, tx = 0, ty = 0;
   const apply = () => { stage.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')'; };
@@ -4116,8 +4116,13 @@ function openLightbox(node){
   ov.onmousedown = (e) => { if (e.target === ov) close(); };
   ov.addEventListener('wheel', (e) => {
     e.preventDefault();
-    const f = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-    scale = Math.min(8, Math.max(0.2, scale * f));
+    // macOS trackpad: two-finger drag = plain wheel → PAN (user request 2026-09-08);
+    // pinch arrives as wheel+ctrlKey → ZOOM (⌘/Ctrl+scroll gives mouse users the same)
+    if (e.ctrlKey || e.metaKey) {
+      scale = Math.min(8, Math.max(0.2, scale * Math.exp(-e.deltaY * 0.01)));
+    } else {
+      tx -= e.deltaX; ty -= e.deltaY;
+    }
     apply();
   }, { passive: false });
   stage.addEventListener('mousedown', (e) => {

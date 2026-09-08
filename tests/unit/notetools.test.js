@@ -151,8 +151,9 @@ describe('fullscreen lightbox for images + diagrams', () => {
     expect(r).toMatch(/closest\('\.md-mermaid-render, \.milkdown \.mermaid, pre\.mermaid'\)/);
     expect(r).toContain("c.setAttribute('preserveAspectRatio', 'xMidYMid meet')");
   });
-  it('zoom clamps 0.2–8, drag pans, dblclick resets, Esc/✕/backdrop close', () => {
-    expect(r).toMatch(/Math\.min\(8, Math\.max\(0\.2, scale \* f\)\)/);
+  it('two-finger scroll PANS, pinch/⌘-scroll ZOOMS (clamped 0.2–8), dblclick resets, Esc/✕/backdrop close', () => {
+    expect(r).toMatch(/if \(e\.ctrlKey \|\| e\.metaKey\) \{\n      scale = Math\.min\(8, Math\.max\(0\.2, scale \* Math\.exp/);
+    expect(r).toMatch(/tx -= e\.deltaX; ty -= e\.deltaY;/);
     expect(r).toMatch(/scale = 1; tx = 0; ty = 0; apply\(\)/);
     expect(r).toMatch(/e\.key === 'Escape'[\s\S]{0,60}close\(\)/);
     expect(r).toMatch(/if \(e\.target === ov\) close\(\)/);
