@@ -150,6 +150,8 @@ describe('fullscreen lightbox for images + diagrams', () => {
     expect(r).not.toMatch(/addEventListener\('dblclick'[\s\S]{0,120}openLightbox/);
     expect(r).toMatch(/closest\('\.md-mermaid-render, \.milkdown \.mermaid, pre\.mermaid'\)/);
     expect(r).toContain("c.setAttribute('preserveAspectRatio', 'xMidYMid meet')");
+    // crepe's add-caption bubble collided with the ⛶ button — permanently hidden
+    expect(read('renderer/styles.css')).toMatch(/\.image-wrapper \.operation \{ display: none !important/);
   });
   it('two-finger scroll PANS, pinch/⌘-scroll ZOOMS (clamped 0.2–8), dblclick resets, Esc/✕/backdrop close', () => {
     expect(r).toMatch(/if \(e\.ctrlKey \|\| e\.metaKey\) \{\n      scale = Math\.min\(8, Math\.max\(0\.2, scale \* Math\.exp/);
