@@ -90,6 +90,22 @@ describe('collapsible slide images (8)', () => {
     expect(css).toMatch(/\.milkdown img\.kz-clip \{[^}]*height: 96px !important[^}]*zoom-in/);
     expect(css).toMatch(/\.milkdown img\.kz-clip\.kz-open \{[^}]*height: auto !important/);
   });
+  it('kz-clip also wins inside crepe milkdown-image-block (min-height:100px would beat height)', () => {
+    // regression: crepe upgrades own-paragraph images to <milkdown-image-block> whose img has
+    // min-height:100px + fit-content wrapper + inline height from the resize handle — the clip
+    // rules must override all three or slide clips render full-size and wreck the note layout
+    const css = read('renderer/styles.css');
+    expect(css).toMatch(/\.milkdown \.milkdown-image-block > \.image-wrapper img\.kz-clip \{[^}]*min-height: 0 !important/);
+    expect(css).toMatch(/\.milkdown \.milkdown-image-block > \.image-wrapper:has\(img\.kz-clip\) \{[^}]*width: 100%/);
+    expect(css).toMatch(/\.milkdown \.milkdown-image-block > \.image-wrapper img\.kz-clip\.kz-open \{[^}]*height: auto !important/);
+    expect(css).toMatch(/:not\(:has\(img\.kz-open\)\) > \.image-resize-handle \{ display: none/);
+    // crepe's inline node view (img.image-inline) sizes to intrinsic aspect — force full-width strip
+    expect(css).toMatch(/\.milkdown img\.image-inline\.kz-clip \{ width: 100% !important; max-width: 560px !important/);
+    expect(css).toMatch(/\.milkdown img\.image-inline\.kz-clip\.kz-open \{ width: auto !important/);
+    // inline-flex span wrapper shrink-wraps, making img width:100% circular → widen the wrapper
+    expect(css).toMatch(/\.milkdown \.milkdown-image-inline:has\(> img\.kz-clip\) \{ width: 100%; max-width: 560px/);
+    expect(css).toMatch(/\.milkdown \.milkdown-image-inline:has\(> img\.kz-open\) \{ width: auto/);
+  });
 });
 
 // 2026-09-05: opening from SEARCH now reveals the item in the sidebar — ancestors expanded,
