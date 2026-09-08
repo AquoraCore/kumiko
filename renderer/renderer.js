@@ -1194,12 +1194,15 @@ async function maybeCreateNewNotes(text){
     // new notes used to always drop at the vault root regardless of where the user was working
     const base = _noteRelFromName(n.name);
     if (!base) continue;
-    const existing = new Set(Object.values(window.__wlNoteRel || {}).map((x) => String(x).toLowerCase()));
-    // EXACT name of a note that already exists → the AI means "replace that note" (log 2026-08-24:
+    // SAME name as a note that already exists → the AI means "replace that note" (log 2026-08-24:
     // a translate request came back as NEW-NOTE with the same name and silently spawned "… 2").
+    // Compared with dash/space NORMALIZATION — the AI copies the H1's em-dash while the file
+    // uses "-", which spawned a duplicate "Cheat Sheet BSS — …" (log 2026-09-09).
     // Route it through the same review gate as UPDATED-NOTE name= instead of uniquifying.
-    if (existing.has((base + '.md').toLowerCase())) {
-      const rel0 = Object.values(window.__wlNoteRel || {}).find((x) => String(x).toLowerCase() === (base + '.md').toLowerCase()) || (base + '.md');
+    const _relKey = (x) => String(x).toLowerCase().replace(/[‐-―−]/g, '-').replace(/\s+/g, ' ');
+    const rel0x = Object.values(window.__wlNoteRel || {}).find((x) => _relKey(x) === _relKey(base + '.md'));
+    if (rel0x) {
+      const rel0 = rel0x;
       try {
         const nb0 = await resolvePdfClipMarkers(n.body);
         if (rel0 === currentNote) { applyReplyToNote(nb0, { silent: true }); }
@@ -1213,8 +1216,9 @@ async function maybeCreateNewNotes(text){
       } catch (_) {}
       continue;
     }
+    const existing = new Set(Object.values(window.__wlNoteRel || {}).map(_relKey));
     let final = base, i = 2;
-    while (existing.has((final + '.md').toLowerCase())) final = base + ' ' + (i++);
+    while (existing.has(_relKey(final + '.md'))) final = base + ' ' + (i++);
     try {
       const nb = await resolvePdfClipMarkers(n.body);
       await window.api.saveNote(final + '.md', nb);
@@ -1238,9 +1242,20 @@ async function maybeCreateNewNotes(text){
 
 // ---- Kumiko tool executors -------------------------------------------------------------
 // Resolve a spoken note name to a vault rel via the sidebar's name map (case-insensitive).
+// Dash-variant normalizer: AI-written names copy the note's H1, which often uses an em/en
+// dash ("Cheat Sheet BSS — สรุป…") while the filename uses "-". Comparing raw strings spawned
+// a DUPLICATE note (log 2026-09-09). Unify every dash codepoint + collapse whitespace runs.
+function _noteNameKey(s){
+  return String(s || '').trim().replace(/\.md$/i, '').split('/').pop().toLowerCase()
+    .replace(/[‐-―−]/g, '-').replace(/\s+/g, ' ');
+}
 function _resolveNoteRel(name){
+  const map = window.__wlNoteRel || {};
   const key = String(name || '').trim().replace(/\.md$/i, '').split('/').pop().toLowerCase();
-  return (window.__wlNoteRel || {})[key] || null;
+  if (map[key]) return map[key];
+  const want = _noteNameKey(name);
+  for (const k of Object.keys(map)) if (_noteNameKey(k) === want) return map[k];
+  return null;
 }
 // KUMIKO.md is written ONLY via the KUMIKO-RULE confirm card — the AI once "helpfully"
 // edited it through the note channels (log 2026-08-19), which bypasses the rule governance.

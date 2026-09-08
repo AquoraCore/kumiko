@@ -184,3 +184,16 @@ describe('fullscreen lightbox for images + diagrams', () => {
     expect(css).toMatch(/#kzLightbox \{[^}]*z-index: 12000/);
   });
 });
+
+describe('AI note-name dash normalization (2026-09-09)', () => {
+  it('duplicate guard: NEW-NOTE with em-dash name routes to the existing hyphen note', () => {
+    // GLM copies the H1 ("Cheat Sheet BSS — สรุป…") while the file uses " - " — raw string
+    // comparison spawned a duplicate note; both resolver and the NEW-NOTE existing-check
+    // must compare dash/space-normalized keys.
+    const r = read('renderer/renderer.js');
+    expect(r).toMatch(/function _noteNameKey\(s\)\{[\s\S]{0,300}replace\(\/\[‐-―−\]\/g, '-'\)/);
+    expect(r).toMatch(/_resolveNoteRel[\s\S]{0,400}_noteNameKey\(k\) === want/);
+    expect(r).toMatch(/const _relKey = \(x\) => String\(x\)\.toLowerCase\(\)\.replace\(\/\[‐-―−\]\/g, '-'\)/);
+    expect(r).toMatch(/_relKey\(x\) === _relKey\(base \+ '\.md'\)/);
+  });
+});

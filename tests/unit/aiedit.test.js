@@ -252,7 +252,7 @@ describe('AI new-note (===NEW-NOTE===) chain', () => {
   it('executor creates uniquified notes WITHOUT switching the view (red dot marks them)', () => {
     expect(renderer4).toContain('function maybeCreateNewNotes');
     // uniquified against REL paths (per-folder) since folder-aware creation, 2026-08-19
-    expect(renderer4).toMatch(/while \(existing\.has\(\(final \+ '\.md'\)\.toLowerCase\(\)\)\) final = base \+ ' ' \+ \(i\+\+\)/);
+    expect(renderer4).toMatch(/while \(existing\.has\(_relKey\(final \+ '\.md'\)\)\) final = base \+ ' ' \+ \(i\+\+\)/);
     expect(renderer4).toContain('refreshList(firstRel, { keepView: true })');
     expect(renderer4).toMatch(/__flaggedNotes\.add\(final \+ '\.md'\)/);
     expect(chat4).toContain('maybeCreateNewNotes(last.text');
@@ -805,10 +805,10 @@ describe('NEW-NOTE name collision + continuation intent (log 2026-08-24 #2)', ()
   const fs = require('fs'), path = require('path');
   const js = fs.readFileSync(path.join(__dirname, '../../renderer/renderer.js'), 'utf8');
   it('NEW-NOTE naming an existing note stages a review of that note instead of spawning "… 2"', () => {
-    expect(js).toMatch(/if \(existing\.has\(\(base \+ '\.md'\)\.toLowerCase\(\)\)\) \{/);
+    expect(js).toMatch(/_relKey\(x\) === _relKey\(base \+ '\.md'\)/);   // dash/space-normalized since 2026-09-09 (em-dash duplicate)
     expect(js).toMatch(/มีโน้ตชื่อนี้อยู่แล้ว — AI เสนอเขียนทับ /);
     // uniquify still exists for genuinely-new names
-    expect(js).toMatch(/while \(existing\.has\(\(final \+ '\.md'\)\.toLowerCase\(\)\)\) final = base \+ ' ' \+ \(i\+\+\);/);
+    expect(js).toMatch(/while \(existing\.has\(_relKey\(final \+ '\.md'\)\)\) final = base \+ ' ' \+ \(i\+\+\);/);
   });
   it('tool continuation carries the AI own promise + a no-echo rule', () => {
     expect(js).toMatch(/function buildToolContinuationPrompt\(userMsg, results, ownPlan\)/);
