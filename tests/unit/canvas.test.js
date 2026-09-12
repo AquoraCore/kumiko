@@ -228,6 +228,13 @@ describe('Canvas wiring (renderer + view plumbing)', () => {
     expect(html).toContain('../core/canvas.js');
     expect(html.indexOf('src="canvas.js"')).toBeGreaterThan(html.indexOf('src="renderer.js"'));
   });
+  it('web/index.html loads canvas too (parity miss 2026-09-12: web canvas view rendered blank)', () => {
+    const w = read('web/index.html');
+    expect(w).toContain('/core/canvas.js?v=__ASSET_VERSION__');
+    expect(w).toContain('/renderer/canvas.js?v=__ASSET_VERSION__');
+    expect(w).toContain('<div id="canvasView" class="main-view"></div>');
+    expect(w.indexOf('/renderer/canvas.js')).toBeGreaterThan(w.indexOf('/renderer/renderer.js'));
+  });
   it('renderer.js: setMainView knows canvas (class, render, lastOpen, Esc) + sidebar leaf', () => {
     const r = read('renderer/renderer.js');
     expect(r).toContain("left.classList.toggle('view-canvas', v==='canvas')");
