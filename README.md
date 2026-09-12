@@ -5,29 +5,37 @@
 <h1 align="center">Kumiko (組子)</h1>
 
 <p align="center">
-  แอปจดโน้ตสำหรับคนเรียนหนังสือ ที่คิดเป็นภาษาไทยตั้งแต่บรรทัดแรก<br>
-  <em>A study-notes app that thinks in Thai first — Markdown notes × PDF reading × an AI that actually edits your notes.</em>
+  A local-first study-notes app — Markdown notes × PDF reading × an AI that actually edits your notes.<br>
+  <em>Built Thai-first 🇹🇭 · works fully in English too.</em>
 </p>
 
 ---
 
-![โน้ตพร้อม diagram และแชท AI](docs/screenshots/editor.png)
+![Notes with a live diagram and the AI side chat](docs/screenshots/editor.png)
 
-## ทำอะไรได้บ้าง
+## Features
 
-- **โน้ต Markdown แบบ WYSIWYG** — สไตล์ Notion: slash menu, ตาราง, callout สี, `[[wikilink]]` พร้อม backlinks, แท็กซ้อนชั้นแบบมีสี, ค้นหาทั้ง vault
-- **ฐานข้อมูล + แดชบอร์ด + กราฟ + flashcards** — ฐานข้อมูล 6 ชนิดคอลัมน์ 5 มุมมอง (ตาราง/บอร์ด/ปฏิทิน/แกลเลอรี/ชาร์ต), แดชบอร์ดต่อ vault, กราฟความเชื่อมโยง, ท่องจำแบบ SM-2
-- **อ่าน PDF ในแอป** — ไฮไลต์ + กล่องโน้ตบนหน้าสไลด์, แคปหน้าสไลด์เป็นภาพ (เผาไฮไลต์/โน้ตลงภาพให้เลย) ส่งเข้าโน้ตอัตโนมัติ, ระบบจำหน้าที่อ่านค้าง
-- **AI เป็นผู้ช่วยจริง ไม่ใช่แค่แชท** — สร้างโน้ตใหม่, แก้โน้ตผ่านหน้ารีวิวทีละท่อน (คุณกดรับ/แก้/ทิ้งเอง), ติดแท็ก, จัดบอร์ดแคนวาส, ค้นทั้ง vault ด้วย RAG, มีชั้นความจำต่อ vault + โปรไฟล์กลางข้ามวิชา — ใช้ได้ทั้งผ่าน CLI ที่มีอยู่แล้ว (Claude Code / OpenCode+GLM ตาม subscription ของคุณ) หรือ API key
-- **Kumiko Canvas** — บอร์ดสรุปงาน: หยิบ "ท่อน" ของโน้ตมาวางเป็นการ์ดเต็ม ๆ ลากจัด โยงเส้นระหว่างท่อน (เส้นแนะนำงอกเองจาก `[[ลิงก์]]` ในเนื้อหา) หลายบอร์ด สั่ง AI จัดบอร์ดได้
-- **เก็บของเป็นไฟล์ล้วน** — โน้ตทั้งหมดเป็น `.md` + ภาพเป็นไฟล์ในโฟลเดอร์ vault ของคุณเอง มีประวัติเวอร์ชันอัตโนมัติ กู้คืนได้ ไม่ล็อกอิน ไม่ผูกคลาวด์
-- **ลาย Kumiko แท้ 30 ลาย** — ธีมพื้นหลังจากลายฉลุไม้ญี่ปุ่น (อาซาโนฮะ ซากุระโกชิ ชิปโป ฯลฯ) สลับสว่าง/มืด
-- **เว็บเซิร์ฟเวอร์ในตัว** *(ทดลอง)* — โฮสต์เองแล้วเปิดจากเบราว์เซอร์/มือถือได้ หน้าตาเดียวกับเดสก์ท็อป
-- สลับ UI **ไทย ⇄ อังกฤษ** ได้ · หลาย vault แยกข้อมูลขาดจากกัน · ถังขยะกู้คืนได้
+- **WYSIWYG Markdown notes** — Notion-style editing: slash menu, tables, colored callouts, `[[wikilinks]]` with backlinks, nested colored tags, full-vault search
+- **Databases, dashboards, graph, flashcards** — databases with 6 column types and 5 views (table / board / calendar / gallery / chart), per-vault dashboards, a link graph, and SM-2 spaced repetition
+- **A real PDF reader** — highlight and place sticky notes on lecture slides, capture any page as an image *with your annotations burned in* straight into a note, and it remembers where you left off
+- **An AI that edits, not just chats** — creates notes, edits them through a per-hunk review UI (you accept / tweak / discard every change), tags your vault, arranges Canvas boards, searches everything with tiered RAG, and keeps a per-vault memory plus a cross-vault profile. Runs on the CLI subscriptions you already have (**Claude Code** or **OpenCode + GLM**) or a plain API key
+- **Kumiko Canvas** — a summary board: pull full *sections* of notes onto cards, drag and resize them, wire sections together (suggested wires grow automatically from the `[[wikilinks]]` already in your content), keep multiple boards, or just ask the AI to arrange one
+- **Plain files, forever** — every note is a `.md` file and every image a real file in your own folder, with automatic version history. No account, no cloud lock-in
+- **30 authentic kumiko patterns** — background themes drawn from Japanese woodwork lattices (asanoha, sakura-goshi, shippō, …), light and dark
+- **Self-hostable web server** *(experimental)* — the same UI from a browser or phone
+- Thai ⇄ English UI toggle · multiple isolated vaults · restorable trash
 
-![Kumiko Canvas — บอร์ดสรุปก่อนสอบ](docs/screenshots/canvas.png)
+![Kumiko Canvas — an exam-prep board](docs/screenshots/canvas.png)
 
-## ติดตั้ง (macOS)
+## Install (macOS, Apple Silicon)
+
+Grab the zip from [**Releases**](https://github.com/AquoraCore/kumiko/releases), unzip, drag **Kumiko.app** into Applications. The app isn't notarized yet — on first launch use **right-click → Open**, or:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Kumiko.app
+```
+
+Or build from source (Node.js 20+):
 
 ```bash
 git clone https://github.com/AquoraCore/kumiko.git
@@ -37,34 +45,30 @@ npm run dist
 open dist/mac-arm64/Kumiko.app
 ```
 
-ต้องมี Node.js 20+ · สร้างเสร็จแอปจะอยู่ที่ `dist/mac-arm64/Kumiko.app` (ลากไป Applications ได้เลย) · อัปเดตรุ่นถัดไปกดปุ่มเดียวจากในแอป (Settings → เกี่ยวกับ)
+Later updates are one click from inside the app (Settings → About).
 
-**โหมด AI** เลือกได้ใน Settings:
+**AI modes** (pick one in Settings — without any of them Kumiko is still a complete notes + PDF app):
 
-| โหมด | ต้องมี |
+| Mode | You need |
 |---|---|
-| CLI (แนะนำ) | [Claude Code](https://claude.com/claude-code) หรือ [OpenCode](https://opencode.ai) + GLM Coding Plan ที่ล็อกอินไว้แล้ว |
-| API key | คีย์ Anthropic / OpenAI-compatible ใส่ในแอป |
-| Managed | ชี้ไปเซิร์ฟเวอร์ Kumiko ที่ถือคีย์ให้ (สำหรับ self-host) |
+| CLI (recommended) | [Claude Code](https://claude.com/claude-code) or [OpenCode](https://opencode.ai) + GLM Coding Plan, already logged in |
+| API key | An Anthropic / OpenAI-compatible key, entered in the app |
+| Managed | A self-hosted Kumiko server that holds the key for its users |
 
-ไม่ตั้งค่า AI ก็ใช้เป็นแอปจดโน้ต + อ่าน PDF ได้ครบทุกอย่าง
+## ภาษาไทย (ย่อ)
 
-## English (brief)
+Kumiko คือแอปจดโน้ตสำหรับคนเรียนหนังสือที่คิดเป็นภาษาไทยตั้งแต่แรก — โน้ต Markdown แบบ WYSIWYG พร้อม `[[wikilink]]`/แท็ก/ฐานข้อมูล/flashcards, ตัวอ่าน PDF ที่แคปสไลด์พร้อมเผาไฮไลต์และโน้ตลงภาพได้, และ AI ที่**แก้โน้ตให้จริงผ่านหน้ารีวิวทีละท่อน** (ใช้ Claude Code / OpenCode CLI ที่มีอยู่แล้ว หรือ API key), Kumiko Canvas บอร์ดสรุปที่หยิบท่อนโน้ตมาวางเป็นการ์ดแล้วเส้นเชื่อมงอกเองจากลิงก์ในเนื้อหา — ทุกอย่างเป็นไฟล์ `.md` ในเครื่องคุณเอง มีประวัติเวอร์ชันอัตโนมัติ ไม่ต้องล็อกอิน
 
-Kumiko is an Electron study-notes app built Thai-first: WYSIWYG Markdown notes with wikilinks/tags/databases, an in-app PDF reader whose highlights and sticky notes can be burned into captured slide images, and an AI layer that *edits your vault through a per-hunk review UI* rather than just chatting — powered by your existing Claude Code or OpenCode CLI subscription, or an API key. Kumiko Canvas turns note sections into draggable cards wired together by the `[[wikilinks]]` already in your content. Everything is plain `.md` files in your own folder, with automatic version history. Includes 30 authentic kumiko woodwork patterns as themes, and an experimental self-hostable web server.
-
-```bash
-git clone https://github.com/AquoraCore/kumiko.git && cd kumiko && npm install && npm run dist
-```
+ติดตั้ง: โหลด zip จากหน้า [Releases](https://github.com/AquoraCore/kumiko/releases) → ลากไป Applications → เปิดครั้งแรกให้คลิกขวา → Open (แอปยังไม่ได้ notarize)
 
 ## Development
 
 ```bash
 npm test          # vitest — 800+ unit tests
 npm start         # run unpackaged (dev)
-npm run server    # self-host web server (PORT, DATA_DIR, AUTH_SECRET)
+npm run server    # self-hosted web server (PORT, DATA_DIR, AUTH_SECRET)
 ```
 
 ## License
 
-[MIT](LICENSE)
+[AGPL-3.0](LICENSE) — free to use, modify, and self-host; if you distribute a modified version **or run one as a network service**, you must share your changes under the same license. Interested in a commercial license or managed hosting? Open an issue to get in touch.

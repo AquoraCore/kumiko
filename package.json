@@ -20,7 +20,7 @@
     "build:ocr": "swiftc -O native/pdf-ocr.swift -o native/pdf-ocr"
   },
   "author": "",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "build": {
     "appId": "com.pasawit.studynotes",
     "productName": "Kumiko",
