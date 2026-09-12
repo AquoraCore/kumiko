@@ -22,7 +22,7 @@
 - **WYSIWYG Markdown notes** — Notion-style editing: slash menu, tables, colored callouts, `[[wikilinks]]` with backlinks, nested colored tags, full-vault search
 - **Databases, dashboards, graph, flashcards** — databases with 6 column types and 5 views (table / board / calendar / gallery / chart), per-vault dashboards, a link graph, and SM-2 spaced repetition
 - **A real PDF reader** — highlight and place sticky notes on lecture slides, capture any page as an image *with your annotations burned in* straight into a note, and it remembers where you left off
-- **An AI that edits, not just chats** — creates notes, edits them through a per-hunk review UI (you accept / tweak / discard every change), tags your vault, arranges Canvas boards, searches everything with tiered RAG, and keeps a per-vault memory plus a cross-vault profile. Runs on the CLI subscriptions you already have (**Claude Code** or **OpenCode + GLM**) or a plain API key
+- **An AI that edits, not just chats** — creates notes, edits them through a per-hunk review UI (you accept / tweak / discard every change), tags your vault, arranges Canvas boards, searches everything with tiered RAG, and keeps a per-vault memory plus a cross-vault profile. Runs on the CLI subscriptions you already have (**Claude Code**, **OpenCode + GLM**, or **Gemini CLI**) or a plain API key
 - **Kumiko Canvas** — a summary board: pull full *sections* of notes onto cards, drag and resize them, wire sections together (suggested wires grow automatically from the `[[wikilinks]]` already in your content), keep multiple boards, or just ask the AI to arrange one
 - **Plain files, forever** — every note is a `.md` file and every image a real file in your own folder, with automatic version history. No account, no cloud lock-in
 - **30 authentic kumiko patterns** — background themes drawn from Japanese woodwork lattices (asanoha, sakura-goshi, shippō, …), light and dark
@@ -55,7 +55,7 @@ Later updates are one click from inside the app (Settings → About).
 
 | Mode | You need |
 |---|---|
-| CLI (recommended) | [Claude Code](https://claude.com/claude-code) or [OpenCode](https://opencode.ai) + GLM Coding Plan, already logged in |
+| CLI (recommended) | [Claude Code](https://claude.com/claude-code), [OpenCode](https://opencode.ai) + GLM Coding Plan, or [Gemini CLI](https://github.com/google-gemini/gemini-cli) (free with a Google account), already logged in |
 | API key | An Anthropic / OpenAI-compatible key, entered in the app |
 | Managed | A self-hosted Kumiko server that holds the key for its users |
 

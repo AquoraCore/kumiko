@@ -2246,6 +2246,13 @@ async function openAiSettings(tab){
     modeSeg.appendChild(b);
   });
   panelProvider.appendChild(modeSeg);
+  // wizard recall — reopen the first-run AI setup helper at any time (desktop only)
+  if (isDesktop){
+    const wizBtn=document.createElement('button'); wizBtn.type='button'; wizBtn.className='ghost sm'; wizBtn.style.margin='0 0 10px';
+    wizBtn.textContent=t('ตัวช่วยตั้งค่า AI');
+    wizBtn.onclick=()=>{ dismiss(); openAiWizard(); };
+    panelProvider.appendChild(wizBtn);
+  }
 
   // API SECTION — visible only when selected mode === 'api'
   const apiSection=document.createElement('div'); apiSection.id='aiApiSection'; apiSection.className='ai-api-section';
@@ -2334,8 +2341,8 @@ async function openAiSettings(tab){
     const ceRow=document.createElement('div'); ceRow.className='settings-field';
     const ceLab=document.createElement('label'); ceLab.textContent=t('เครื่องมือ (CLI)');
     ceSel=document.createElement('select'); ceSel.id='aiCliEngine'; ceSel.className='ai-sel';
-    [['claude','Claude — claude CLI (Pro/Max subscription)'],['glm','GLM — opencode (Coding Plan)']].forEach(([v,l])=>{ const o=document.createElement('option'); o.value=v; o.textContent=l; ceSel.appendChild(o); });
-    ceSel.value = (cfg.cliEngine==='glm') ? 'glm' : 'claude';
+    [['claude','Claude — claude CLI (Pro/Max subscription)'],['glm','GLM — opencode (Coding Plan)'],['gemini','Gemini — gemini CLI (Google)']].forEach(([v,l])=>{ const o=document.createElement('option'); o.value=v; o.textContent=l; ceSel.appendChild(o); });
+    ceSel.value = (cfg.cliEngine==='glm' || cfg.cliEngine==='gemini') ? cfg.cliEngine : 'claude';
     ceRow.appendChild(ceLab); ceRow.appendChild(ceSel); cliSection.appendChild(ceRow);
 
     // Claude model picker (alias → `claude --model`); shown when engine === 'claude'
@@ -2343,20 +2350,24 @@ async function openAiSettings(tab){
     const clLab=document.createElement('label'); clLab.textContent=t('โมเดล (Claude)');
     claudeSel=document.createElement('select'); claudeSel.id='aiCliClaudeModel'; claudeSel.className='ai-sel';
     CLAUDE_CLI_MODELS.forEach(([v,l])=>{ const o=document.createElement('option'); o.value=v; o.textContent=l; claudeSel.appendChild(o); });
-    claudeSel.value = (cfg.cliEngine!=='glm' && cfg.cliModel) ? cfg.cliModel : '';
+    claudeSel.value = (cfg.cliEngine!=='glm' && cfg.cliEngine!=='gemini' && cfg.cliModel) ? cfg.cliModel : '';
     claudeRow.appendChild(clLab); claudeRow.appendChild(claudeSel); cliSection.appendChild(claudeRow);
 
-    // opencode/GLM model (free text); shown when engine === 'glm'
+    // opencode/GLM + Gemini model (free text); shown when engine is 'glm' OR 'gemini' —
+    // glm defaults to the Coding-Plan model, gemini empty = the CLI's own default
     cmRow=document.createElement('div'); cmRow.className='settings-field';
     const cmLab=document.createElement('label'); cmLab.textContent=t('โมเดล (opencode)');
     cmInput=document.createElement('input'); cmInput.id='aiCliModel'; cmInput.type='text'; cmInput.className='ai-sel'; cmInput.placeholder='zai-coding-plan/glm-5.2';
-    cmInput.value = (cfg.cliEngine==='glm' && cfg.cliModel) ? cfg.cliModel : 'zai-coding-plan/glm-5.2';
+    cmInput.value = (cfg.cliEngine==='gemini') ? (cfg.cliModel || '') : ((cfg.cliEngine==='glm' && cfg.cliModel) ? cfg.cliModel : 'zai-coding-plan/glm-5.2');
     cmRow.appendChild(cmLab); cmRow.appendChild(cmInput); cliSection.appendChild(cmRow);
 
     const cliNote=document.createElement('p'); cliNote.className='ai-note';
     cliNote.textContent=t('ใช้ subscription ที่ล็อกอินไว้ในเครื่องผ่าน CLI — ต้องติดตั้ง `claude` / `opencode` และล็อกอินแล้ว (ไม่ต้องใช้ API key)');
     cliSection.appendChild(cliNote);
-    const syncCliEngine=()=>{ const glm = (ceSel.value==='glm'); cmRow.style.display = glm ? '' : 'none'; claudeRow.style.display = glm ? 'none' : ''; };
+    const syncCliEngine=()=>{ const free = (ceSel.value==='glm' || ceSel.value==='gemini');
+      cmRow.style.display = free ? '' : 'none'; claudeRow.style.display = free ? 'none' : '';
+      cmLab.textContent = (ceSel.value==='gemini') ? t('โมเดล (Gemini)') : t('โมเดล (opencode)');
+      cmInput.placeholder = (ceSel.value==='gemini') ? 'gemini-2.5-pro' : 'zai-coding-plan/glm-5.2'; };
     ceSel.onchange=syncCliEngine; syncCliEngine();
   }
   panelProvider.appendChild(cliSection);
@@ -2613,9 +2624,9 @@ async function openAiSettings(tab){
     apiSection.style.display=(selectedMode==='api') ? '' : 'none';
     cliSection.style.display=(selectedMode==='cli') ? '' : 'none';
     if (selectedMode==='cli' && ceSel && cmRow && claudeRow){
-      const glm = (ceSel.value==='glm');
-      cmRow.style.display = glm ? '' : 'none';
-      claudeRow.style.display = glm ? 'none' : '';
+      const free = (ceSel.value==='glm' || ceSel.value==='gemini');
+      cmRow.style.display = free ? '' : 'none';
+      claudeRow.style.display = free ? 'none' : '';
     }
   }
   rebuildModels(); syncKeyPlaceholder(); syncApiSection();
@@ -2636,10 +2647,11 @@ async function openAiSettings(tab){
   const saveBtn=document.createElement('button'); saveBtn.type='button'; saveBtn.id='aiSettingsSave'; saveBtn.className='solid'; saveBtn.textContent=t('บันทึก');
   saveBtn.onclick=async ()=>{
     const cfgPatch = { mode:selectedMode, provider:pSel.value, model:mSel.value, thinking: (tChk.disabled ? null : tChk.checked),
-      visionModel: (vRow.style.display==='none' ? '' : vSel.value), autoVision: avChk.checked, readNoteImages: rnChk.checked };
+      visionModel: (vRow.style.display==='none' ? '' : vSel.value), autoVision: avChk.checked, readNoteImages: rnChk.checked, configured: true };
     if (selectedMode==='cli' && ceSel){
       cfgPatch.cliEngine = ceSel.value;
-      cfgPatch.cliModel = (ceSel.value==='glm') ? ((cmInput && cmInput.value.trim()) || '') : (claudeSel ? claudeSel.value : '');
+      // claude saves the alias dropdown; glm/gemini save the free-text field (empty = CLI default)
+      cfgPatch.cliModel = (ceSel.value==='claude') ? (claudeSel ? claudeSel.value : '') : ((cmInput && cmInput.value.trim()) || '');
     }
     await window.api.aiSetConfig(cfgPatch);
     if (typeof refreshAiCfgCache === 'function') refreshAiCfgCache();
@@ -2709,9 +2721,112 @@ function applyChatHidden(){
   const tgl = document.getElementById('aiPanelToggle');
   if (tgl) tgl.classList.toggle('on', !hidden);
 }
-function setChatHidden(v){ localStorage.setItem('chatHidden', v ? '1' : '0'); applyChatHidden(); }
+function setChatHidden(v){ localStorage.setItem('chatHidden', v ? '1' : '0'); applyChatHidden(); if (!v) maybeShowAiWizard(); }
 applyChatHidden();
 { const tg = document.getElementById('aiPanelToggle'); if (tg) tg.onclick = () => setChatHidden(localStorage.getItem('chatHidden') !== '1'); }
+
+// ---------- AI onboarding wizard (desktop only) ----------
+// Short first-run setup: pops the FIRST time the user opens the AI chat panel (toggle or first
+// send) while AI config is untouched — never at app boot, never on web (web has managed/API).
+// Decision + config mapping live in core/ai.js (shouldShowAiWizard / aiWizardPatch) so they're
+// unit-tested; this is only the DOM. Built entirely from JS — neither index.html needs a container.
+let _aiWizardShown = false;   // session guard: X-ing the modal doesn't re-pop it on every send
+async function maybeShowAiWizard(){
+  if (typeof window.KUMIKO_WEB !== 'undefined') return false;          // web parity: no wizard
+  if (_aiWizardShown || document.getElementById('aiWizardOverlay')) return false;
+  const CoreAi = window.CoreAi;
+  if (!CoreAi || !CoreAi.shouldShowAiWizard) return false;
+  let view = null;
+  try { view = await window.api.aiGetConfig(); } catch (_) { return false; }
+  if (!CoreAi.shouldShowAiWizard(view, { web: false })) return false;
+  _aiWizardShown = true;
+  await openAiWizard();
+  return true;
+}
+async function openAiWizard(detect){
+  if (!detect) { try { detect = (window.api.aiDetectClis && typeof window.KUMIKO_WEB === 'undefined') ? await window.api.aiDetectClis() : null; } catch (_) {} }
+  detect = detect || { claude: false, opencode: false, gemini: false };
+  const old = document.getElementById('aiWizardOverlay'); if (old) old.remove();
+  const ov = document.createElement('div'); ov.id = 'aiWizardOverlay'; ov.className = 'aiwiz-ov';
+  const card = document.createElement('div'); card.className = 'settings-card aiwiz-card';
+  const head = document.createElement('div'); head.className = 'tbl-head';
+  const title = document.createElement('span'); title.textContent = t('ตั้งค่า AI ของคุณ');
+  const xBtn = document.createElement('button'); xBtn.className = 'rv-close'; xBtn.innerHTML = icoSvg('x', 'sm');
+  const close = () => ov.remove();
+  xBtn.onclick = close;
+  head.appendChild(title); head.appendChild(xBtn); card.appendChild(head);
+  const sub = document.createElement('p'); sub.className = 'ai-note'; sub.textContent = t('เลือกว่าจะใช้ AI แบบไหน — เปลี่ยนได้ทีหลังที่ ⚙ ตั้งค่า'); card.appendChild(sub);
+
+  let choice = 'gemini';   // the recommended free default
+  let modelInput = null;
+  const cards = document.createElement('div'); cards.className = 'aiwiz-cards';
+  const badge = (txt) => { const sp = document.createElement('span'); sp.className = 'aiwiz-badge'; sp.textContent = txt; return sp; };
+  // div (not <button>) so the opencode card can hold a text input; keyboard basics kept
+  const mkCard = (key, lab, subTxt, extra) => {
+    const b = document.createElement('div'); b.className = 'ai-mode-btn' + (key === choice ? ' on' : ''); b.setAttribute('role', 'radio'); b.setAttribute('aria-checked', key === choice ? 'true' : 'false'); b.tabIndex = 0;
+    const l = document.createElement('span'); l.className = 'ai-mode-lab'; l.textContent = lab;
+    const s = document.createElement('span'); s.className = 'ai-mode-sub'; s.textContent = subTxt;
+    b.appendChild(l); if (extra) b.appendChild(extra); b.appendChild(s);
+    const pick = () => { choice = key; cards.querySelectorAll('.ai-mode-btn').forEach((x) => { x.classList.remove('on'); x.setAttribute('aria-checked', 'false'); }); b.classList.add('on'); b.setAttribute('aria-checked', 'true'); };
+    b.onclick = pick;
+    b.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } };
+    cards.appendChild(b); return b;
+  };
+
+  // Claude Code — existing subscription; ✓ badge when the CLI is detected
+  const clExtra = detect.claude ? badge(t('✓ ติดตั้งแล้ว')) : null;
+  mkCard('claude', 'Claude Code', t('ใช้ subscription Claude ที่มีอยู่'), clExtra);
+
+  // Gemini CLI — free & recommended; show the install+login how-to when missing
+  let gemExtra = badge(t('ฟรี · แนะนำ'));
+  if (!detect.gemini) {
+    const inst = document.createElement('div'); inst.className = 'aiwiz-install';
+    const p1 = document.createElement('div'); p1.textContent = t('ยังไม่ติดตั้ง — ติดตั้งก่อน แล้วรัน gemini หนึ่งครั้งเพื่อล็อกอิน Google:');
+    const code = document.createElement('code'); code.textContent = 'npm install -g @google/gemini-cli';
+    inst.appendChild(p1); inst.appendChild(code);
+    const both = document.createElement('span'); both.appendChild(badge(t('ฟรี · แนะนำ'))); both.appendChild(inst);
+    gemExtra = both;
+  }
+  mkCard('gemini', 'Gemini CLI', '', gemExtra);
+
+  // opencode — GLM & other providers, free-text model
+  const glmWrap = document.createElement('span');
+  const glmLab = document.createElement('span'); glmLab.className = 'ai-mode-sub'; glmLab.textContent = t('GLM และ provider อื่น ๆ');
+  modelInput = document.createElement('input'); modelInput.type = 'text'; modelInput.className = 'aiwiz-model';
+  modelInput.placeholder = 'zai-coding-plan/glm-5.2'; modelInput.value = 'zai-coding-plan/glm-5.2';
+  modelInput.onclick = (e) => e.stopPropagation();
+  glmWrap.appendChild(glmLab); glmWrap.appendChild(modelInput);
+  mkCard('glm', 'opencode', '', glmWrap);
+
+  // API key — closes the wizard and opens Settings → AI straight away (no config write here)
+  const apiCard = document.createElement('div'); apiCard.className = 'ai-mode-btn'; apiCard.setAttribute('role', 'button'); apiCard.tabIndex = 0;
+  const al = document.createElement('span'); al.className = 'ai-mode-lab'; al.textContent = 'API key';
+  const as = document.createElement('span'); as.className = 'ai-mode-sub'; as.textContent = t('ใช้ API key ของตัวเอง (เปิดหน้าตั้งค่า)');
+  apiCard.appendChild(al); apiCard.appendChild(as);
+  const goSettings = () => { close(); openAiSettings('provider'); };
+  apiCard.onclick = goSettings;
+  apiCard.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goSettings(); } };
+  cards.appendChild(apiCard);
+
+  card.appendChild(cards);
+
+  // footer — skip (no AI, never auto-pops again) + confirm
+  const foot = document.createElement('div'); foot.className = 'settings-actions';
+  const skipBtn = document.createElement('button'); skipBtn.type = 'button'; skipBtn.className = 'ghost'; skipBtn.textContent = t('ข้ามไปก่อน');
+  skipBtn.title = t('ใช้แอปโดยไม่มี AI — เปิดตัวช่วยได้ที่ ⚙ ตั้งค่า');
+  skipBtn.onclick = async () => { try { await window.api.aiSetConfig({ configured: true }); } catch (_) {} if (typeof refreshAiCfgCache === 'function') refreshAiCfgCache(); close(); };
+  const okBtn = document.createElement('button'); okBtn.type = 'button'; okBtn.className = 'solid'; okBtn.textContent = t('ยืนยัน');
+  okBtn.onclick = async () => {
+    const CoreAi = window.CoreAi;
+    const patch = (CoreAi && CoreAi.aiWizardPatch) ? CoreAi.aiWizardPatch(choice, modelInput ? modelInput.value : '') : null;
+    if (patch) { try { await window.api.aiSetConfig(patch); } catch (_) {} if (typeof refreshAiCfgCache === 'function') refreshAiCfgCache(); }
+    close();
+  };
+  foot.appendChild(skipBtn); foot.appendChild(okBtn);
+  card.appendChild(foot);
+  ov.appendChild(card);
+  document.body.appendChild(ov);
+}
 
 // ---------- Chat send + mode toggle ----------
 const chatInput = document.getElementById('chatInput');
@@ -2831,6 +2946,7 @@ async function sendChat(){
   const msg = chatInput.value.trim();
   const images = (typeof takeChatImages === 'function') ? takeChatImages() : [];
   if (!msg && !images.length) return;
+  maybeShowAiWizard();   // first send with zero AI setup → offer the wizard (send proceeds)
   const s = activeSession();
   if (isRunning(s.id)) { __chatImages = images; renderAttachBar(); return; }
   chatInput.value = ''; chatInput.style.height = 'auto';

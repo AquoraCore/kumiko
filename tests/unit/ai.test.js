@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildEngineInvocation, aiConfigView, setConfigKey,
+  shouldShowAiWizard, aiWizardPatch,
   buildApiRequest, parseSseDelta,
   buildEmbedRequest, parseEmbedResponse,
 } from '../../core/ai.js';
@@ -38,23 +39,45 @@ describe('buildEngineInvocation', () => {
       stdin: 'p',
     });
   });
+
+  it('builds the gemini invocation with a model, args in order (happy)', () => {
+    expect(buildEngineInvocation('gemini', 'gemini-2.5-pro', 'P')).toEqual({
+      cmd: 'gemini',
+      args: ['--approval-mode', 'auto_edit', '-m', 'gemini-2.5-pro', '-p', 'P'],
+      stdin: null,
+      env: { GEMINI_CLI_TRUST_WORKSPACE: 'true' },
+    });
+  });
+
+  it('builds the gemini invocation WITHOUT -m when no model — CLI default (happy)', () => {
+    const inv = buildEngineInvocation('gemini', '', 'hi');
+    expect(inv.args).toEqual(['--approval-mode', 'auto_edit', '-p', 'hi']);
+    expect(inv.args).not.toContain('-m');
+    expect(inv.stdin).toBeNull();
+    expect(inv.env).toEqual({ GEMINI_CLI_TRUST_WORKSPACE: 'true' });
+  });
+
+  it('keeps the glm/claude shapes env-free (regression — no new fields on old engines)', () => {
+    expect(buildEngineInvocation('glm', 'm', 'p')).not.toHaveProperty('env');
+    expect(buildEngineInvocation('claude', '', 'p')).not.toHaveProperty('env');
+  });
 });
 
 describe('aiConfigView', () => {
   it('maps a populated config to a safe view, hiding raw keys (happy)', () => {
     const v = aiConfigView({ mode: 'api', provider: 'zai', model: 'm', keys: { anthropic: 'x' } });
-    expect(v).toEqual({ mode: 'api', provider: 'zai', model: 'm', thinking: null, cliEngine: 'claude', cliModel: '', visionModel: '', autoVision: true, readNoteImages: true, hasKey: { anthropic: true, zai: false, 'zai-coding': false } });
+    expect(v).toEqual({ mode: 'api', provider: 'zai', model: 'm', thinking: null, configured: false, cliEngine: 'claude', cliModel: '', visionModel: '', autoVision: true, readNoteImages: true, hasKey: { anthropic: true, zai: false, 'zai-coding': false } });
   });
 
   it('defaults to cli/anthropic/empty when given null (edge)', () => {
     expect(aiConfigView(null)).toEqual({
-      mode: 'cli', provider: 'anthropic', model: '', thinking: null, cliEngine: 'claude', cliModel: '', visionModel: '', autoVision: true, readNoteImages: true, hasKey: { anthropic: false, zai: false, 'zai-coding': false },
+      mode: 'cli', provider: 'anthropic', model: '', thinking: null, configured: false, cliEngine: 'claude', cliModel: '', visionModel: '', autoVision: true, readNoteImages: true, hasKey: { anthropic: false, zai: false, 'zai-coding': false },
     });
   });
 
   it('defaults to cli/anthropic/empty when given an empty object (edge)', () => {
     expect(aiConfigView({})).toEqual({
-      mode: 'cli', provider: 'anthropic', model: '', thinking: null, cliEngine: 'claude', cliModel: '', visionModel: '', autoVision: true, readNoteImages: true, hasKey: { anthropic: false, zai: false, 'zai-coding': false },
+      mode: 'cli', provider: 'anthropic', model: '', thinking: null, configured: false, cliEngine: 'claude', cliModel: '', visionModel: '', autoVision: true, readNoteImages: true, hasKey: { anthropic: false, zai: false, 'zai-coding': false },
     });
   });
 
@@ -68,6 +91,72 @@ describe('aiConfigView', () => {
   it('treats a non-string / empty key as absent (edge)', () => {
     const v = aiConfigView({ keys: { anthropic: '', zai: 123, x: 'y' } });
     expect(v.hasKey).toEqual({ anthropic: false, zai: false, 'zai-coding': false });
+  });
+
+  it('accepts gemini as a cliEngine (edge)', () => {
+    expect(aiConfigView({ mode: 'cli', cliEngine: 'gemini', cliModel: 'gemini-2.5-pro' }).cliEngine).toBe('gemini');
+  });
+
+  it('still falls back to claude for junk cliEngine values (edge)', () => {
+    expect(aiConfigView({ cliEngine: 'gpt' }).cliEngine).toBe('claude');
+    expect(aiConfigView({}).cliEngine).toBe('claude');
+    expect(aiConfigView(null).cliEngine).toBe('claude');
+  });
+
+  it('surfaces configured=true once the user saved/skipped AI setup (wizard gate)', () => {
+    expect(aiConfigView({ configured: true }).configured).toBe(true);
+    expect(aiConfigView({ configured: 'yes' }).configured).toBe(false);   // only strict true
+    expect(aiConfigView({}).configured).toBe(false);
+  });
+});
+
+describe('shouldShowAiWizard — pop the first-run AI wizard?', () => {
+  it('pops for a completely untouched config (happy)', () => {
+    expect(shouldShowAiWizard(aiConfigView({}))).toBe(true);
+    expect(shouldShowAiWizard(aiConfigView(null))).toBe(true);
+  });
+
+  it('does NOT pop when a key is already saved (edge)', () => {
+    expect(shouldShowAiWizard(aiConfigView({ keys: { anthropic: 'enc' } }))).toBe(false);
+    expect(shouldShowAiWizard(aiConfigView({ keys: { zai: 'enc' } }))).toBe(false);
+    expect(shouldShowAiWizard(aiConfigView({ keys: { 'zai-coding': 'enc' } }))).toBe(false);
+  });
+
+  it('does NOT pop once configured (saved settings or skipped wizard) (edge)', () => {
+    expect(shouldShowAiWizard(aiConfigView({ configured: true }))).toBe(false);
+  });
+
+  it('never pops in web mode even with an untouched config (edge)', () => {
+    expect(shouldShowAiWizard(aiConfigView({}), { web: true })).toBe(false);
+  });
+
+  it('no view → no wizard (defensive)', () => {
+    expect(shouldShowAiWizard(null)).toBe(false);
+  });
+});
+
+describe('aiWizardPatch — wizard choice → ai:setConfig patch', () => {
+  it('claude → cli mode, claude engine, no model alias (happy)', () => {
+    expect(aiWizardPatch('claude')).toEqual({ mode: 'cli', cliEngine: 'claude', cliModel: '', configured: true });
+  });
+
+  it('gemini → cli mode, gemini engine, free-text model; empty = CLI default (happy)', () => {
+    expect(aiWizardPatch('gemini', 'gemini-2.5-pro')).toEqual({ mode: 'cli', cliEngine: 'gemini', cliModel: 'gemini-2.5-pro', configured: true });
+    expect(aiWizardPatch('gemini', '  ')).toEqual({ mode: 'cli', cliEngine: 'gemini', cliModel: '', configured: true });
+  });
+
+  it('glm → cli mode with the Coding-Plan model default when left empty (happy)', () => {
+    expect(aiWizardPatch('glm', '')).toEqual({ mode: 'cli', cliEngine: 'glm', cliModel: 'zai-coding-plan/glm-5.2', configured: true });
+    expect(aiWizardPatch('glm', 'zai-coding-plan/glm-4.7')).toEqual({ mode: 'cli', cliEngine: 'glm', cliModel: 'zai-coding-plan/glm-4.7', configured: true });
+  });
+
+  it('skip → only marks configured so the wizard never auto-pops again (edge)', () => {
+    expect(aiWizardPatch('skip')).toEqual({ configured: true });
+  });
+
+  it('apikey / unknown → null — no config write, the wizard opens Settings instead (edge)', () => {
+    expect(aiWizardPatch('apikey')).toBeNull();
+    expect(aiWizardPatch('nope')).toBeNull();
   });
 });
 

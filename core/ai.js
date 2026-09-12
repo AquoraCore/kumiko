@@ -5,12 +5,21 @@
 //   glm    = `opencode run -m <model>`, prompt on STDIN
 //   claude = `claude -p <prompt> --permission-mode acceptEdits [--model <model>]`, no STDIN
 // For claude, `model` is an OPTIONAL alias/id (opus|sonnet|haiku|full-id); empty = CLI default.
+//   gemini = `gemini --approval-mode auto_edit [-m <model>] -p <prompt>`, no STDIN (verified on
+//   gemini-cli 0.41.2: headless REQUIRES -p; auto_edit approves ONLY edit tools; the env var
+//   below bypasses the trusted-directory gate). `model` empty = CLI default.
 function buildEngineInvocation(engine, model, prompt){
   if (engine === 'glm') return { cmd: 'opencode', args: ['run', '-m', model], stdin: prompt };
   if (engine === 'claude') {
     const args = ['-p', prompt, '--permission-mode', 'acceptEdits'];
     if (model) args.push('--model', model);
     return { cmd: 'claude', args, stdin: null };
+  }
+  if (engine === 'gemini') {
+    const args = ['--approval-mode', 'auto_edit'];
+    if (model) args.push('-m', model);
+    args.push('-p', prompt);
+    return { cmd: 'gemini', args, stdin: null, env: { GEMINI_CLI_TRUST_WORKSPACE: 'true' } };
   }
   return null;
 }
@@ -27,15 +36,18 @@ function aiConfigView(cfg){
   const has = (p) => !!(keys[p] && typeof keys[p] === 'string' && keys[p].length > 0);
   // thinking: true/false = explicit user choice; null = "use the provider/model default".
   const thinking = (c.thinking === true || c.thinking === false) ? c.thinking : null;
-  // CLI (subscription) mode fields — which local CLI to spawn + its model (glm/opencode only).
-  const cliEngine = (c.cliEngine === 'glm' || c.cliEngine === 'claude') ? c.cliEngine : 'claude';
+  // CLI (subscription) mode fields — which local CLI to spawn + its model (glm/opencode, claude, gemini).
+  const cliEngine = (c.cliEngine === 'glm' || c.cliEngine === 'claude' || c.cliEngine === 'gemini') ? c.cliEngine : 'claude';
   const cliModel = (typeof c.cliModel === 'string') ? c.cliModel : '';
   // vision: which model handles image messages (Z.ai only — Claude models all see), whether to
   // auto-switch to it, and whether READ-NOTE attaches slide images from notes. Defaults ON.
   const visionModel = (typeof c.visionModel === 'string') ? c.visionModel : '';
   const autoVision = (c.autoVision === false) ? false : true;
   const readNoteImages = (c.readNoteImages === false) ? false : true;
-  return { mode, provider, model, thinking, cliEngine, cliModel, visionModel, autoVision, readNoteImages, hasKey: { anthropic: has('anthropic'), zai: has('zai') || has('zai-coding'), 'zai-coding': has('zai-coding') || has('zai') } };   // both Z.ai endpoints share one key
+  // configured: separates "the raw defaults" from "the user chose something" — set when the user
+  // saves from the settings modal or the onboarding wizard (also on "ข้ามไปก่อน"/skip).
+  const configured = !!(c.configured === true);
+  return { mode, provider, model, thinking, configured, cliEngine, cliModel, visionModel, autoVision, readNoteImages, hasKey: { anthropic: has('anthropic'), zai: has('zai') || has('zai-coding'), 'zai-coding': has('zai-coding') || has('zai') } };   // both Z.ai endpoints share one key
 }
 
 // Return a NEW config with keys[provider] set to `encrypted`, or DELETED when
@@ -48,6 +60,28 @@ function setConfigKey(cfg, provider, encrypted){
   if (encrypted === null || encrypted === undefined || encrypted === '') delete next.keys[provider];
   else next.keys[provider] = encrypted;
   return next;
+}
+
+// ---- AI onboarding wizard: PURE decision helpers ------------------------------
+// shouldShowAiWizard: does the FIRST-open-of-AI-chat wizard pop? Takes the SAFE view from
+// aiConfigView (never raw keys) + opts.web (renderer is the web build). Never at boot, never
+// on web, never once the user has touched AI setup (a saved key or configured=true).
+function shouldShowAiWizard(view, opts){
+  if (!view) return false;
+  if (opts && opts.web) return false;   // web has managed/API — no CLI wizard there
+  if (view.configured) return false;
+  if (view.hasKey && (view.hasKey.anthropic || view.hasKey.zai || view.hasKey['zai-coding'])) return false;
+  return true;
+}
+// aiWizardPatch: wizard choice → ai:setConfig patch. 'skip' only marks configured so the
+// wizard never auto-pops again; 'apikey' returns null (the wizard just opens Settings instead).
+function aiWizardPatch(choice, model){
+  const m = (typeof model === 'string') ? model.trim() : '';
+  if (choice === 'claude') return { mode: 'cli', cliEngine: 'claude', cliModel: '', configured: true };
+  if (choice === 'gemini') return { mode: 'cli', cliEngine: 'gemini', cliModel: m, configured: true };
+  if (choice === 'glm') return { mode: 'cli', cliEngine: 'glm', cliModel: m || 'zai-coding-plan/glm-5.2', configured: true };
+  if (choice === 'skip') return { configured: true };
+  return null;
 }
 
 // ---- API request builders: PURE, side-effect-free ---------------------------
@@ -178,10 +212,16 @@ function parseEmbedResponse(provider, obj){
   return withIndex.map((e) => e.embedding);
 }
 
-module.exports = {
-  buildEngineInvocation, aiConfigView, setConfigKey,
-  buildApiRequest, parseSseDelta, parseSseEvent,
-  buildEmbedRequest, parseEmbedResponse,
-  // capability table (models + thinking support) — re-exported for convenience
-  ...require('./aicaps'),
-};
+// Browser (renderer loads this as a plain script): expose ONLY the pure helpers the wizard
+// needs — the request builders stay Node-only (they never run in a browser anyway).
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    buildEngineInvocation, aiConfigView, setConfigKey,
+    shouldShowAiWizard, aiWizardPatch,
+    buildApiRequest, parseSseDelta, parseSseEvent,
+    buildEmbedRequest, parseEmbedResponse,
+    // capability table (models + thinking support) — re-exported for convenience
+    ...require('./aicaps'),
+  };
+}
+if (typeof window !== 'undefined') window.CoreAi = { shouldShowAiWizard, aiWizardPatch };

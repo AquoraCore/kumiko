@@ -2,6 +2,9 @@
 function stripAnsi(s){ return s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\r/g, ''); }
 function cleanChatText(s){
   return stripAnsi(s)
+    // main.js emits a stable marker when the gemini CLI dies un-logged-in — swap it here (the
+    // only seam every chat surface flows through) so TH/EN comes from i18n, not the main process
+    .replace(/\[gemini-not-logged-in\]/g, t('Gemini CLI ยังไม่ได้ล็อกอิน — เปิด Terminal รันคำสั่ง `gemini` หนึ่งครั้งเพื่อล็อกอิน Google แล้วลองใหม่'))
     .replace(/Warning: no stdin data received[^\n]*\n?/g, '')
     .replace(/^\s*>\s*build\b.*$/gm, '')
     .replace(/\n{3,}/g, '\n\n');

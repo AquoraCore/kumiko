@@ -76,6 +76,7 @@ contextBridge.exposeInMainWorld('api', {
   aiSetConfig: (patch) => ipcRenderer.invoke('ai:setConfig', patch),
   aiSetKey: (provider, key) => ipcRenderer.invoke('ai:setKey', { provider, key }),
   aiTestConnection: () => ipcRenderer.invoke('ai:testConnection'),
+  aiDetectClis: () => ipcRenderer.invoke('ai:detectClis'),
   ragContext: (question, opts) => ipcRenderer.invoke('rag:context', { question, opts: opts || {} }),
 
   collabRelay,   // phase 6c-3a: point the collab editor at a specific y-websocket relay

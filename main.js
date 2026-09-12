@@ -6,7 +6,7 @@ const chokidar = require('chokidar');
 const { wikiTargets, linksTo, rewriteLinkTargets } = require('./core/wikilinks');
 const { safeRel, baseName, vaultName } = require('./core/pathutil');
 const { aiConfigView, setConfigKey, buildApiRequest, parseSseDelta, parseSseEvent, modelSupportsVision, visionModelFor, buildEmbedRequest, parseEmbedResponse, resolveThinking, buildEngineInvocation } = require('./core/ai');
-const { spawn } = require('child_process');   // CLI (subscription) engine path — claude / opencode
+const { spawn, spawnSync } = require('child_process');   // CLI (subscription) engine path — claude / opencode / gemini
 const os = require('os');
 // A GUI app launched from Finder/Dock inherits a MINIMAL PATH (/usr/bin:/bin:…) that does NOT
 // include Homebrew etc., so `spawn('claude')` fails with ENOENT even though the CLI is installed.
@@ -48,6 +48,7 @@ function readAiConfig(){
       model: (a && typeof a.model === 'string') ? a.model : '',
       keys: (a && a.keys && typeof a.keys === 'object') ? a.keys : {},
       _plain: !!(a && a._plain),
+      configured: !!(a && a.configured),   // survives reads so the onboarding wizard never re-pops
     };
   } catch (_) { return { mode: 'api', provider: 'anthropic', model: '', keys: {} }; }
 }
@@ -100,8 +101,9 @@ ipcMain.handle('ai:setConfig', (e, patch) => {
     if ('autoVision' in patch) cfg.autoVision = patch.autoVision;
     if ('readNoteImages' in patch) cfg.readNoteImages = patch.readNoteImages;
     if ('thinking' in patch) cfg.thinking = patch.thinking;   // true/false/null (provider default)
-    if ('cliEngine' in patch) cfg.cliEngine = patch.cliEngine;   // 'claude' | 'glm' (CLI/subscription mode)
+    if ('cliEngine' in patch) cfg.cliEngine = patch.cliEngine;   // 'claude' | 'glm' | 'gemini' (CLI/subscription mode)
     if ('cliModel' in patch) cfg.cliModel = patch.cliModel;
+    if ('configured' in patch) cfg.configured = !!patch.configured;   // user saved AI setup (settings modal / wizard) or skipped the wizard
   }
   writeAiConfig(cfg);
   return aiConfigView(cfg);
@@ -133,6 +135,18 @@ ipcMain.handle('ai:testConnection', async () => {
   } catch (err) {
     return { ok: false, error: String(err) };
   }
+});
+
+// Which local AI CLIs are installed? For the onboarding wizard's badges/hints. `which` runs
+// under the rich login PATH so Finder-launched apps see Homebrew/npm bins too. Desktop only
+// (this file never loads on web). Never throws — a missing `which` just reports all-false.
+ipcMain.handle('ai:detectClis', () => {
+  const env = _richEnv();
+  const has = (bin) => {
+    try { return spawnSync('which', [bin], { env, encoding: 'utf8', timeout: 5000 }).status === 0; }
+    catch (_) { return false; }
+  };
+  return { claude: has('claude'), opencode: has('opencode'), gemini: has('gemini') };
 });
 
 // ---- Collab auth token (phase 7b-4) -----------------------------------------
@@ -556,7 +570,7 @@ async function runApiProvider({ provider, model, prompt, key, rid, emit, thinkin
   }
 }
 
-// ---- CLI (subscription) engine — spawns `claude`/`opencode` so AI runs on the user's
+// ---- CLI (subscription) engine — spawns `claude`/`opencode`/`gemini` so AI runs on the user's
 // logged-in SUBSCRIPTION, NO API key. Desktop only (a browser can't spawn a process).
 // buildEngineInvocation (core/ai.js) maps engine+model+prompt -> {cmd,args,stdin}. The child
 // is stored in engineProcs so the existing engine:stop (SIGINT→SIGKILL) aborts it too.
@@ -569,14 +583,23 @@ function runCliEngine({ engine, model, prompt, rid, emit }){
   // cwd MUST be the vault so the CLI can open/edit the note by its {file} name (e.g. "Nephron.md").
   // Without this the action-bar "let AI edit this note" flow silently no-ops: claude runs in the app
   // dir, can't find the file, edits nothing → the chokidar watcher never fires → no accept/review.
-  try { child = spawn(bin, inv.args, { stdio: ['pipe', 'pipe', 'pipe'], env, cwd: NOTES_DIR }); }
+  // gemini adds engine-specific env (GEMINI_CLI_TRUST_WORKSPACE) on top of the rich login PATH.
+  const spawnEnv = inv.env ? Object.assign({}, env, inv.env) : env;
+  try { child = spawn(bin, inv.args, { stdio: ['pipe', 'pipe', 'pipe'], env: spawnEnv, cwd: NOTES_DIR }); }
   catch (err) { emit('\r\n[เรียก ' + inv.cmd + ' ไม่ได้ — ติดตั้ง/ล็อกอิน CLI แล้วหรือยัง?] ' + (err && err.message || '') + '\r\n'); win.webContents.send('engine:done', { runId: rid, code: -1 }); return; }
   engineProcs.set(rid, child);   // child.kill(signal) satisfies engine:stop
   child.on('error', (err) => { emit('\r\n[' + inv.cmd + ' error: ' + (err && err.message || err) + ' — ' + (String(err && err.code) === 'ENOENT' ? ('หา `' + inv.cmd + '` ไม่เจอ — ติดตั้งแล้วหรือยัง? (PATH: ' + env.PATH.split(path.delimiter).slice(0,3).join(', ') + '…)') : 'ติดตั้ง CLI แล้วหรือยัง?') + ']\r\n'); });
   if (child.stdin) { if (inv.stdin != null) { try { child.stdin.write(inv.stdin); } catch (_) {} } try { child.stdin.end(); } catch (_) {} }
   if (child.stdout) child.stdout.on('data', (d) => emit(d.toString()));
-  if (child.stderr) child.stderr.on('data', (d) => emit(d.toString()));
-  child.on('close', (code) => { engineProcs.delete(rid); _lastEngineExit = Date.now(); win.webContents.send('engine:done', { runId: rid, code: (code == null ? 0 : code) }); });
+  let _err = '';
+  if (child.stderr) child.stderr.on('data', (d) => { const s = d.toString(); _err += s; emit(s); });
+  child.on('close', (code) => {
+    engineProcs.delete(rid); _lastEngineExit = Date.now();
+    // gemini login gate: OAuth traces + non-zero exit = the CLI was never signed in. Emit a stable
+    // marker; the renderer swaps it (via i18n) for a readable TH/EN hint instead of the raw dump.
+    if (code !== 0 && engine === 'gemini' && /OAuth|oauth2|_doSetupUser|Please sign in/.test(_err)) emit('\r\n[gemini-not-logged-in]\r\n');
+    win.webContents.send('engine:done', { runId: rid, code: (code == null ? 0 : code) });
+  });
 }
 
 // ---- One-shot engine runner (no shell, argv array) ----
@@ -618,8 +641,8 @@ ipcMain.handle('engine:run', (e, { engine, model, prompt, runId, images }) => {
   // CLI (subscription) mode — spawn the logged-in `claude`/`opencode` CLI, no API key.
   if (aicfg.mode === 'cli') {
     const eng = aicfg.cliEngine || 'claude';
-    // glm needs an opencode model (default the Coding-Plan one); claude's model is an
-    // OPTIONAL alias (opus/sonnet/haiku) — empty means the claude CLI's own default.
+    // glm needs an opencode model (default the Coding-Plan one); claude/gemini models are
+    // OPTIONAL — empty means that CLI's own default.
     const mdl = (eng === 'glm') ? (aicfg.cliModel || 'zai-coding-plan/glm-5.2') : (aicfg.cliModel || '');
     // CLI can't take content blocks — write images to temp files and point the CLI at them
     // (both `claude` and `opencode` read image files with their own tools)

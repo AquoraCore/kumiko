@@ -39,6 +39,16 @@ const AI_CAPABILITIES = {
     ],
     visionDefault: 'glm-4.6v',
   },
+  // gemini CLI (subscription mode) — thinking is NOT toggleable from Kumiko (the CLI decides),
+  // hence thinking:false on every row. Free-text model; empty = the CLI's own default.
+  gemini: {
+    label: 'Gemini CLI (Google)',
+    thinkingDefault: false,
+    models: [
+      { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', thinking: false },
+      { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', thinking: false },
+    ],
+  },
 };
 
 function aiProviders(){ return Object.keys(AI_CAPABILITIES); }
