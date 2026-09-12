@@ -30,7 +30,7 @@
 ## ติดตั้ง (macOS)
 
 ```bash
-git clone https://github.com/Pasawittz/kumiko.git
+git clone https://github.com/AquoraCore/kumiko.git
 cd kumiko
 npm install
 npm run dist
@@ -54,7 +54,7 @@ open dist/mac-arm64/Kumiko.app
 Kumiko is an Electron study-notes app built Thai-first: WYSIWYG Markdown notes with wikilinks/tags/databases, an in-app PDF reader whose highlights and sticky notes can be burned into captured slide images, and an AI layer that *edits your vault through a per-hunk review UI* rather than just chatting — powered by your existing Claude Code or OpenCode CLI subscription, or an API key. Kumiko Canvas turns note sections into draggable cards wired together by the `[[wikilinks]]` already in your content. Everything is plain `.md` files in your own folder, with automatic version history. Includes 30 authentic kumiko woodwork patterns as themes, and an experimental self-hostable web server.
 
 ```bash
-git clone https://github.com/Pasawittz/kumiko.git && cd kumiko && npm install && npm run dist
+git clone https://github.com/AquoraCore/kumiko.git && cd kumiko && npm install && npm run dist
 ```
 
 ## Development
