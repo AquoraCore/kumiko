@@ -29,7 +29,7 @@
 
 ## Install (macOS, Apple Silicon)
 
-Grab the zip from [**Releases**](https://github.com/AquoraCore/kumiko/releases), unzip, drag **Kumiko.app** into Applications. The app isn't notarized yet — on first launch use **right-click → Open**, or:
+[**Download the DMG**](https://github.com/AquoraCore/kumiko/releases/latest/download/Kumiko-mac-arm64.dmg), open it, and drag **Kumiko** into Applications. The app isn't notarized yet — on first launch use **right-click → Open**, or:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Kumiko.app
