@@ -9,6 +9,10 @@
   <em>Built Thai-first 🇹🇭 · works fully in English too.</em>
 </p>
 
+<p align="center">
+  <a href="https://aquoracore.com/kumiko"><strong>aquoracore.com/kumiko</strong></a> · a product of <a href="https://aquoracore.com">Aquora</a>
+</p>
+
 ---
 
 ![Notes with a live diagram and the AI side chat](docs/screenshots/editor.png)
