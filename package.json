@@ -17,7 +17,8 @@
     "server": "node server/index.js",
     "build:crepe": "esbuild build/crepe-entry.js --bundle --format=iife --loader:.ttf=dataurl --loader:.woff=dataurl --loader:.woff2=dataurl --loader:.eot=dataurl --loader:.svg=dataurl --outfile=renderer/vendor/crepe.bundle.js",
     "build:mermaid": "esbuild build/mermaid-entry.js --bundle --format=iife --outfile=renderer/vendor/mermaid.bundle.js",
-    "build:ocr": "swiftc -O native/pdf-ocr.swift -o native/pdf-ocr"
+    "build:ocr": "swiftc -O native/pdf-ocr.swift -o native/pdf-ocr",
+    "dist:dmg": "electron-builder --mac dmg"
   },
   "author": "",
   "license": "AGPL-3.0-only",
@@ -48,6 +49,29 @@
     ],
     "directories": {
       "output": "dist"
+    },
+    "dmg": {
+      "background": "build/dmg-background.png",
+      "window": {
+        "width": 660,
+        "height": 420
+      },
+      "iconSize": 110,
+      "contents": [
+        {
+          "x": 180,
+          "y": 225,
+          "type": "file"
+        },
+        {
+          "x": 480,
+          "y": 225,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ],
+      "artifactName": "Kumiko-mac-arm64.${ext}",
+      "title": "Kumiko ${version}"
     }
   },
   "devDependencies": {
