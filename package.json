@@ -78,30 +78,32 @@
   },
   "devDependencies": {
     "@electron/rebuild": "^3.6.0",
+    "@milkdown/crepe": "^7.21.3",
+    "@milkdown/plugin-collab": "^7.21.3",
     "@playwright/test": "^1.48.0",
+    "@y/websocket-server": "^0.1.5",
+    "codemirror": "^5.65.21",
     "electron": "^33.2.0",
     "electron-builder": "^24.13.3",
     "esbuild": "^0.28.1",
-    "vitest": "^2.1.4"
-  },
-  "dependencies": {
-    "@milkdown/crepe": "^7.21.3",
-    "@milkdown/plugin-collab": "^7.21.3",
-    "@y/websocket-server": "^0.1.5",
-    "bcryptjs": "^3.0.3",
-    "chokidar": "^3.6.0",
-    "codemirror": "^5.65.21",
-    "express": "^5.2.1",
-    "google-auth-library": "^11.0.0",
     "hypermd": "^0.3.11",
-    "jsonwebtoken": "^9.0.3",
     "marked": "^12.0.2",
     "mermaid": "^11.16.1",
     "pdfjs-dist": "^3.11.174",
+    "vitest": "^2.1.4",
+    "y-prosemirror": "^1.3.7",
+    "y-websocket": "^3.0.0"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "chokidar": "^3.6.0",
+    "express": "^5.2.1",
+    "google-auth-library": "^11.0.0",
+    "jsonwebtoken": "^9.0.3",
+    "lib0": "^0.2.117",
     "qrcode": "^1.5.4",
     "ws": "^8.21.1",
-    "y-prosemirror": "^1.3.7",
-    "y-websocket": "^3.0.0",
+    "y-protocols": "^1.0.7",
     "yjs": "^13.6.31"
   }
 }

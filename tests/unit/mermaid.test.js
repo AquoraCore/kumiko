@@ -9,9 +9,9 @@ const read = (p) => fs.readFileSync(path.join(__dirname, '../../', p), 'utf8');
 // threw, and mermaid then drew its own page-sized error SVG into <body>. Since decorations()
 // re-runs on every keystroke, typing stacked one bomb per character.
 describe('mermaid renders Thai and never draws page-sized errors', () => {
-  it('is pinned to v11 as a DIRECT dependency (8.x cannot parse Thai)', () => {
+  it('is pinned to v11 as a direct dep (8.x cannot parse Thai) — devDependencies counts: the runtime copy is the vendored bundle', () => {
     const pkg = JSON.parse(read('package.json'));
-    const dep = (pkg.dependencies && pkg.dependencies.mermaid) || '';
+    const dep = (pkg.dependencies && pkg.dependencies.mermaid) || (pkg.devDependencies && pkg.devDependencies.mermaid) || '';
     expect(dep).toBeTruthy();
     expect(dep).toMatch(/1[1-9]/);          // v11+
     const installed = JSON.parse(read('node_modules/mermaid/package.json')).version;
