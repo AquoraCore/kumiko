@@ -1,0 +1,16 @@
+services:
+  kumiko:
+    image: ghcr.io/aquoracore/kumiko:latest
+    build: .
+    ports:
+      - "4321:4321"
+    volumes:
+      - ./kumiko-data:/data
+    restart: unless-stopped
+    # environment:
+    #   - AUTH_SECRET=change-me            # optional — auto-generated & persisted in /data/.auth-secret if unset
+    #   - ALLOWED_EMAILS=you@example.com   # lock signup to specific accounts (comma-separated)
+    #   - MANAGED_AI_PROVIDER=anthropic    # server holds the AI key so browsers never see it
+    #   - MANAGED_AI_KEY=sk-ant-...
+    #   - MANAGED_AI_MODEL=claude-opus-4-8
+    #   - GOOGLE_CLIENT_ID=1234-xyz.apps.googleusercontent.com

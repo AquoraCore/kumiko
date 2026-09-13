@@ -26,7 +26,7 @@
 - **Kumiko Canvas** — a summary board: pull full *sections* of notes onto cards, drag and resize them, wire sections together (suggested wires grow automatically from the `[[wikilinks]]` already in your content), keep multiple boards, or just ask the AI to arrange one
 - **Plain files, forever** — every note is a `.md` file and every image a real file in your own folder, with automatic version history. No account, no cloud lock-in
 - **30 authentic kumiko patterns** — background themes drawn from Japanese woodwork lattices (asanoha, sakura-goshi, shippō, …), light and dark
-- **Self-hostable web server** *(experimental)* — the same UI from a browser or phone
+- **Self-hostable web server** *(experimental)* — the same UI from a browser or phone · [self-hosting guide](docs/SELF-HOSTING.md)
 - Thai ⇄ English UI toggle · multiple isolated vaults · restorable trash
 
 ![Kumiko Canvas — an exam-prep board](docs/screenshots/canvas.png)
@@ -72,6 +72,8 @@ npm test          # vitest — 800+ unit tests
 npm start         # run unpackaged (dev)
 npm run server    # self-hosted web server (PORT, DATA_DIR, AUTH_SECRET)
 ```
+
+Just want to try the server? One command, no build: `docker run -d -p 4321:4321 -v ./kumiko-data:/data ghcr.io/aquoracore/kumiko` → http://localhost:4321 — see [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md).
 
 ## License
 

@@ -57,11 +57,10 @@ function makeVaultOf(vreg) {
 
 async function startServer(opts = {}) {
   const port = opts.port != null ? opts.port : (Number(process.env.PORT) || 4321);
-  const secret = opts.secret || process.env.AUTH_SECRET || 'dev-insecure-secret-change-me';
-  if (secret === 'dev-insecure-secret-change-me') {
-    console.warn('[server] WARNING: using insecure default AUTH_SECRET — set AUTH_SECRET for anything but local dev.');
-  }
   const dataDir = opts.dataDir || process.env.DATA_DIR || path.join(__dirname, '..', '.server-data');
+  // AUTH_SECRET: opts (tests) > env > persisted <dataDir>/.auth-secret (auto-generated
+  // on first boot). See auth.resolveAuthSecret — tokens survive restarts either way.
+  const secret = opts.secret || auth.resolveAuthSecret(dataDir);
   setPersistDir(path.join(dataDir, 'rooms'));
   const store = createStore(path.join(dataDir, 'users.json'));
   const googleClientId = opts.googleClientId || process.env.GOOGLE_CLIENT_ID || '';
