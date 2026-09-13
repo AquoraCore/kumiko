@@ -499,6 +499,7 @@ app.whenReady().then(() => {
   NOTES_DIR = resolveNotesDir();
   if (!fs.existsSync(NOTES_DIR)) fs.mkdirSync(NOTES_DIR, { recursive: true });
   createWindow();
+  maybeAutoStartHost();   // Host Mode: restore a running host from the last session
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -1546,4 +1547,88 @@ ipcMain.on('vault:stateReadSync', (e) => {
   try { e.returnValue = JSON.parse(fs.readFileSync(path.join(washiDir(), 'state.json'), 'utf8')); }
   catch (_) { e.returnValue = null; }
 });
+
+// ---- Host Mode (desktop): run the web server in-process so phones/LAN browsers ----
+// can open Kumiko with one switch — no Docker, no Terminal. State lives in this one
+// module: hostSrv (startServer result) + hostInfo ({mode, port, urls, pairToken}).
+// Config persists in userData/host-config.json (same pattern as readAiConfig) so a
+// running host auto-restores on the next app boot.
+const { hostConfigView, lanUrls, pairUrl } = require('./core/hostmode');
+function hostConfigFile(){ return path.join(app.getPath('userData'), 'host-config.json'); }
+function readHostConfig(){
+  try { return hostConfigView(JSON.parse(fs.readFileSync(hostConfigFile(), 'utf8'))); }
+  catch (_) { return hostConfigView({}); }
+}
+function writeHostConfig(cfg){
+  try { fs.writeFileSync(hostConfigFile(), JSON.stringify(cfg, null, 2), 'utf8'); } catch (_) {}
+}
+let hostSrv = null, hostInfo = null;
+function hostStatusPayload(){
+  if (!hostSrv || !hostInfo) return { running: false, devices: [] };
+  const base = hostInfo.urls[0] || ('http://127.0.0.1:' + hostInfo.port);
+  return {
+    running: true, mode: hostInfo.mode, port: hostInfo.port, urls: hostInfo.urls,
+    pairUrl: hostInfo.mode === 'mirror' ? pairUrl(base, hostInfo.pairToken) : null,
+    devices: hostSrv.getDevices(),
+  };
+}
+function _hostNotify(){
+  try { if (win && !win.isDestroyed()) win.webContents.send('host:changed', hostStatusPayload()); } catch (_) {}
+}
+async function stopHost(){
+  if (!hostSrv) return;
+  const s = hostSrv; hostSrv = null; hostInfo = null;
+  try { await s.close(); } catch (_) {}
+  _hostNotify();
+}
+async function startHost(mode){
+  await stopHost();
+  const { startServer } = require('./server/index');
+  const crypto = require('crypto');
+  const cfg = readHostConfig();
+  const dataDir = path.join(app.getPath('userData'), 'host-data');
+  const pairToken = crypto.randomBytes(16).toString('hex');
+  // EADDRINUSE: walk cfg.port .. cfg.port+10, report the port that actually bound.
+  let lastErr = null;
+  for (let off = 0; off <= 10 && !hostSrv; off++) {
+    try {
+      const sopts = { port: cfg.port + off, dataDir };
+      if (mode !== 'family') {
+        sopts.pairToken = pairToken;
+        sopts.mirrorVault = { email: 'owner@kumiko.local', dir: NOTES_DIR };
+      }
+      hostSrv = await startServer(sopts);
+    } catch (e) {
+      lastErr = e;
+      if (String((e && e.code) || e).indexOf('EADDRINUSE') < 0) throw e;
+    }
+  }
+  if (!hostSrv) throw lastErr;
+  hostInfo = { mode: mode === 'family' ? 'family' : 'mirror', port: hostSrv.port, urls: lanUrls(os.networkInterfaces(), hostSrv.port), pairToken, startedAt: Date.now() };
+  _hostNotify();
+  return hostStatusPayload();
+}
+ipcMain.handle('host:start', async (e, { mode } = {}) => {
+  const cfg = readHostConfig();
+  cfg.enabled = true;
+  cfg.mode = (mode === 'family') ? 'family' : 'mirror';
+  writeHostConfig(cfg);
+  try { return Object.assign({ ok: true }, await startHost(cfg.mode)); }
+  catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
+});
+ipcMain.handle('host:stop', async () => {
+  const cfg = readHostConfig(); cfg.enabled = false; writeHostConfig(cfg);
+  await stopHost();
+  return { ok: true };
+});
+ipcMain.handle('host:status', () => hostStatusPayload());
+ipcMain.handle('host:qr', async (e, { text } = {}) => {
+  try { return await require('qrcode').toDataURL(String(text || ''), { margin: 1, width: 240 }); }
+  catch (_) { return null; }
+});
+function maybeAutoStartHost(){
+  const cfg = readHostConfig();
+  if (cfg.enabled) startHost(cfg.mode).catch(() => {});
+}
+app.on('before-quit', () => { if (hostSrv) { try { hostSrv.close(); } catch (_) {} } });
 

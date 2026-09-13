@@ -4,6 +4,17 @@ Run the full Kumiko web app (notes, PDFs, AI, collab) on your own machine or a s
 
 > Status: experimental. The desktop app remains the primary experience; the server is the same UI from a browser or phone.
 
+## In-app Host Mode (LAN)
+
+No Docker, no Terminal: open the desktop app → **Settings → Host on the network** and flip the switch. Kumiko runs its web server inside the app; phones on the same Wi-Fi scan the QR code and are in immediately.
+
+Two modes:
+
+- **Share this vault (mirror)** — your phone lands directly in the desktop's current vault, no signup. Phones sign in via the QR's one-time pairing token, refreshed every time the host restarts.
+- **Family server** — members create their own accounts and each gets a separate vault, just like a normal web deployment.
+
+How it differs from Docker above: the host runs **only while the desktop app is open** (closing the app pauses it; a running host restores itself on the next launch) and it is reachable **only on your local Wi-Fi** — not from the internet. For outside-your-home access, use the Docker deployment with a Cloudflare Tunnel.
+
 ## Quick start (Docker)
 
 ```bash

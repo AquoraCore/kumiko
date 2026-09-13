@@ -135,6 +135,23 @@ async function webReset() {
 window.addEventListener('DOMContentLoaded', () => {
   const box = document.getElementById('webLogin');
   if (!box) return;
+  // Scan-the-QR flow (in-app Host Mode, mirror): /?pair=<token> → exchange for a
+  // session directly — the phone never sees the login card. Failure falls through
+  // to the normal login overlay.
+  if (!webAuthed()) {
+    try {
+      const pairTok = new URLSearchParams(location.search).get('pair');
+      if (pairTok) {
+        (async () => {
+          try {
+            const { r, j } = await webJson('/auth/pair', { token: pairTok });
+            if (r.ok && j.token) { await window.api.authSetToken(j.token, j.email); location.reload(); }
+          } catch (_) { /* fall through to login */ }
+        })();
+        return;   // don't flash the login card while pairing is in flight
+      }
+    } catch (_) {}
+  }
   if (!webAuthed()) {
     box.style.display = 'flex';
     setupGoogle(); // fire-and-forget; button stays hidden if no client id

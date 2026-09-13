@@ -27,6 +27,7 @@
 - **Plain files, forever** — every note is a `.md` file and every image a real file in your own folder, with automatic version history. No account, no cloud lock-in
 - **30 authentic kumiko patterns** — background themes drawn from Japanese woodwork lattices (asanoha, sakura-goshi, shippō, …), light and dark
 - **Self-hostable web server** *(experimental)* — the same UI from a browser or phone · [self-hosting guide](docs/SELF-HOSTING.md)
+  - Or just flip the Host switch in the desktop app: phones on your home Wi-Fi scan a QR code and are in — no Docker needed ([In-app Host Mode](docs/SELF-HOSTING.md#in-app-host-mode-lan))
 - Thai ⇄ English UI toggle · multiple isolated vaults · restorable trash
 
 ![Kumiko Canvas — an exam-prep board](docs/screenshots/canvas.png)

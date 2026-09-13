@@ -16,8 +16,11 @@ const { createAiQuota } = require('./aiquota');
 const { createRateLimiter } = require('./ratelimit');
 // Real client IP behind the Cloudflare Tunnel: CF-Connecting-IP is the browser's IP;
 // req.ip / the socket would just be the tunnel/localhost. Falls back for local dev.
+// ::ffff:x.x.x.x (v6-mapped) is normalized to the plain v4 form so rate-limit keys
+// and device tracking see one identity per client.
 function clientIp(req) {
-  return String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || (req.socket && req.socket.remoteAddress) || 'unknown').split(',')[0].trim();
+  const raw = String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || (req.socket && req.socket.remoteAddress) || 'unknown').split(',')[0].trim();
+  return raw.indexOf('::ffff:') === 0 ? raw.slice(7) : raw;
 }
 const aiCore = require('../core/ai');
 const coreEmail = require('../core/email');
@@ -173,6 +176,21 @@ async function startServer(opts = {}) {
   // the express default is 100kb, which silently 413s a single cropped image.
   app.use(express.json({ limit: '25mb' }));
 
+  // ---- device tracking (in-app Host Mode): ip -> {ua, last}, 10-min TTL ----
+  const DEVICE_TTL_MS = 10 * 60 * 1000;
+  const devices = new Map();
+  app.use((req, res, next) => {
+    try { devices.set(clientIp(req), { ua: String(req.headers['user-agent'] || '').slice(0, 200), last: now() }); } catch (_) {}
+    next();
+  });
+  const getDevices = (maxAgeMs) => {
+    const ttl = (maxAgeMs != null) ? maxAgeMs : DEVICE_TTL_MS;
+    const out = [];
+    for (const [ip, d] of devices) if (now() - d.last <= ttl) out.push({ ip, ua: d.ua, last: d.last });
+    out.sort((a, b) => b.last - a.last);
+    return out;
+  };
+
   // Per-user vault registry (Phase 8.2). Resolves the x-vault header to a
   // real vault id, falling back to the user's default vault.
   const vreg = createVaultReg(path.join(dataDir, 'vaults'));
@@ -218,6 +236,41 @@ async function startServer(opts = {}) {
     const s = Math.ceil(Math.max(0, worstMs) / 1000);
     res.set('Retry-After', String(s));
     return res.status(429).json({ error: 'พยายามบ่อยเกินไป — ลองใหม่ในอีก ' + s + ' วินาที', retryAfter: s });
+  }
+
+  // ---- mirror vault (in-app Host Mode, mirror): bind the desktop's CURRENT vault ----
+  // opts.mirrorVault = { email, dir }. (ก) find-or-create a dedicated pair-only account,
+  // (ข) point that account's default vault dir at `dir` via a SYMLINK — notestore /
+  // vaultfs / dbstore / pdfstore / assets all resolve <dataDir>/vaults/<enc(uid)>/<enc(vid)>
+  // through the real filesystem, so the mirror account transparently reads/writes the
+  // desktop vault with zero changes to those modules. (ค) the account has NO password:
+  // it signs in ONLY via POST /auth/pair with the one-time-per-start pairing token.
+  let mirrorUser = null;
+  if (opts.mirrorVault && opts.mirrorVault.email && opts.mirrorVault.dir) {
+    const em = auth.normalizeEmail(opts.mirrorVault.email);
+    mirrorUser = store.findByEmail(em) || store.create({ email: em, verified: true, pairOnly: true });
+    if (!mirrorUser.pairOnly) store.update(mirrorUser.id, { pairOnly: true });
+    try {
+      const vid = vreg.defaultVaultId(mirrorUser.id);
+      const vdir = path.join(dataDir, 'vaults', encodeURIComponent(String(mirrorUser.id)), encodeURIComponent(String(vid)));
+      let cur = null;
+      try { cur = fs.readlinkSync(vdir); } catch (_) {}   // null = missing or a real dir
+      if (cur !== opts.mirrorVault.dir) {
+        if (fs.existsSync(vdir)) fs.rmSync(vdir, { recursive: true, force: true });
+        fs.mkdirSync(path.dirname(vdir), { recursive: true });
+        fs.symlinkSync(opts.mirrorVault.dir, vdir, 'dir');
+      }
+    } catch (_) { /* unwritable dataDir etc: pairing still works, vault stays server-local */ }
+  }
+
+  // POST /auth/pair {token} — scan-the-QR login for Host Mode mirror. Active ONLY when
+  // a pairing token + mirror account were configured (family mode signs up normally).
+  if (opts.pairToken && mirrorUser) {
+    app.post('/auth/pair', (req, res) => {
+      const tok = String((req.body || {}).token || '');
+      if (!tok || tok !== opts.pairToken) return res.status(401).json({ error: 'invalid token' });
+      return res.json({ token: auth.signToken({ sub: mirrorUser.id, email: mirrorUser.email }, secret), email: mirrorUser.email });
+    });
   }
 
   // POST /auth/signup {email,password}
@@ -351,6 +404,8 @@ async function startServer(opts = {}) {
     if (ci.limited || ce.limited) return tooMany(res, Math.max(ci.retryAfterMs, ce.retryAfterMs));
     if (!emailAllowed(email)) { loginLimiter.hit(ipKey); if (emKey) loginLimiter.hit(emKey); return res.status(403).json({ error: 'not_allowed' }); }
     const user = store.findByEmail(em);
+    // Mirror accounts (in-app Host Mode) have no password — pairing token only.
+    if (user && user.pairOnly) { loginLimiter.hit(ipKey); return res.status(403).json({ error: 'pair_only' }); }
     if (!user || !auth.verifyPassword(password, user.passwordHash)) {
       loginLimiter.hit(ipKey); if (emKey) loginLimiter.hit(emKey);   // only FAILURES count
       return res.status(401).json({ error: 'invalid credentials' });
@@ -705,7 +760,7 @@ async function startServer(opts = {}) {
     wss.close(() => server.close(res));
   });
 
-  return { server, wss, port: realPort, secret, googleClientId, close };
+  return { server, wss, port: realPort, secret, googleClientId, close, getDevices };
 }
 
 module.exports = { startServer };

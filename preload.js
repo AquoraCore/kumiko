@@ -84,4 +84,10 @@ contextBridge.exposeInMainWorld('api', {
   authSetToken: (token, email) => ipcRenderer.invoke('auth:setToken', { token, email }),   // phase 7b-4: encrypted collab auth token
   authGetToken: () => ipcRenderer.invoke('auth:getToken'),
   authClear: () => ipcRenderer.invoke('auth:clear'),
+
+  hostStart: (mode) => ipcRenderer.invoke('host:start', { mode }),   // Host Mode (desktop): run the LAN server in-process
+  hostStop: () => ipcRenderer.invoke('host:stop'),
+  hostStatus: () => ipcRenderer.invoke('host:status'),
+  hostQr: (text) => ipcRenderer.invoke('host:qr', { text }),
+  onHostChanged: (cb) => ipcRenderer.on('host:changed', (_e, d) => cb(d)),
 });

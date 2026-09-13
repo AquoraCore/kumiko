@@ -2202,6 +2202,7 @@ async function openAiSettings(tab){
   const _panel=(key)=>{ const p=document.createElement('div'); p.className='ai-panel'; sdetail.appendChild(p); _panels[key]=p; return p; };
   const panelAppearance=_panel('appearance');
   const panelProvider=_panel('provider'), panelRag=_panel('rag'), panelPrompts=_panel('prompts'), panelCollab=_panel('collab'), panelAbout=_panel('about');
+  const panelHost=(typeof window.KUMIKO_WEB === 'undefined') ? _panel('host') : null;   // Host Mode: desktop only
   // footer follows the section: Test connection only makes sense on Provider; Save/Cancel only on
   // pages that hold AI config (appearance applies instantly, about has nothing to save).
   const FOOT_SAVE=new Set(['provider','rag','prompts','collab']);
@@ -2218,6 +2219,7 @@ async function openAiSettings(tab){
   _navItem('prompts','terminal',t('คำสั่ง & กติกา'));
   _navSec(t('อื่น ๆ'));
   _navItem('collab','link',t('Collab & บัญชี'));
+  if (typeof window.KUMIKO_WEB === 'undefined') _navItem('host','crate',t('โฮสต์บนเครือข่าย'));   // desktop only
   _navItem('about','note',t('เกี่ยวกับ'));
   // appearance applies instantly — no save needed; the footer's save only concerns AI config
   { const note=document.createElement('div'); note.className='ai-note'; note.textContent=t('การเปลี่ยนแปลงในหน้านี้มีผลทันที'); panelAppearance.appendChild(note);
@@ -2605,6 +2607,99 @@ async function openAiSettings(tab){
     }
   }
   renderAuthArea();
+
+  // ---- HOST panel (desktop only) — one switch, phones join via QR (mock H2) ----
+  if (panelHost) {
+    // Status row: switch + pill (เขียว "กำลังโฮสต์" / เทา "ปิดอยู่")
+    const hRow=document.createElement('div'); hRow.className='ai-rag-row host-row';
+    const hSw=document.createElement('input'); hSw.type='checkbox'; hSw.id='hostSwitch';
+    const hSwLab=document.createElement('label'); hSwLab.setAttribute('for','hostSwitch'); hSwLab.className='ai-rag-lab'; hSwLab.textContent=t('เปิดโฮสต์บนเครือข่าย');
+    const hPill=document.createElement('span'); hPill.className='host-pill-st';
+    hRow.appendChild(hSw); hRow.appendChild(hSwLab); hRow.appendChild(hPill); panelHost.appendChild(hRow);
+
+    // Mode cards (radio). Changing mode while running restarts the server.
+    const HOST_MODES=[
+      ['mirror','🪞',t('แชร์ vault นี้'),t('เข้าจากมือถือได้ทันที ไม่ต้องสมัคร (โหมดส่วนตัว)')],
+      ['family','👪',t('เซิร์ฟเวอร์ครอบครัว'),t('สมาชิกสมัครบัญชีของตัวเอง ข้อมูลแยกคนละ vault')],
+    ];
+    let hostModeSel='mirror';
+    const hostCards=document.createElement('div'); hostCards.className='host-modes';
+    const hostRadios=[];
+    HOST_MODES.forEach(([m,icon,title,sub])=>{
+      const card=document.createElement('label'); card.className='host-mode-card'; card.dataset.mode=m;
+      const radio=document.createElement('input'); radio.type='radio'; radio.name='hostMode'; radio.value=m; radio.checked=(m==='mirror');
+      const body=document.createElement('span'); body.className='host-mode-body';
+      const h=document.createElement('b'); h.textContent=icon+' '+title;
+      const s=document.createElement('small'); s.textContent=sub;
+      body.appendChild(h); body.appendChild(s);
+      card.appendChild(radio); card.appendChild(body); hostCards.appendChild(card); hostRadios.push(radio);
+      radio.onchange=async()=>{
+        if (!radio.checked) return;
+        hostModeSel=m;
+        hostRadios.forEach((r)=>r.closest('.host-mode-card').classList.toggle('on', r.checked));
+        let st=null; try { st=await window.api.hostStatus(); } catch(_) {}
+        if (st && st.running) { radio.disabled=true; try { await window.api.hostStart({ mode: m }); } catch(_) {} radio.disabled=false; hostRefresh(); }   // mode change while running → restart
+      };
+    });
+    hostRadios[0].closest('.host-mode-card').classList.add('on');
+    panelHost.appendChild(hostCards);
+
+    // URL box + copy + QR (mirror: pairUrl; family: plain URL)
+    const urlRow=document.createElement('div'); urlRow.className='host-url-row';
+    const urlInp=document.createElement('input'); urlInp.readOnly=true; urlInp.className='host-url'; urlInp.spellcheck=false;
+    const cpBtn=document.createElement('button'); cpBtn.type='button'; cpBtn.className='ghost sm'; cpBtn.textContent=t('คัดลอก');
+    cpBtn.onclick=()=>{ const v=urlInp.value; if (v) { navigator.clipboard.writeText(v).catch(()=>{}); cpBtn.textContent=t('คัดลอกแล้ว'); setTimeout(()=>{ cpBtn.textContent=t('คัดลอก'); }, 1500); } };
+    urlRow.appendChild(urlInp); urlRow.appendChild(cpBtn);
+    const qrImg=document.createElement('img'); qrImg.className='host-qr'; qrImg.alt='QR';
+    panelHost.appendChild(urlRow); panelHost.appendChild(qrImg);
+
+    // Connected devices (refresh every 5s while the panel is open)
+    const devH=document.createElement('div'); devH.className='host-dev-h'; devH.textContent=t('เครื่องที่เชื่อมอยู่');
+    const devList=document.createElement('div'); devList.className='host-dev-list';
+    panelHost.appendChild(devH); panelHost.appendChild(devList);
+
+    // Warning + docs link (external)
+    const warn=document.createElement('p'); warn.className='ai-note host-warn';
+    warn.textContent=t('ปิดแอป = โฮสต์หยุดชั่วคราว · ใช้ได้เฉพาะใน Wi-Fi เดียวกัน — ออกเน็ตนอกบ้านดู');
+    const docsA=document.createElement('a'); docsA.href='#'; docsA.textContent='docs/SELF-HOSTING.md';
+    docsA.onclick=(e)=>{ e.preventDefault(); window.api.openExternal('https://github.com/AquoraCore/kumiko/blob/main/docs/SELF-HOSTING.md'); };
+    warn.appendChild(docsA);
+    panelHost.appendChild(warn);
+
+    async function hostRefresh(){
+      if (!ov.isConnected || ov.hidden) { clearInterval(hostTimer); hostTimer=null; return; }   // panel closed → stop polling
+      let st=null; try { st=await window.api.hostStatus(); } catch(_) { st=null; }
+      const running=!!(st && st.running);
+      hSw.checked=running;
+      hPill.textContent=running?t('กำลังโฮสต์'):t('ปิดอยู่');
+      hPill.classList.toggle('on',running);
+      urlRow.style.display=running?'':'none'; qrImg.style.display=running?'':'none';
+      devH.style.display=running?'':'none'; devList.style.display=running?'':'none';
+      if (!running) return;
+      const u=((st.mode==='mirror')&&st.pairUrl)?st.pairUrl:((st.urls&&st.urls[0])||('http://127.0.0.1:'+st.port));
+      urlInp.value=u;
+      if (qrImg.dataset.for!==u){ qrImg.dataset.for=u; qrImg.removeAttribute('src'); window.api.hostQr(u).then((d)=>{ if (d) qrImg.src=d; }).catch(()=>{}); }
+      devList.innerHTML='';
+      const devs=st.devices||[];
+      devs.forEach((d)=>{
+        const row=document.createElement('div'); row.className='host-dev';
+        row.innerHTML='<span class="host-dev-ip"></span><span class="host-dev-ua"></span><span class="host-dev-t"></span>';
+        row.querySelector('.host-dev-ip').textContent=d.ip;
+        row.querySelector('.host-dev-ua').textContent=String(d.ua||'').replace(/\(([^)]*)\)[^()]*$/,'').slice(0,60)||'—';
+        row.querySelector('.host-dev-t').textContent=new Date(d.last).toLocaleTimeString();
+        devList.appendChild(row);
+      });
+      if (!devs.length) devList.textContent=t('ยังไม่มีเครื่องเชื่อมต่อ');
+    }
+    hSw.onchange=async()=>{
+      hSw.disabled=true;
+      try { if (hSw.checked) await window.api.hostStart({ mode: hostModeSel }); else await window.api.hostStop(); } catch(_) {}
+      hSw.disabled=false;
+      hostRefresh();
+    };
+    let hostTimer=setInterval(hostRefresh,5000);
+    hostRefresh();
+  }
 
   function rebuildModels(){
     const caps = window.AICaps;
@@ -3588,6 +3683,20 @@ new MutationObserver(() => {
 (function shellWiring(){
   { const _tb = document.getElementById('trashBtn2'); if (_tb) _tb.onclick = () => setMainView('trash'); }
   { const _sb = document.getElementById('settingsBtn2'); if (_sb) _sb.onclick = (e) => { e.preventDefault(); openAiSettings('appearance'); }; }
+  // Host Mode pill (desktop only): "⇄ Host · N เครื่อง" while the LAN server runs; click → Settings → Host.
+  { const hp = document.getElementById('hostPill');
+    if (hp) {
+      if (typeof window.KUMIKO_WEB !== 'undefined') hp.remove();
+      else {
+        hp.onclick = (e) => { e.preventDefault(); openAiSettings('host'); };
+        const upd = async () => { let st=null; try { st=await window.api.hostStatus(); } catch(_) {}
+          hp.hidden = !(st && st.running);
+          if (st && st.running) hp.querySelector('.host-pill-txt').textContent = '⇄ Host · ' + (st.devices||[]).length + ' ' + t('เครื่อง'); };
+        upd();
+        setInterval(upd, 5000);
+        if (window.api.onHostChanged) window.api.onHostChanged(() => upd());
+      }
+    } }
 
   // "＋ ใหม่" dropdown — create note / folder / db / board, or import PDF
   async function importPdfFlow(){
