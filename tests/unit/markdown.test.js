@@ -335,9 +335,12 @@ describe('extractSectionUpdates', () => {
 
 // WYSIWYG parity: what you type in the sticky box must equal what displays after editing.
 describe('mdToHtml fenced code + images (edit/display parity)', () => {
-  it('renders a fenced block as <pre><code>, not stray paragraphs', () => {
+  it('renders a fenced block as a code-studio wrap (bar + label + copy), not stray paragraphs', () => {
     const out = mdToHtml('ก่อน\n```js\nconst a = 1;\n```\nหลัง');
-    expect(out).toContain('<pre class="md-code"><code>const a = 1;</code></pre>');
+    expect(out).toContain('md-codewrap');
+    expect(out).toContain('<span class="md-lang">JS</span>');
+    expect(out).toContain('<pre class="md-code"><code>');
+    expect(out).toContain('<span class="tok-k">const</span>');
     expect(out).not.toContain('<p>```');
   });
   it('mermaid fences emit a placeholder the PDF preview upgrades to a live diagram', () => {
@@ -609,5 +612,86 @@ describe('mdToHtml hard break + space entities (crepe serialization)', () => {
   });
   it('EDGE: an explicitly escaped entity (\\&#x20;) stays literal — backslash escapes win over decoding', () => {
     expect(_mdInline('a \\&#x20; b')).toBe('a &amp;#x20; b');
+  });
+});
+
+// 2026-09-13 R2 "Code studio" mock: headerless tables, code-fence header bar, light highlight.
+describe('headerless GFM tables (R2 code-studio mock, 2026-09-13)', () => {
+  it('HAPPY: `| | |` empty header + separator → <table> with NO thead, body rows straight in tbody', () => {
+    const out = mdToHtml('| | |\n|---|---|\n| a | b |');
+    expect(out).toContain('<table class="md-table">');
+    expect(out).not.toContain('<thead');
+    expect(out).toContain('<tbody>');
+    expect(out).toContain('<td>a</td>');
+    expect(out).toContain('<td>b</td>');
+  });
+  it('HAPPY: `||` (no spaces) works the same', () => {
+    const out = mdToHtml('||\n|---|---|\n| 1 | 2 |');
+    expect(out).toContain('<table');
+    expect(out).not.toContain('<thead');
+    expect(out).toContain('<td>2</td>');
+  });
+  it('a normal headered table keeps its thead exactly as before', () => {
+    const out = mdToHtml('| A | B |\n| --- | --- |\n| 1 | 2 |');
+    expect(out).toContain('<thead>');
+    expect(out).toContain('<th>A</th>');
+    expect(out).toContain('<td>1</td>');
+  });
+  it('EDGE: empty first row WITHOUT a separator after it is NOT a table', () => {
+    const out = mdToHtml('| | |\n| a | b |');
+    expect(out).not.toContain('<table');
+  });
+});
+
+describe('fenced code: header bar + language label + copy button (R2)', () => {
+  it('HAPPY: ```python fence → md-codewrap + codebar + PYTHON label + .md-copy button', () => {
+    const out = mdToHtml('```python\nx = 1\n```');
+    expect(out).toContain('<div class="md-codewrap">');
+    expect(out).toContain('<div class="md-codebar">');
+    expect(out).toContain('<span class="md-lang">PYTHON</span>');
+    expect(out).toContain('<button type="button" class="md-copy"');
+    expect(out).toContain('<pre class="md-code"><code>');
+  });
+  it('EDGE: no info string → label CODE; mermaid fences stay the old placeholder', () => {
+    expect(mdToHtml('```\nx = 1\n```')).toContain('<span class="md-lang">CODE</span>');
+    const mm = mdToHtml('```mermaid\ngraph TD\n```');
+    expect(mm).toContain('md-mermaid-src');
+    expect(mm).not.toContain('md-codewrap');
+  });
+});
+
+describe('light syntax highlight (pure regex, on ESCAPED text)', () => {
+  it('HAPPY: a # Thai comment is one tok-c chunk to end of line', () => {
+    const out = mdToHtml('```python\n# คอมเมนต์ไทย ทั้งบรรทัด\nx = 1\n```');
+    expect(out).toContain('<span class="tok-c"># คอมเมนต์ไทย ทั้งบรรทัด</span>');
+  });
+  it('HAPPY: python keyword + number highlighted; // comment and bare string for unknown langs', () => {
+    const out = mdToHtml('```python\ndef f():\n    return 42\n```');
+    expect(out).toContain('<span class="tok-k">def</span>');
+    expect(out).toContain('<span class="tok-k">return</span>');
+    expect(out).toContain('<span class="tok-n">42</span>');
+    const unk = mdToHtml('```\n// note\ns = "hi" + 7\n```');
+    expect(unk).toContain('<span class="tok-c">// note</span>');
+    expect(unk).toContain('<span class="tok-s">"hi"</span>');
+    expect(unk).toContain('<span class="tok-n">7</span>');
+  });
+  it('keywords inside strings/comments are never highlighted (parked first)', () => {
+    const out = mdToHtml('```python\ns = "def return if"\n# def while\n```');
+    expect(out).toContain('tok-s');
+    expect(out).not.toContain('tok-k');
+  });
+  it('SECURITY: <script> in code always renders as escaped text', () => {
+    const out = mdToHtml('```html\n<script>alert(1)</script>\n```');
+    expect(out).not.toContain('<script');
+    expect(out).toContain('&lt;script&gt;');
+  });
+  it('escaped entities never feed the passes: &#x20; stays intact inside a fence', () => {
+    const out = mdToHtml('```\nv&#x20;= 1\n```');
+    expect(out).toContain('&amp;#x20;');
+    expect(out).not.toContain('tok-c');   // the `#x20;` tail is NOT a comment
+  });
+  it('the new highlight code uses no regex lookbehind (Safari < 16.4 cannot even parse it)', () => {
+    const src = require('fs').readFileSync(require('path').join(__dirname, '../../core/markdown.js'), 'utf8');
+    expect(src).not.toMatch(/\(\?[<=]/);
   });
 });

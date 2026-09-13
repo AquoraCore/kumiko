@@ -66,6 +66,49 @@
     s = s.replace(/^\|/, '').replace(/\|$/, '');
     return s.split('|').map((c) => c.trim());
   }
+
+  // ---- light fence highlighter (pure regex, runs on ALREADY-ESCAPED text — display only).
+  // Safe order: park escaped entities, then comments/strings (so keywords/numbers never match
+  // inside them), highlight keywords/numbers on the rest, restore. No lookbehind anywhere
+  // (Safari < 16.4 fails to PARSE the file otherwise — same rule as _mdInline).
+  var _HL_KW = {
+    python: 'def|return|if|elif|else|for|while|in|not|and|or|import|from|class|try|except|finally|with|as|pass|break|continue|lambda|None|True|False|is|del|global|raise|yield|assert',
+    js: 'var|let|const|function|return|if|else|for|while|do|switch|case|default|break|continue|new|typeof|instanceof|in|of|class|extends|super|this|import|export|from|try|catch|finally|throw|async|await|yield|null|undefined|true|false|void|delete',
+    java: 'public|private|protected|static|final|class|interface|extends|implements|enum|new|return|if|else|for|while|do|switch|case|default|break|continue|try|catch|finally|throw|throws|import|package|this|super|null|true|false|abstract|synchronized|record|var|instanceof|void|int|long|double|float|boolean|char|byte|short',
+    c: 'int|char|float|double|void|long|short|unsigned|signed|struct|union|enum|typedef|static|extern|const|return|if|else|for|while|do|switch|case|default|break|continue|goto|sizeof|NULL',
+    sql: 'select|from|where|insert|into|values|update|set|delete|create|table|drop|alter|add|join|inner|left|right|outer|full|on|as|and|or|not|null|is|in|like|between|group|by|order|having|limit|offset|union|all|distinct|count|sum|avg|min|max|primary|key|foreign|references|index|view'
+  };
+  _HL_KW.ts = _HL_KW.js + '|interface|type|implements|namespace|declare|readonly|public|private|protected|abstract|any|unknown|never|string|number|boolean';
+  var _HL_ALIAS = { python: 'python', py: 'python', js: 'js', javascript: 'js', jsx: 'js', node: 'js',
+    ts: 'ts', typescript: 'ts', tsx: 'ts', java: 'java', c: 'c', cpp: 'c', h: 'c', sql: 'sql', sqlite: 'sql' };
+  function _hlLang(info){ return _HL_ALIAS[String(info || '').toLowerCase()] || null; }
+  function _hlCode(esc, lang){
+    var parked = [];
+    var park = function (val) { parked.push(val); return '\uE012' + (parked.length - 1) + '\uE013'; };
+    // 1) escaped entities — parked so their digits/# never feed the comment/number passes.
+    //    A source-level entity like &#x20; escapes to TWO adjacent chunks (`&amp;` + `#x20;`)
+    //    — the optional tail swallows the second chunk so its `#` can't open a comment span.
+    esc = esc.replace(/&(?:amp|lt|gt);(?:[#a-zA-Z0-9]+;)?/g, park);
+    // 2) comments + strings, leftmost-first: anything they consume can never match as keyword
+    var parts = ["'(?:[^'\\\\\\n]|\\\\.)*'", '"(?:[^"\\\\\\n]|\\\\.)*"', '\\/\\/[^\\n]*'];
+    if (lang !== 'js' && lang !== 'ts' && lang !== 'java' && lang !== 'c') parts.push('#[^\\n]*');
+    esc = esc.replace(new RegExp(parts.join('|'), 'g'), function (m) {
+      return park('<span class="' + ((m.charAt(0) === '\'' || m.charAt(0) === '"') ? 'tok-s' : 'tok-c') + '">' + m + '</span>');
+    });
+    // 3) keywords (known languages) + numbers on what is left
+    if (lang && _HL_KW[lang]){
+      esc = esc.replace(new RegExp('(^|[^A-Za-z0-9_$\\uE012\\uE013])(' + _HL_KW[lang] + ')(?![A-Za-z0-9_$\\uE012\\uE013])', 'g'),
+        function (_, pre, w) { return pre + '<span class="tok-k">' + w + '</span>'; });
+    }
+    esc = esc.replace(/(^|[^A-Za-z0-9_$.\uE012\uE013])(\d+(?:\.\d+)?)(?![A-Za-z0-9_$\uE012\uE013])/g,
+      function (_, pre, n) { return pre + '<span class="tok-n">' + n + '</span>'; });
+    // 4) restore (looped: a parked string may itself hold a parked entity)
+    var guard = 0;
+    while (/\uE012\d+\uE013/.test(esc) && guard++ < 5){
+      esc = esc.replace(/\uE012(\d+)\uE013/g, function (_, i) { return parked[+i]; });
+    }
+    return esc;
+  }
   // GFM separator cell: dashes with optional leading/trailing colons, e.g. ":---:", "---", "---:"
   function _isMdSepCell(c){ return /^[ ]?:-{1,}:[ ]?$/.test(c) || /^[ ]?:?-+:?[ ]?$/.test(c); }
   function mdToHtml(md){
@@ -89,19 +132,32 @@
         if ((fm[1] || '').toLowerCase() === 'mermaid') {
           html += '<pre class="md-mermaid-src" data-mmd="' + escAttr(code) + '">' + _mdEsc(code) + '</pre>';
         } else {
-          html += '<pre class="md-code"><code>' + _mdEsc(code) + '</code></pre>';
+          // R2 "code studio": bar with the language label + copy button over a sumi panel.
+          // Label = uppercase of the info string's first token; body is highlighted ON the
+          // escaped text (highlight never sees raw markup — no XSS surface).
+          const label = fm[1] ? _mdEsc(fm[1].toUpperCase()) : 'CODE';
+          html += '<div class="md-codewrap"><div class="md-codebar"><span class="md-lang">' + label +
+            '</span><button type="button" class="md-copy" title="คัดลอกโค้ด">⧉</button></div>' +
+            '<pre class="md-code"><code>' + _hlCode(_mdEsc(code), _hlLang(fm[1])) + '</code></pre></div>';
         }
         i = k + 1;   // skip the closing fence (or EOF)
         continue;
       }
-      // ---- GFM table: header row + separator row + 0+ body rows ----
-      if (isPipeRow(line) && i + 1 < lines.length){
+      // ---- GFM table: header row + separator row + 0+ body rows · headerless form: the
+      // first row is ALL empty cells (`| | |`, `||`) — render tbody only, no thead. ----
+      const headerlessRow = (l) => l.includes('|') && _mdRowCells(l).every((c) => !c);
+      if ((isPipeRow(line) || headerlessRow(line)) && i + 1 < lines.length){
         const sepCells = _mdRowCells(lines[i + 1]);
         if (sepCells.length >= 1 && sepCells.every(_isMdSepCell)){
           closeList();
-          html += '<table class="md-table"><thead><tr>';
-          _mdRowCells(line).forEach((c) => { html += '<th>' + _mdInline(c) + '</th>'; });
-          html += '</tr></thead><tbody>';
+          if (!headerlessRow(line)){
+            html += '<table class="md-table"><thead><tr>';
+            _mdRowCells(line).forEach((c) => { html += '<th>' + _mdInline(c) + '</th>'; });
+            html += '</tr></thead>';
+          } else {
+            html += '<table class="md-table">';
+          }
+          html += '<tbody>';
           let k = i + 2;
           while (k < lines.length && isPipeRow(lines[k])){
             html += '<tr>';

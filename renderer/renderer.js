@@ -1088,6 +1088,7 @@ function kumikoToolsPrompt(){
     '===CANVAS-WIRE from=โน้ต fromseg=หัวข้อ to=โน้ต toseg=หัวข้อ=== — โยงเส้นถาวรระหว่างท่อน (fromseg/toseg ไม่บังคับ) · ===CANVAS-UNWIRE from=… to=…=== · ===CANVAS-STICKY text=โน้ตแปะสั้น ๆ===\n' +
     'เส้นแนะนำจาก [[ลิงก์]] ในเนื้อหาเกิดเองบนแคนวาส — WIRE เฉพาะคู่ที่ไม่มีลิงก์ถึงกัน\n' +
     'ข้อห้าม: KUMIKO.md แก้ผ่านบล็อก KUMIKO-RULE และ KUMIKO-MEMORY.md แก้ผ่าน REMEMBER/FORGET เท่านั้น — ห้ามใช้ช่องทางแก้/สร้าง/ลบโน้ตกับสองไฟล์นี้\n' +
+    'รูปแบบคำตอบ: โค้ดหลายบรรทัดให้ใช้ ```<ภาษา> เปิด-ปิดเสมอ (เช่น ```python) ห้ามเขียนโค้ดทีละบรรทัดด้วย backtick เดี่ยว · ตาราง markdown ให้มีแถวหัวเสมอ หรือเว้นหัวว่างด้วย | | | ได้\n' +
     (list ? 'โน้ตทั้งหมดใน vault: ' + list + '\n' : '') +
     _folderListLine() + ((typeof tagPromptLine === 'function') ? tagPromptLine() : '');
 }

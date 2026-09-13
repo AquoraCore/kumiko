@@ -122,6 +122,8 @@ const I18N_EN = {
   'กู้คืนเวอร์ชันเดิมแล้ว (สถานะก่อนหน้าถูกเก็บเป็น snapshot)': 'Restored (the previous state was snapshotted first)',
   'ส่งใหม่': 'Resend',
   'ส่งคำถามเดิมอีกครั้ง': 'Send the same question again',
+  'คัดลอกโค้ด': 'Copy code',
+  '✓ คัดลอกแล้ว': '✓ Copied',
   'ส่งเข้าโน้ต': 'Send to note',
   'ต่อท้ายคำตอบนี้ลงโน้ต (ผ่านหน้ารีวิว)': 'Append this reply to a note (via review)',
   'ค้นหาโน้ตปลายทาง…': 'Search target note…',

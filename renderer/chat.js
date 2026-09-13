@@ -483,10 +483,33 @@ window.api.onEngineDone(async (payload) => {
 });
 
 // Clicking an @-mention or [source:] reference in chat jumps to that note (or PDF).
+// The ⧉ copy button on rendered code blocks lives here too — delegated at the container so
+// it survives the constant chat re-renders (never wired per-button).
 (function wireRefClicks(){
   const box = document.getElementById('chatMessages');
   if (!box) return;
-  box.addEventListener('click', (e) => {
+  box.addEventListener('click', async (e) => {
+    const cp = e.target.closest && e.target.closest('.md-copy');
+    if (cp){
+      const wrap = cp.closest('.md-codewrap');
+      const code = wrap && wrap.querySelector('pre.md-code code');
+      const txt = code ? code.textContent : '';
+      try {
+        // clipboard API needs a secure context (https/localhost); web over http LAN falls
+        // back to the textarea+execCommand path
+        if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(txt);
+        else {
+          const ta = document.createElement('textarea');
+          ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0';
+          document.body.appendChild(ta); ta.select();
+          document.execCommand('copy'); ta.remove();
+        }
+        const done = t('✓ คัดลอกแล้ว');
+        cp.textContent = done; cp.title = done;
+        setTimeout(() => { cp.textContent = '⧉'; cp.title = t('คัดลอกโค้ด'); }, 1500);
+      } catch (_) {}
+      return;
+    }
     const a = e.target.closest && e.target.closest('.at-ref');
     if (!a) return;
     const raw = a.dataset.ref || '';
