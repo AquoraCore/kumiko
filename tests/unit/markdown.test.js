@@ -571,3 +571,43 @@ describe('search: PDF-Text shadows surface as the PDF, not as files (log 2026-08
     expect(r).toMatch(/window\.__wikiNav\(rel \+ \(hit\.page \? '#p' \+ hit\.page : ''\)\)/);
   });
 });
+
+// 2026-09-13 user bug: the WYSIWYG editor (milkdown/crepe) serializes multi-line paragraphs
+// with CommonMark hard breaks ("line\") and &#x20; entities for indentation — mdToHtml showed
+// the backslash and the raw entity on every surface (canvas cards, db cells, chat, dashboard).
+describe('mdToHtml hard break + space entities (crepe serialization)', () => {
+  const SNIPPET = 'i = 0\\\ntemp = self.head\\\nwhile self.next != where:\\\n&#x20; temp = temp.next\\\ntemp = temp.next.next';
+  it('HAPPY: the user snippet renders as 5 clean lines, line 4 nbsp-indented', () => {
+    const out = mdToHtml(SNIPPET);
+    expect(out.match(/<p>/g)).toHaveLength(5);
+    expect(out).toContain('<p>i = 0</p>');
+    expect(out).toContain('<p>while self.next != where:</p>');
+    expect(out).toContain('<p>&nbsp; temp = temp.next</p>');
+    expect(out).not.toContain('\\');
+    expect(out).not.toContain('#x20');                       // neither raw &#x20; nor &amp;#x20;
+    expect((out.match(/&nbsp;/g) || []).length).toBe(1);      // only line 4 is indented
+  });
+  it('HAPPY: mid-line &#32; and &#X20; (uppercase X) are a plain space; a leading run is one nbsp per entity', () => {
+    expect(mdToHtml('a&#32;b&#X20;c')).toBe('<p>a b c</p>');
+    expect(mdToHtml('&#X20;&#32;x')).toBe('<p>&nbsp;&nbsp;x</p>');
+  });
+  it('EDGE: an even trailing run (a\\\\) is an escaped backslash — ONE backslash survives, not a break', () => {
+    expect(mdToHtml('a\\\\')).toBe('<p>a\\</p>');
+  });
+  it('EDGE: inline code keeps every character raw — entities and trailing backslashes', () => {
+    expect(_mdInline('`code with &#x20; and trailing \\\\`')).toBe('<code>code with &amp;#x20; and trailing \\\\</code>');
+  });
+  it('EDGE: fenced code keeps raw line-trailing \\ and &#x20; lines', () => {
+    const out = mdToHtml('```\nline\\\n&#x20; indented\n```');
+    expect(out).toContain('line\\\n&amp;#x20; indented');
+    expect(out).not.toContain('&nbsp;');
+  });
+  it('SECURITY: only SPACE entities decode — &#x3C;script&#x3E; stays escaped text, never a tag', () => {
+    const out = mdToHtml('&#x3C;script&#x3E;');
+    expect(out).toContain('&amp;#x3C;script&amp;#x3E;');
+    expect(out).not.toContain('<script');
+  });
+  it('EDGE: an explicitly escaped entity (\\&#x20;) stays literal — backslash escapes win over decoding', () => {
+    expect(_mdInline('a \\&#x20; b')).toBe('a &amp;#x20; b');
+  });
+});

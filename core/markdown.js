@@ -7,7 +7,22 @@
   // lightweight markdown -> HTML for the AI review preview (display only, so it reads as rich text not raw .md)
   function _mdEsc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
   function _mdInline(s){
+    // CommonMark hard break: an ODD run of trailing backslashes ends in a hard break — the
+    // per-line structure around here already breaks lines, so drop just that last '\'
+    // (crepe serializes "i = 0\<EOL>" and every surface showed the backslash, 2026-09-13).
+    // An even run is escaped-backslash pairs, rendered below as one backslash per pair.
+    s = s.replace(/\\+$/, function (m) { return m.length % 2 ? m.slice(0, -1) : m; });
     s = _mdEsc(s);
+    // Inline code is parked FIRST, raw — its content must display verbatim ("&#x20;" or a
+    // trailing "\\" inside backticks must not be decoded/collapsed). A backtick behind an
+    // ODD backslash run is escaped and never opens a span (the escape pass handles it).
+    var _code = [];
+    // (no lookbehind \u2014 Safari < 16.4 fails to PARSE the file otherwise; the prefix groups
+    // are captured and put back so "\`not code" keeps its escaped backtick untouched)
+    s = s.replace(/(^|[^\\])((?:\\\\)*)`([^`\n]+)`/g, function (_, pre, esc, body) {
+      _code.push('<code>' + body + '</code>');
+      return pre + esc + '\uE004' + (_code.length - 1) + '\uE005';
+    });
     // CommonMark backslash escapes: the WYSIWYG editor serializes "<<extend>>" as
     // "\<\<extend\>\>" — show the character, never the backslash ("มี \ เพิ่มเข้ามา").
     // Escaped chars are parked in private-use placeholders until AFTER the formatting
@@ -26,7 +41,14 @@
       return '' + (_prot.length - 1) + '';
     });
 
-    s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+    // Space entities ONLY (crepe writes leading indent as &#x20;/&#X20;/&#32;): a LEADING
+    // run — entities possibly interleaved with real spaces — becomes one &nbsp; per entity
+    // so HTML cannot collapse the indent; anywhere else the entity is a plain space. No
+    // other entity ever decodes: &#x3C; and friends stay escaped text (XSS guard).
+    s = s.replace(/^((?:&amp;#(?:[xX]20|32);| )+)/, function (run) {
+      return run.indexOf('&amp;#') < 0 ? run : run.replace(/&amp;#(?:[xX]20|32);/g, '&nbsp;');
+    });
+    s = s.replace(/&amp;#(?:[xX]20|32);/g, ' ');
     s = s.replace(/\{c:([a-z]+)\}([\s\S]*?)\{\/c\}/g, (m,name,inner)=> '<span class="tcolor tcolor-'+name+'">'+inner+'</span>');   // inline text colour
     s = s.replace(/\\?\[\\?\[([^\[\]|\n]+?)(?:\|([^\[\]\n]+?))?\\?\]\\?\]/g, (m,a,b)=> '<span class="wikilink">'+(b||a)+'</span>');   // tolerates \[\[escaped]] links
     s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<span class="mdlink">$1</span>');
@@ -35,6 +57,7 @@
     s = s.replace(/(^|[^_])_([^_\n]+)_/g, '$1<em>$2</em>');
     s = s.replace(/\uE002(\d+)\uE003/g, function (_, i) { return _prot[+i]; });   // restore parked <img> tags first — their urls may hold escd tokens
     s = s.replace(/(\d+)/g, function (_, i) { return _escd[+i]; });   // restore escaped chars
+    s = s.replace(/\uE004(\d+)\uE005/g, function (_, i) { return _code[+i]; });   // inline code LAST — its content is final, nothing may rewrite it
     return s;
   }
   // split a single table row line into trimmed cells, dropping optional leading/trailing pipes
