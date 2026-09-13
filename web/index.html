@@ -87,6 +87,17 @@
       <input id="webLoginPass" type="password" placeholder="password" />
       <button id="webLoginBtn" class="primary">เข้าสู่ระบบ / Log in</button>
       <button id="webSignupBtn" class="secondary">สมัคร / Sign up</button>
+      <a href="#" id="webForgotLink" style="font-size:12px;color:#2563eb;text-align:center;text-decoration:none">ลืมรหัสผ่าน? / Forgot password?</a>
+      <!-- verify (6-digit code) state — shown when the backend answers pendingVerify -->
+      <input id="webLoginCode" type="text" inputmode="numeric" maxlength="6" placeholder="รหัสยืนยัน 6 หลัก / 6-digit code" style="display:none" />
+      <button id="webVerifyBtn" class="primary" style="display:none">ยืนยัน / Verify</button>
+      <button id="webResendBtn" class="secondary" style="display:none">ส่งโค้ดใหม่ / Resend code</button>
+      <!-- forgot/reset password state -->
+      <input id="webResetToken" type="text" placeholder="โค้ดตั้งรหัสใหม่ / Reset code" style="display:none" />
+      <input id="webNewPass" type="password" placeholder="รหัสผ่านใหม่ (8 ตัวขึ้นไป) / New password (8+)" style="display:none" />
+      <button id="webForgotBtn" class="primary" style="display:none">ขอโค้ดตั้งรหัสใหม่ / Send reset code</button>
+      <button id="webResetBtn" class="primary" style="display:none">ตั้งรหัสผ่านใหม่ / Reset password</button>
+      <a href="#" id="webBackLogin" style="display:none;font-size:12px;color:#2563eb;text-align:center;text-decoration:none">กลับไปเข้าสู่ระบบ / Back to login</a>
       <div id="webLoginMsg"></div>
       <div id="webGoogleWrap" style="display:none; margin-top:10px; border-top:1px solid #eee; padding-top:10px;">
         <div id="webGoogleBtn"></div>

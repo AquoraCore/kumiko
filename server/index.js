@@ -20,6 +20,8 @@ function clientIp(req) {
   return String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || (req.socket && req.socket.remoteAddress) || 'unknown').split(',')[0].trim();
 }
 const aiCore = require('../core/ai');
+const coreEmail = require('../core/email');
+const { sendEmail: sendEmailHttp } = require('./email');
 
 // Real verifier: validates a Google ID token against this app's client id.
 // Returns { sub, email, name } on success, null on failure. Never throws.
@@ -77,15 +79,42 @@ async function startServer(opts = {}) {
   // unchanged. Turn it on with EMAIL_VERIFY=1 (or opts.emailVerify) when you open signup to
   // the public — new accounts then can't log in until they click the link in their email.
   const emailVerifyOn = (opts.emailVerify != null) ? !!opts.emailVerify : (process.env.EMAIL_VERIFY === '1');
+  // REQUIRE_EMAIL_VERIFY (or opts.requireEmailVerify) is the code-based variant: signup
+  // returns {pendingVerify:true}, the user confirms a 6-digit code via POST /auth/verify.
+  // Also default OFF — no env set means today's behavior, bit for bit.
+  const requireVerify = (opts.requireEmailVerify != null) ? !!opts.requireEmailVerify : (process.env.REQUIRE_EMAIL_VERIFY === '1');
   const appBaseUrl = (opts.appBaseUrl || process.env.APP_BASE_URL || '').replace(/\/+$/, '');
-  // Pluggable mailer: opts.sendEmail(to, subject, text) -> Promise. No mailer configured =>
-  // links go to the server log (dev). Wire a real sender before opening signup for real.
+  // Pluggable mailer: opts.sendEmail(to, subject, text) -> Promise (tests inject here).
+  // Default: server/email.js — real send with RESEND_API_KEY, dev-mode log without it.
   const hasMailer = typeof opts.sendEmail === 'function';
   const sendEmail = hasMailer ? opts.sendEmail
-    : (to, subject, text) => { console.log('[mail:none] to=' + to + ' subject="' + subject + '"\n' + text); return Promise.resolve(); };
+    : (to, subject, text) => sendEmailHttp({ to, subject, text });
   const crypto = require('crypto');
   const newVerifyToken = () => crypto.randomBytes(24).toString('hex');
   const verifyUrlFor = (req, token) => (appBaseUrl || (req.protocol + '://' + req.get('host'))) + '/auth/verify?token=' + token;
+
+  // Injectable clock (tests drive expiry/limits without sleeping).
+  const now = opts.now || (() => Date.now());
+  const VERIFY_TTL_MS = 15 * 60 * 1000;
+  const RESET_TTL_MS = 15 * 60 * 1000;
+  const VERIFY_MAX_ATTEMPTS = 5;
+  const newDigitCode = () => String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+  const newResetToken = () => crypto.randomBytes(16).toString('hex');
+  // Issue (or re-issue) a 6-digit code: bcrypt-hashed on disk, 15-minute expiry, attempts
+  // reset to 0. Fire-and-forget email — auth must not fail because a mailer hiccupped.
+  function issueVerifyCode(u) {
+    const code = newDigitCode();
+    store.update(u.id, {
+      verifyCodeHash: auth.hashPassword(code),
+      verifyCodeExpires: now() + VERIFY_TTL_MS,
+      verifyAttempts: 0,
+    });
+    const m = coreEmail.verifyEmailMsg(code);
+    Promise.resolve(sendEmail(u.email, m.subject, m.text)).catch(() => {});
+  }
+
+  // Resend-code limiter: tight, keyed by email (3/hour) — a code email is a spam vector.
+  const resendLimiter = createRateLimiter({ max: 3, windowMs: 60 * 60 * 1000, now: opts.now });
 
   // Managed AI config (Phase 7e): the server holds the LLM key, the browser never
   // sees it. Empty provider/key = "not configured" -> /ai/chat returns 501.
@@ -202,6 +231,13 @@ async function startServer(opts = {}) {
     if (!emailAllowed(email)) { loginLimiter.hit(ipKey); return res.status(403).json({ error: 'not_allowed' }); }
     const em = auth.normalizeEmail(email);
     if (store.findByEmail(em)) return res.status(409).json({ error: 'email exists' });
+    // When REQUIRE_EMAIL_VERIFY is on: create UNVERIFIED (plan 'free' comes with every new
+    // user), email a 6-digit code, and hold the JWT until POST /auth/verify succeeds.
+    if (requireVerify) {
+      const user = store.create({ email: em, passwordHash: auth.hashPassword(password), verified: false });
+      issueVerifyCode(user);
+      return res.json({ email: em, pendingVerify: true });
+    }
     // When verification is ON: create UNVERIFIED with a one-time token, email the link, and
     // do NOT hand back a session — the user logs in after verifying. When OFF (locked/trusted
     // deployment): create verified and return a token immediately, as before.
@@ -231,6 +267,78 @@ async function startServer(opts = {}) {
     return page(true, 'บัญชี ' + u.email + ' พร้อมใช้งานแล้ว เข้าสู่ระบบได้เลย');
   });
 
+  // POST /auth/verify {email, code} — the code-based flow (REQUIRE_EMAIL_VERIFY). Correct +
+  // unexpired code → verified:true + a JWT right here (no second login round-trip). Wrong →
+  // 401 and the attempt count climbs; past 5 the code is dead and only a resend saves it.
+  app.post('/auth/verify', (req, res) => {
+    const { email, code } = req.body || {};
+    const u = store.findByEmail(auth.normalizeEmail(email || ''));
+    if (!u || u.verified === true || !u.verifyCodeHash) return res.status(401).json({ error: 'invalid code', pendingVerify: true });
+    if ((u.verifyAttempts || 0) >= VERIFY_MAX_ATTEMPTS) return res.status(401).json({ error: 'too many attempts — request a new code', pendingVerify: true });
+    if (now() > (u.verifyCodeExpires || 0)) {
+      store.update(u.id, { verifyCodeHash: null, verifyCodeExpires: null });   // dead code, don't let it revive
+      return res.status(401).json({ error: 'code expired — request a new code', pendingVerify: true });
+    }
+    if (!auth.verifyPassword(String(code || ''), u.verifyCodeHash)) {
+      store.update(u.id, { verifyAttempts: (u.verifyAttempts || 0) + 1 });
+      return res.status(401).json({ error: 'invalid code', pendingVerify: true });
+    }
+    store.markVerified(u.id);
+    const token = auth.signToken({ sub: u.id, email: u.email }, secret);
+    return res.json({ token, email: u.email, plan: u.plan || 'free' });
+  });
+
+  // POST /auth/resend-code {email} — always {ok:true} (never reveal whether the account
+  // exists); a real unverified user gets a fresh code. Tight per-email limit: 3/hour.
+  app.post('/auth/resend-code', (req, res) => {
+    const em = auth.normalizeEmail((req.body || {}).email || '');
+    const key = 'resend:' + (em || 'blank');
+    const c = resendLimiter.check(key);
+    if (c.limited) return tooMany(res, c.retryAfterMs);
+    resendLimiter.hit(key);
+    const u = em ? store.findByEmail(em) : null;
+    if (u && u.verified === false) issueVerifyCode(u);
+    return res.json({ ok: true });
+  });
+
+  // POST /auth/forgot {email} — 200 no matter what (account enumeration stays impossible).
+  // For a real account: 32-hex one-time token (bcrypt-hashed at rest, 15 min), emailed as a
+  // link + raw token. Works in dev-mode too — the "email" lands in the server log.
+  app.post('/auth/forgot', (req, res) => {
+    const ipKey = 'forgot:ip:' + clientIp(req);
+    const c = loginLimiter.check(ipKey);
+    if (c.limited) return tooMany(res, c.retryAfterMs);
+    loginLimiter.hit(ipKey);   // every call counts — unauthenticated mail-spam vector
+    const em = auth.normalizeEmail((req.body || {}).email || '');
+    const u = em ? store.findByEmail(em) : null;
+    if (u) {
+      const token = newResetToken();
+      store.update(u.id, { resetTokenHash: auth.hashPassword(token), resetExpires: now() + RESET_TTL_MS });
+      const link = (appBaseUrl || (req.protocol + '://' + req.get('host'))) + '/?reset=' + token + '&email=' + encodeURIComponent(em);
+      const m = coreEmail.resetEmailMsg(link);
+      Promise.resolve(sendEmail(em, m.subject, m.text)).catch(() => {});
+    }
+    return res.json({ ok: true });
+  });
+
+  // POST /auth/reset {email, token, newPassword} — same length policy as signup; the token
+  // is single-use and dies on success, failure, and expiry alike (uniform 'invalid token'
+  // answer — no oracle about which part was wrong).
+  app.post('/auth/reset', (req, res) => {
+    const ipKey = 'reset:ip:' + clientIp(req);
+    const c = loginLimiter.check(ipKey);
+    if (c.limited) return tooMany(res, c.retryAfterMs);
+    loginLimiter.hit(ipKey);
+    const { email, token, newPassword } = req.body || {};
+    if (typeof newPassword !== 'string' || newPassword.length < 8) return res.status(400).json({ error: 'password too short' });
+    const em = auth.normalizeEmail(email || '');
+    const u = em ? store.findByEmail(em) : null;
+    const ok = !!(u && u.resetTokenHash && now() <= (u.resetExpires || 0) && auth.verifyPassword(String(token || ''), u.resetTokenHash));
+    if (!ok) return res.status(400).json({ error: 'invalid token' });
+    store.update(u.id, { passwordHash: auth.hashPassword(newPassword), resetTokenHash: null, resetExpires: null });
+    return res.json({ ok: true });
+  });
+
   // POST /auth/login {email,password} — brute-force limited by client IP AND targeted email
   // (so neither one IP guessing many accounts, nor many IPs guessing one account, is cheap).
   app.post('/auth/login', (req, res) => {
@@ -252,11 +360,11 @@ async function startServer(opts = {}) {
     // 401s first, so this doesn't reveal which emails exist.
     if (user.verified === false) {
       loginLimiter.reset(ipKey); if (emKey) loginLimiter.reset(emKey);   // credentials were right — don't penalise
-      return res.status(403).json({ error: 'email_not_verified' });
+      return res.status(403).json({ error: 'email_not_verified', pendingVerify: true });
     }
     loginLimiter.reset(ipKey); if (emKey) loginLimiter.reset(emKey);  // success clears the counters
     const token = auth.signToken({ sub: user.id, email: em }, secret);
-    return res.json({ token, email: em });
+    return res.json({ token, email: em, plan: user.plan || 'free' });
   });
 
   // GET /auth/me  (Authorization: Bearer <token>)
@@ -265,7 +373,8 @@ async function startServer(opts = {}) {
     const token = header.startsWith('Bearer ') ? header.slice(7) : null;
     const payload = auth.verifyToken(token, secret);
     if (!payload) return res.status(401).json({ error: 'unauthorized' });
-    return res.json({ email: payload.email, sub: payload.sub });
+    const u = store.findByEmail(payload.email);
+    return res.json({ email: payload.email, sub: payload.sub, plan: (u && u.plan) || 'free' });
   });
 
   // POST /auth/google { idToken } -> verifies a Google ID token via the configured
@@ -277,6 +386,9 @@ async function startServer(opts = {}) {
     if (!g || !g.email) return res.status(401).json({ error: 'invalid google token' });
     if (!emailAllowed(g.email)) return res.status(403).json({ error: 'not_allowed' });
     const user = store.findOrCreateGoogle(g.sub, auth.normalizeEmail(g.email));
+    // Google has already confirmed this email — a Google login ALWAYS leaves the account
+    // verified (even one that signed up by password and never entered a code).
+    if (user.verified !== true || !user.plan) store.update(user.id, { verified: true, plan: user.plan || 'free' });
     const token = auth.signToken({ sub: user.id, email: user.email }, secret);
     return res.json({ token, email: user.email });
   });

@@ -38,7 +38,8 @@ function createStore(filePath) {
   // passwordHash + googleId both optional now (Google users have no password).
   // verified/verifyToken support email verification: a NEW unverified user carries a token;
   // legacy users (no `verified` field) are treated as verified elsewhere for back-compat.
-  function create({ email, passwordHash, googleId, verified, verifyToken }) {
+  // plan: every NEW user starts on 'free' (legacy users get it filled at the view layer).
+  function create({ email, passwordHash, googleId, verified, verifyToken, plan }) {
     load();
     if (users.some((u) => u.email === email)) return null;
     const count = users.length + 1;
@@ -46,6 +47,7 @@ function createStore(filePath) {
       id: 'u' + count + '_' + email,
       email,
       createdAt: new Date().toISOString(),
+      plan: plan || 'free',
     };
     if (passwordHash != null) user.passwordHash = passwordHash;
     if (googleId != null) user.googleId = googleId;
@@ -56,18 +58,35 @@ function createStore(filePath) {
     return user;
   }
 
+  // Generic patch: update(id, {field: value, ...}); a null value DELETES the field.
+  // One tool for verify-code state, reset tokens, password changes — no per-field setters.
+  function update(id, patch) {
+    const u = load().find((x) => x.id === id);
+    if (!u) return null;
+    for (const k of Object.keys(patch || {})) {
+      if (patch[k] === null) delete u[k];
+      else u[k] = patch[k];
+    }
+    save();
+    return u;
+  }
+
   function findByVerifyToken(token) {
     const t = String(token == null ? '' : token);
     if (!t) return null;
     return load().find((u) => u.verifyToken && u.verifyToken === t) || null;
   }
 
-  // Mark a user verified and drop the one-time token. Returns true if a change was made.
+  // Mark a user verified and drop the one-time token AND any pending 6-digit code
+  // state. Returns true if a change was made.
   function markVerified(id) {
     const u = load().find((x) => x.id === id);
     if (!u) return false;
     u.verified = true;
     delete u.verifyToken;
+    delete u.verifyCodeHash;
+    delete u.verifyCodeExpires;
+    delete u.verifyAttempts;
     save();
     return true;
   }
@@ -91,7 +110,7 @@ function createStore(filePath) {
     return load();
   }
 
-  return { findByEmail, findByGoogleId, create, findOrCreateGoogle, findByVerifyToken, markVerified, _all };
+  return { findByEmail, findByGoogleId, create, update, findOrCreateGoogle, findByVerifyToken, markVerified, _all };
 }
 
 module.exports = { createStore };
