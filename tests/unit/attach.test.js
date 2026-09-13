@@ -31,8 +31,8 @@ describe('image attach — capability table + request builder', () => {
 describe('image attach — wiring', () => {
   it('main: engine:run takes images, auto-switches to the vision model, CLI gets temp files, vision-model event emitted', () => {
     const m = read('main.js');
-    expect(m).toMatch(/engine:run', \(e, \{ engine, model, prompt, runId, images \}\)/);
-    expect(m).toMatch(/if \(vm && modelSupportsVision\(aicfg\.provider, vm\)\) \{ apiModel = vm; usedVision = true; \}/);
+    expect(m).toMatch(/engine:run', \(e, \{ engine, model, prompt, runId, images, override \}\)/);
+    expect(m).toMatch(/if \(vm && modelSupportsVision\(apiProvider, vm\)\) \{ apiModel = vm; usedVision = true; \}/);
     expect(m).toMatch(/_imagesToTempFiles\(images\)/);
     expect(m).toMatch(/kind: 'vision-model'/);
     expect(m).toMatch(/ภาพถูกตัดออก/);   // no silent drop when vision is impossible

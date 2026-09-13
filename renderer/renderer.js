@@ -914,10 +914,8 @@ async function runEngineAction(prompt) {
   await save();                                              // flush editor -> file so AI edits latest
   aiSnapshot = { name: currentNote, content: await window.api.readNote(currentNote) };
   noteActionRunId = s.id;
-  const engine = s.engine;
-  const model = 'zai-coding-plan/' + s.model;
   beginAiTurn(prompt);
-  window.api.runEngine({ engine, model: (engine === 'glm' ? model : ''), prompt, runId: s.id });
+  window.api.runEngine({ override: { sel: s.engineSel, model: s.modelSel }, prompt, runId: s.id });
 }
 
 actionBar.querySelectorAll('button[data-act]').forEach((btn) => {
@@ -3071,8 +3069,7 @@ async function sendChat(){
        'ตอบคำถามนี้: ' + msg)
     : (rules + mem + reviewFb + noteEditCapabilityPrompt() + pdfClipCapabilityPrompt() + kumikoLearnPrompt() + kumikoMemoryLearnPrompt() + kumikoToolsPrompt() + (history ? 'บทสนทนาก่อนหน้า:\n' + history + '\n\n' : '') + 'ผู้ใช้: ' + msg);
   beginAiTurn(msg || t('(ส่งภาพ)'), sources, images);
-  const model = 'zai-coding-plan/' + s.model;
-  window.api.runEngine({ engine: s.engine, model: (s.engine === 'glm' ? model : ''), prompt: finalPrompt, runId: s.id, images: images.map((im) => im.uri) });
+  window.api.runEngine({ override: { sel: s.engineSel, model: s.modelSel }, prompt: finalPrompt, runId: s.id, images: images.map((im) => im.uri) });
 }
 // the single #chatSend button reflects the ACTIVE session: SEND when idle, STOP when running.
 function updateSendButton(){
@@ -3354,8 +3351,8 @@ async function runAutoLink(){
     '- phrase ต้องคัดลอกจากเนื้อโน้ตแบบตรงตัว (จะได้หาเจอ)\n' +
     '- ห้ามเสนอคำที่เป็น [[...]] อยู่แล้ว · ห้ามแต่งชื่อโน้ตหรือแท็กใหม่ · ถ้าไม่มีให้ตอบ []\n' +
     '- ลิงก์สูงสุด 8 · แท็กสูงสุด 3 · เฉพาะที่เกี่ยวข้องจริง ๆ';
-  const model = 'zai-coding-plan/' + currentModel;
-  window.api.runEngine({ engine: currentEngine, model: (currentEngine === 'glm' ? model : ''), prompt, runId: 'autolink' });
+  // background job — always the Settings default, never a chat tab's override
+  window.api.runEngine({ prompt, runId: 'autolink' });
 }
 
 window.api.onEngineOutput((p) => { if (p && p.runId === 'autolink' && p.kind !== 'reasoning') autolinkAcc += stripAnsi(p.data || ''); });

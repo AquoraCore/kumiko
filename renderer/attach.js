@@ -146,6 +146,8 @@ function refreshAttachState(){
 async function refreshAiCfgCache(){
   try { window.__aiCfg = await window.api.aiGetConfig(); } catch (_) {}
   refreshAttachState();
+  // the chat header's per-tab engine picker mirrors the same config — rebuild its options
+  if (typeof resetEngineTabOpts === 'function') { try { resetEngineTabOpts(); } catch (_) {} }
 }
 
 (function initAttach(){

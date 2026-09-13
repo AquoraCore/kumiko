@@ -5,7 +5,7 @@ const fs = require('fs');
 const chokidar = require('chokidar');
 const { wikiTargets, linksTo, rewriteLinkTargets } = require('./core/wikilinks');
 const { safeRel, baseName, vaultName } = require('./core/pathutil');
-const { aiConfigView, setConfigKey, buildApiRequest, parseSseDelta, parseSseEvent, modelSupportsVision, visionModelFor, buildEmbedRequest, parseEmbedResponse, resolveThinking, buildEngineInvocation } = require('./core/ai');
+const { aiConfigView, setConfigKey, buildApiRequest, parseSseDelta, parseSseEvent, modelSupportsVision, visionModelFor, buildEmbedRequest, parseEmbedResponse, resolveThinking, buildEngineInvocation, resolveEngineOverride, modelsForProvider } = require('./core/ai');
 const { spawn, spawnSync } = require('child_process');   // CLI (subscription) engine path — claude / opencode / gemini
 const os = require('os');
 // A GUI app launched from Finder/Dock inherits a MINIMAL PATH (/usr/bin:/bin:…) that does NOT
@@ -604,7 +604,7 @@ function runCliEngine({ engine, model, prompt, rid, emit }){
 }
 
 // ---- One-shot engine runner (no shell, argv array) ----
-ipcMain.handle('engine:run', (e, { engine, model, prompt, runId, images }) => {
+ipcMain.handle('engine:run', (e, { engine, model, prompt, runId, images, override }) => {
   images = Array.isArray(images) ? images.filter((u) => /^data:image\//.test(String(u))).slice(0, 4) : [];
   const rid = runId || 'default';
   const emit = (data) => win.webContents.send('engine:output', { runId: rid, data });
@@ -639,12 +639,15 @@ ipcMain.handle('engine:run', (e, { engine, model, prompt, runId, images }) => {
     return;
   }
   const aicfg = readAiConfig();
-  // CLI (subscription) mode — spawn the logged-in `claude`/`opencode` CLI, no API key.
-  if (aicfg.mode === 'cli') {
-    const eng = aicfg.cliEngine || 'claude';
+  // Per-tab override (chat header): a real backend choice beats the Settings default.
+  // null (no/junk override, or 'default') = today's behavior, driven by Settings.
+  const ov = override ? resolveEngineOverride(override.sel, override.model) : null;
+  // CLI path — the tab picked a CLI, or Settings mode is 'cli' with no override.
+  if ((ov && ov.kind === 'cli') || (!ov && aicfg.mode === 'cli')) {
+    const eng = ov ? ov.engine : (aicfg.cliEngine || 'claude');
     // glm needs an opencode model (default the Coding-Plan one); claude/gemini models are
     // OPTIONAL — empty means that CLI's own default.
-    const mdl = (eng === 'glm') ? (aicfg.cliModel || 'zai-coding-plan/glm-5.2') : (aicfg.cliModel || '');
+    const mdl = ov ? ov.model : ((eng === 'glm') ? (aicfg.cliModel || 'zai-coding-plan/glm-5.2') : (aicfg.cliModel || ''));
     // CLI can't take content blocks — write images to temp files and point the CLI at them
     // (both `claude` and `opencode` read image files with their own tools)
     if (images.length) prompt += '\n\n' + _imagesToTempFiles(images).map((f, i) => '[ภาพแนบที่ ' + (i + 1) + ': ' + f + ' — เปิดอ่านไฟล์ภาพนี้ประกอบคำตอบ]').join('\n');
@@ -652,19 +655,22 @@ ipcMain.handle('engine:run', (e, { engine, model, prompt, runId, images }) => {
     return;
   }
   // Otherwise the API-key path. If no key/api config is set, emit a graceful error.
-  const key = getDecryptedKey(aicfg.provider);
-  if (!key) { emit('\r\n[ยังไม่ได้ตั้งค่า API key — ไปที่ ⚙ ตั้งค่า AI]\r\n'); win.webContents.send('engine:done', { runId: rid, code: -1 }); return; }
-  let apiModel = aicfg.model || model;
+  const apiProvider = (ov && ov.kind === 'api') ? ov.provider : aicfg.provider;
+  const key = getDecryptedKey(apiProvider);
+  if (!key) { emit('\r\n[ยังไม่ได้ตั้งค่า API key' + (ov ? ' ของ ' + apiProvider : '') + ' — ไปที่ ⚙ ตั้งค่า AI]\r\n'); win.webContents.send('engine:done', { runId: rid, code: -1 }); return; }
+  // Override model wins; an override with no model uses the provider's FIRST capability
+  // model (the Settings model may belong to a different provider entirely).
+  let apiModel = ov ? (ov.model || (modelsForProvider(apiProvider)[0] || {}).id || '') : (aicfg.model || model);
   let usedVision = false;
   if (images.length) {
-    if (!modelSupportsVision(aicfg.provider, apiModel)) {
-      const vm = (aicfg.autoVision !== false) ? (aicfg.visionModel || visionModelFor(aicfg.provider, apiModel)) : null;
-      if (vm && modelSupportsVision(aicfg.provider, vm)) { apiModel = vm; usedVision = true; }
+    if (!modelSupportsVision(apiProvider, apiModel)) {
+      const vm = (aicfg.autoVision !== false) ? ((ov ? null : aicfg.visionModel) || visionModelFor(apiProvider, apiModel)) : null;
+      if (vm && modelSupportsVision(apiProvider, vm)) { apiModel = vm; usedVision = true; }
       else { emit('\r\n[โมเดล ' + apiModel + ' มองภาพไม่ได้ และไม่ได้เปิดสลับรุ่นอัตโนมัติ — ภาพถูกตัดออก]\r\n'); images = []; }
     } else usedVision = true;
   }
   if (usedVision) win.webContents.send('engine:output', { runId: rid, data: apiModel, kind: 'vision-model' });
-  runApiProvider({ provider: aicfg.provider, model: apiModel, prompt, key, rid, emit, thinking: aicfg.thinking, images });
+  runApiProvider({ provider: apiProvider, model: apiModel, prompt, key, rid, emit, thinking: aicfg.thinking, images });
 });
 
 // data URIs → temp .jpg/.png files for the CLI path; best-effort cleanup after 10 minutes

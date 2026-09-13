@@ -114,26 +114,73 @@ const _linkify = (h) => (window.CoreMarkdown && window.CoreMarkdown.linkifyRefs)
 const SESSION_ICONS = ['note','task','graph','sparkle','pencil','dash','db','star'];
 const SCOPE_LABEL = { note: 'อ้างอิงโน้ตนี้', vault: 'ทั้ง vault', free: 'อิสระ' };
 const GLM_MODELS = ['glm-5.2','glm-5.1','glm-5-turbo','glm-4.7','glm-4.5-air'];
+
+// ---- Per-tab engine override --------------------------------------------------
+// s.engineSel: 'default' (ตาม Settings) หรือ backend จริง 'cli:*'/'api:*'; s.modelSel:
+// '' = default ของ backend นั้น. Options มาจาก core (engineTabOptions) จากของที่ใช้ได้
+// จริงเท่านั้น: CLI ที่ติดตั้ง (desktop) + provider ที่มี key. legacy s.engine/s.model
+// เดิมเป็นแค่ป้ายหลอก (engine:run ไม่เคยฟัง) จึง migrate ทุกแท็บเป็น 'default'.
+const ENGINE_TAB_LABELS = { 'cli:claude': 'Claude CLI', 'cli:glm': 'GLM (opencode)', 'cli:gemini': 'Gemini CLI', 'api:anthropic': 'Claude API', 'api:zai': 'GLM API', 'api:zai-coding': 'GLM API' };
+const ENGINE_TAB_SHORT = { 'default': 'AUTO', 'cli:claude': 'Claude', 'cli:glm': 'GLM', 'cli:gemini': 'Gemini', 'api:anthropic': 'Claude', 'api:zai': 'GLM', 'api:zai-coding': 'GLM' };
+function _defaultEngineLabel(view){
+  if (!view) return '';
+  if (view.mode === 'cli') return ({ claude: 'Claude CLI', glm: 'GLM (opencode)', gemini: 'Gemini CLI' })[view.cliEngine] || view.cliEngine;
+  if (view.mode === 'managed') return 'Managed';
+  return ({ anthropic: 'Claude API', zai: 'GLM API', 'zai-coding': 'GLM API' })[view.provider] || view.provider;
+}
+let _tabOpts = null;           // [{id}] + _view — cached; reset via resetEngineTabOpts()
+let _tabOptsLoading = false;
+function resetEngineTabOpts(){ _tabOpts = null; renderHead(); }
+async function _loadTabOpts(){
+  if (_tabOpts || _tabOptsLoading) return;
+  _tabOptsLoading = true;
+  const web = typeof window.KUMIKO_WEB !== 'undefined';
+  let view = null, detect = null;
+  try { view = await window.api.aiGetConfig(); } catch (_) {}
+  if (!web && window.api.aiDetectClis) { try { detect = await window.api.aiDetectClis(); } catch (_) {} }
+  const CoreAi = window.CoreAi;
+  _tabOpts = (CoreAi && CoreAi.engineTabOptions) ? CoreAi.engineTabOptions(view, detect, { web }) : [{ id: 'default' }];
+  _tabOpts._view = view;
+  _tabOptsLoading = false;
+  renderHead();   // re-render with the real list once it arrives
+}
+// bubble "who" label: the tab's real pick, or the resolved Settings default for 'default'
+function _tabWhoLabel(s){
+  const sel = (s && s.engineSel) || 'default';
+  if (sel !== 'default') return ENGINE_TAB_SHORT[sel] || 'AI';
+  const v = _tabOpts && _tabOpts._view;
+  if (!v) return 'AI';
+  if (v.mode === 'cli') return ({ claude: 'Claude', glm: 'GLM', gemini: 'Gemini' })[v.cliEngine] || 'AI';
+  return ({ anthropic: 'Claude', zai: 'GLM', 'zai-coding': 'GLM' })[v.provider] || 'AI';
+}
+function _tabModelChoices(id){
+  const CoreAi = window.CoreAi;
+  const mf = (window.AICaps && window.AICaps.modelsForProvider) || null;
+  return (CoreAi && CoreAi.modelChoicesFor) ? CoreAi.modelChoicesFor(id, mf) : [];
+}
 let sessions = [];
 let activeId = null;
 let liveBubble = null;     // ai bubble DOM element of the active session's running turn (else null)
 
 function persistSessions(){
   try {
-    const slim = sessions.map((s) => ({ id: s.id, name: s.name, icon: s.icon, engine: s.engine, model: s.model, scope: s.scope,
+    const slim = sessions.map((s) => ({ id: s.id, name: s.name, icon: s.icon, engine: s.engine, model: s.model, engineSel: s.engineSel, modelSel: s.modelSel, scope: s.scope,
       messages: s.messages.map((m) => ({ role: m.role, text: m.text, thumbs: m.thumbs, stopped: m.stopped || undefined, think: m.think || undefined, visionModel: m.visionModel || undefined })) }));
     vsSet('aiSessions', { sessions: slim, activeId });
   } catch (_) {}
 }
 function newSession(opts){
   const id = 's' + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36);
-  return Object.assign({ id, name: 'แชตใหม่', icon: 'note', engine: currentEngine, model: currentModel, scope: 'free', messages: [], running: false }, opts || {});
+  return Object.assign({ id, name: 'แชตใหม่', icon: 'note', engine: currentEngine, model: currentModel, engineSel: 'default', modelSel: '', scope: 'free', messages: [], running: false }, opts || {});
 }
 function loadSessions(){
   let saved = vsGet('aiSessions', null);
   if (saved && Array.isArray(saved.sessions) && saved.sessions.length) {
     sessions = saved.sessions.map((s) => ({ id: s.id, name: s.name, icon: (s.icon && /^[a-z-]+$/.test(s.icon)) ? s.icon : 'note', engine: s.engine || 'glm',
-      model: s.model || 'glm-5.2', scope: s.scope || 'free', running: false,
+      model: s.model || 'glm-5.2',
+      engineSel: (typeof s.engineSel === 'string' && (s.engineSel === 'default' || /^(cli|api):/.test(s.engineSel))) ? s.engineSel : 'default',
+      modelSel: (typeof s.modelSel === 'string') ? s.modelSel : '',
+      scope: s.scope || 'free', running: false,
       // repair legacy empty AI bubbles (pre-fix saves) into a visible failure line
       messages: Array.isArray(s.messages) ? s.messages.map((m) => ({ role: m.role,
         text: (m.role === 'ai' && !(m.text || '').trim()) ? t('⚠ engine ไม่ตอบกลับ (คำตอบว่าง) — ลองส่งข้อความเดิมอีกครั้ง') : m.text })) : [] }));
@@ -163,10 +210,11 @@ function renderTabs(){
   bar.innerHTML = '';
   sessions.forEach((s) => {
     const tab = document.createElement('div');
-    tab.className = 'stab' + (s.id === activeId ? ' active' : '') + (s.engine === 'glm' ? ' g' : ' c');
+    const short = ENGINE_TAB_SHORT[s.engineSel || 'default'] || 'AUTO';
+    tab.className = 'stab' + (s.id === activeId ? ' active' : '') + (short === 'Claude' ? ' c' : ' g');
     const ic = document.createElement('span'); ic.className = 'ico'; ic.innerHTML = icoSvg(s.icon || 'note', 'sm');
     const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = s.name;
-    const eng = document.createElement('span'); eng.className = 'eng'; eng.textContent = s.engine === 'glm' ? 'GLM' : 'Claude';
+    const eng = document.createElement('span'); eng.className = 'eng'; eng.textContent = short;
     tab.appendChild(ic); tab.appendChild(nm); tab.appendChild(eng);
     if (s.running) { const d = document.createElement('span'); d.className = 'rundot'; tab.appendChild(d); }
     const x = document.createElement('span'); x.className = 'stab-x'; x.title = t('ปิดแท็บ'); x.innerHTML = '&times;';
@@ -188,13 +236,32 @@ function renderHead(){
   // Scope dropdown removed — context is now injected automatically by PRIORITY
   // (open note first, then RAG-related notes). See buildPriorityContext in renderer.js.
   const sp = document.createElement('span'); sp.className = 'sh-sp'; head.appendChild(sp);
-  const eng = document.createElement('select'); eng.className = 'sh-eng'; eng.title = 'engine';
-  [['glm','GLM'],['claude','Claude']].forEach(([v,l]) => { const o = document.createElement('option'); o.value = v; o.textContent = l; if (s.engine === v) o.selected = true; eng.appendChild(o); });
-  const mdl = document.createElement('select'); mdl.className = 'sh-mdl'; mdl.title = 'model';
-  GLM_MODELS.forEach((v) => { const o = document.createElement('option'); o.value = v; o.textContent = v; if (s.model === v) o.selected = true; mdl.appendChild(o); });
-  mdl.hidden = s.engine !== 'glm';
-  eng.onchange = () => { s.engine = eng.value; mdl.hidden = s.engine !== 'glm'; syncEngineFromSession(); persistSessions(); renderTabs(); };
-  mdl.onchange = () => { s.model = mdl.value; syncEngineFromSession(); persistSessions(); };
+  // per-tab engine override: 'default' follows Settings; other options are REAL and
+  // actually change what runs (engine:run resolves them via core resolveEngineOverride)
+  if (!_tabOpts) _loadTabOpts();   // async — re-renders the head when the list lands
+  const opts = _tabOpts || [{ id: 'default' }];
+  const eng = document.createElement('select'); eng.className = 'sh-eng'; eng.title = t('AI ของแท็บนี้ (อัตโนมัติ = ตามตั้งค่า)');
+  opts.forEach((o) => {
+    const op = document.createElement('option'); op.value = o.id;
+    op.textContent = (o.id === 'default')
+      ? (t('อัตโนมัติ') + (_tabOpts && _tabOpts._view ? ' · ' + _defaultEngineLabel(_tabOpts._view) : ''))
+      : (ENGINE_TAB_LABELS[o.id] || o.id);
+    if ((s.engineSel || 'default') === o.id) op.selected = true;
+    eng.appendChild(op);
+  });
+  const mdl = document.createElement('select'); mdl.className = 'sh-mdl'; mdl.title = t('รุ่นของแท็บนี้');
+  const choices = (s.engineSel && s.engineSel !== 'default') ? _tabModelChoices(s.engineSel) : [];
+  choices.forEach((v) => {
+    const o = document.createElement('option'); o.value = v;
+    o.textContent = v === '' ? t('รุ่นเริ่มต้น') : v.split('/').pop();
+    if ((s.modelSel || '') === v) o.selected = true; mdl.appendChild(o);
+  });
+  mdl.hidden = choices.length < 2;
+  eng.onchange = () => {
+    s.engineSel = eng.value; s.modelSel = '';   // switching backends resets the model pick
+    persistSessions(); renderTabs(); renderHead();
+  };
+  mdl.onchange = () => { s.modelSel = mdl.value; persistSessions(); };
   head.appendChild(eng); head.appendChild(mdl);
   const mem = document.createElement('button'); mem.className = 'sh-mem'; mem.textContent = '🧠'; mem.title = t('ความจำของ vault นี้ (KUMIKO-MEMORY.md)');
   mem.onclick = (e) => { e.stopPropagation(); if (typeof openMemoryDesk === 'function') openMemoryDesk(); };
@@ -209,7 +276,7 @@ function renderChat(){
   const s = activeSession(); box.innerHTML = ''; liveBubble = null;
   s.messages.forEach((m, i) => {
     const wrap = document.createElement('div'); wrap.className = 'm-wrap ' + m.role;
-    if (m.role === 'ai') { const who = document.createElement('div'); who.className = 'who'; who.textContent = s.engine === 'glm' ? 'GLM' : 'Claude';
+    if (m.role === 'ai') { const who = document.createElement('div'); who.className = 'who'; who.textContent = _tabWhoLabel(s);
       if (m.visionModel) { const vb = document.createElement('span'); vb.className = 'who-vision'; vb.textContent = '👁 ' + m.visionModel; vb.title = t('ข้อความนี้มีภาพ — ส่งด้วยรุ่น vision'); who.appendChild(vb); }
       wrap.appendChild(who); }
     // (No source pills: the reference row was removed on request. `m.sources` is still recorded
@@ -449,9 +516,8 @@ window.api.onEngineDone(async (payload) => {
       s.running = true;
       persistSessions(); renderTabs();
       if (runId === activeId) renderChat();
-      const model = 'zai-coding-plan/' + s.model;
       const toolImgs = (window.__toolImages || []).slice(0, 4); window.__toolImages = [];
-      window.api.runEngine({ engine: s.engine, model: (s.engine === 'glm' ? model : ''),
+      window.api.runEngine({ override: { sel: s.engineSel, model: s.modelSel },
         prompt: buildToolContinuationPrompt(lastUser ? lastUser.text : '', results, (acts.chat || '').slice(0, 600)), runId: s.id, images: toolImgs });
       return;   // an "ask" reply never runs the write executors — the NEXT reply acts
     } catch (_) { s.running = false; }

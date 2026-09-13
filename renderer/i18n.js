@@ -698,6 +698,11 @@ const I18N_EN = {
    'ใช้แอปโดยไม่มี AI — เปิดตัวช่วยได้ที่ ⚙ ตั้งค่า': 'Use the app without AI — reopen the helper from ⚙ Settings',
    'ยืนยัน': 'Confirm',
    'ตัวช่วยตั้งค่า AI': 'AI setup helper',
+   // ---- per-tab engine override (chat header) ----
+   'อัตโนมัติ': 'Auto',
+   'รุ่นเริ่มต้น': 'Default model',
+   'AI ของแท็บนี้ (อัตโนมัติ = ตามตั้งค่า)': "This tab's AI (Auto = follow Settings)",
+   'รุ่นของแท็บนี้': "This tab's model",
   'หยุดคำสั่ง (Ctrl+C)': 'Stop command (Ctrl+C)',
   'รีสตาร์ท terminal': 'Restart terminal',
   'ล้างจอ': 'Clear screen',

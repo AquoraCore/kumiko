@@ -383,6 +383,9 @@ function createWebApi(opts) {
       model: c.model || '',
       thinking: (c.thinking === true || c.thinking === false) ? c.thinking : null,
       hasKey: { anthropic: !!keys.anthropic, zai: !!keys.zai },
+      // names of providers holding a key (values never leave the store) — feeds the
+      // per-tab engine picker, same contract as the desktop aiConfigView
+      keyProviders: Object.keys(keys).filter((p) => !!keys[p]),
     });
   }
   function aiSetConfig(patch) {
@@ -495,7 +498,15 @@ function createWebApi(opts) {
     const runId = payload && payload.runId;
     const prompt = (payload && payload.prompt) || '';
     const c = _readAiCfg(); const keys = c.keys || {};
-    const provider = c.provider || 'zai'; const key = keys[provider]; const model = c.model || '';
+    // per-tab override (chat header): only api:<provider> choices exist on web, and only
+    // for providers the user saved a key for; anything else falls back to the default
+    let provider = c.provider || 'zai'; let model = c.model || '';
+    const ov = payload && payload.override;
+    if (ov && typeof ov.sel === 'string' && ov.sel.indexOf('api:') === 0) {
+      const p = ov.sel.slice(4);
+      if (keys[p]) { provider = p; model = (typeof ov.model === 'string' ? ov.model : ''); }
+    }
+    const key = keys[provider];
     const thinking = (c.thinking === true || c.thinking === false) ? c.thinking : null;
     const body = { prompt };
     const imgs = (payload && Array.isArray(payload.images)) ? payload.images.filter((u) => /^data:image\//.test(String(u))).slice(0, 4) : [];

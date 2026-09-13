@@ -47,7 +47,11 @@ function aiConfigView(cfg){
   // configured: separates "the raw defaults" from "the user chose something" — set when the user
   // saves from the settings modal or the onboarding wizard (also on "ข้ามไปก่อน"/skip).
   const configured = !!(c.configured === true);
-  return { mode, provider, model, thinking, configured, cliEngine, cliModel, visionModel, autoVision, readNoteImages, hasKey: { anthropic: has('anthropic'), zai: has('zai') || has('zai-coding'), 'zai-coding': has('zai-coding') || has('zai') } };   // both Z.ai endpoints share one key
+  // keyProviders: WHICH provider names hold a key (names only, never values) — hasKey
+  // merges the two Z.ai flavors for the settings UI, but the per-tab engine picker
+  // must offer the exact endpoint the key was saved for (coding-plan keys 1113 on /paas).
+  const keyProviders = Object.keys(keys).filter((p) => has(p));
+  return { mode, provider, model, thinking, configured, cliEngine, cliModel, visionModel, autoVision, readNoteImages, keyProviders, hasKey: { anthropic: has('anthropic'), zai: has('zai') || has('zai-coding'), 'zai-coding': has('zai-coding') || has('zai') } };   // both Z.ai endpoints share one key
 }
 
 // Return a NEW config with keys[provider] set to `encrypted`, or DELETED when
@@ -60,6 +64,49 @@ function setConfigKey(cfg, provider, encrypted){
   if (encrypted === null || encrypted === undefined || encrypted === '') delete next.keys[provider];
   else next.keys[provider] = encrypted;
   return next;
+}
+
+// ---- Per-tab engine override (chat header): PURE helpers -----------------------
+// The chat-header dropdown used to be decorative — engine:run followed Settings no
+// matter what the tab said. Now a tab picks a REAL backend ('default' = follow
+// Settings). Options come only from what actually works: installed CLIs (desktop)
+// + providers with a saved key. Ids: 'default' | 'cli:claude' | 'cli:glm' |
+// 'cli:gemini' | 'api:<provider>'.
+function engineTabOptions(view, detect, opts){
+  const out = [{ id: 'default' }];
+  const web = !!(opts && opts.web);
+  if (!web && detect && typeof detect === 'object'){
+    if (detect.claude) out.push({ id: 'cli:claude' });
+    if (detect.opencode) out.push({ id: 'cli:glm' });
+    if (detect.gemini) out.push({ id: 'cli:gemini' });
+  }
+  const kp = (view && Array.isArray(view.keyProviders)) ? view.keyProviders : [];
+  ['anthropic', 'zai', 'zai-coding'].forEach((p) => { if (kp.indexOf(p) >= 0) out.push({ id: 'api:' + p }); });
+  return out;
+}
+// Second dropdown: model choices for a picked id ('' = that backend's own default).
+// `modelsFor` = aicaps modelsForProvider (injected: Node re-exports it, the browser
+// has it on window.AICaps — core files must not reach for either directly).
+function modelChoicesFor(id, modelsFor){
+  if (id === 'cli:claude') return ['', 'opus', 'sonnet', 'haiku'];
+  if (id === 'cli:glm') return ['zai-coding-plan/glm-5.2', 'zai-coding-plan/glm-5.1', 'zai-coding-plan/glm-5-turbo', 'zai-coding-plan/glm-4.7', 'zai-coding-plan/glm-4.5-air'];
+  if (id === 'cli:gemini') return ['', 'gemini-2.5-pro', 'gemini-2.5-flash'];
+  if (typeof id === 'string' && id.indexOf('api:') === 0 && typeof modelsFor === 'function'){
+    return modelsFor(id.slice(4)).map((m) => m.id);
+  }
+  return [];
+}
+// Dispatch descriptor for engine:run — null = follow Settings (also for junk input).
+function resolveEngineOverride(sel, model){
+  const m = (typeof model === 'string') ? model.trim() : '';
+  if (sel === 'cli:claude') return { kind: 'cli', engine: 'claude', model: m };
+  if (sel === 'cli:glm') return { kind: 'cli', engine: 'glm', model: m || 'zai-coding-plan/glm-5.2' };
+  if (sel === 'cli:gemini') return { kind: 'cli', engine: 'gemini', model: m };
+  if (typeof sel === 'string' && sel.indexOf('api:') === 0){
+    const p = sel.slice(4);
+    if (p === 'anthropic' || p === 'zai' || p === 'zai-coding') return { kind: 'api', provider: p, model: m };
+  }
+  return null;
 }
 
 // ---- AI onboarding wizard: PURE decision helpers ------------------------------
@@ -218,10 +265,11 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     buildEngineInvocation, aiConfigView, setConfigKey,
     shouldShowAiWizard, aiWizardPatch,
+    engineTabOptions, modelChoicesFor, resolveEngineOverride,
     buildApiRequest, parseSseDelta, parseSseEvent,
     buildEmbedRequest, parseEmbedResponse,
     // capability table (models + thinking support) — re-exported for convenience
     ...require('./aicaps'),
   };
 }
-if (typeof window !== 'undefined') window.CoreAi = { shouldShowAiWizard, aiWizardPatch };
+if (typeof window !== 'undefined') window.CoreAi = { shouldShowAiWizard, aiWizardPatch, engineTabOptions, modelChoicesFor, resolveEngineOverride };

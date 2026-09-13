@@ -66,18 +66,18 @@ describe('buildEngineInvocation', () => {
 describe('aiConfigView', () => {
   it('maps a populated config to a safe view, hiding raw keys (happy)', () => {
     const v = aiConfigView({ mode: 'api', provider: 'zai', model: 'm', keys: { anthropic: 'x' } });
-    expect(v).toEqual({ mode: 'api', provider: 'zai', model: 'm', thinking: null, configured: false, cliEngine: 'claude', cliModel: '', visionModel: '', autoVision: true, readNoteImages: true, hasKey: { anthropic: true, zai: false, 'zai-coding': false } });
+    expect(v).toEqual({ mode: 'api', provider: 'zai', model: 'm', thinking: null, configured: false, cliEngine: 'claude', cliModel: '', visionModel: '', autoVision: true, readNoteImages: true, keyProviders: ['anthropic'], hasKey: { anthropic: true, zai: false, 'zai-coding': false } });
   });
 
   it('defaults to cli/anthropic/empty when given null (edge)', () => {
     expect(aiConfigView(null)).toEqual({
-      mode: 'cli', provider: 'anthropic', model: '', thinking: null, configured: false, cliEngine: 'claude', cliModel: '', visionModel: '', autoVision: true, readNoteImages: true, hasKey: { anthropic: false, zai: false, 'zai-coding': false },
+      mode: 'cli', provider: 'anthropic', model: '', thinking: null, configured: false, cliEngine: 'claude', cliModel: '', visionModel: '', autoVision: true, readNoteImages: true, keyProviders: [], hasKey: { anthropic: false, zai: false, 'zai-coding': false },
     });
   });
 
   it('defaults to cli/anthropic/empty when given an empty object (edge)', () => {
     expect(aiConfigView({})).toEqual({
-      mode: 'cli', provider: 'anthropic', model: '', thinking: null, configured: false, cliEngine: 'claude', cliModel: '', visionModel: '', autoVision: true, readNoteImages: true, hasKey: { anthropic: false, zai: false, 'zai-coding': false },
+      mode: 'cli', provider: 'anthropic', model: '', thinking: null, configured: false, cliEngine: 'claude', cliModel: '', visionModel: '', autoVision: true, readNoteImages: true, keyProviders: [], hasKey: { anthropic: false, zai: false, 'zai-coding': false },
     });
   });
 
@@ -331,5 +331,69 @@ describe('parseSseEvent — reasoning kept apart from the answer', () => {
     expect(read('renderer/renderer.js')).toMatch(/p\.runId === 'autolink' && p\.kind !== 'reasoning'/);
     expect(read('renderer/renderer.js')).toMatch(/if \(!sc \|\| p\.kind === 'reasoning'\) return;/);
     expect(read('server/index.js')).toMatch(/const ev = aiCore\.parseSseEvent\(provider, m\[1\]\);\n        if \(ev\.text\) yield ev\.text;/);
+  });
+});
+
+// ---- per-tab engine override (chat header) — the dropdown is REAL now ----------
+const { engineTabOptions, modelChoicesFor, resolveEngineOverride, modelsForProvider } = require('../../core/ai');
+
+describe('engineTabOptions — what a chat tab may pick', () => {
+  const view = (kp) => ({ keyProviders: kp || [] });
+  it('happy: default first, installed CLIs, then providers with keys', () => {
+    const ids = engineTabOptions(view(['anthropic', 'zai-coding']), { claude: true, opencode: true, gemini: true }, {}).map((o) => o.id);
+    expect(ids).toEqual(['default', 'cli:claude', 'cli:glm', 'cli:gemini', 'api:anthropic', 'api:zai-coding']);
+  });
+  it('offers ONLY installed CLIs and ONLY keyed providers (edge)', () => {
+    const ids = engineTabOptions(view(['zai']), { claude: false, opencode: false, gemini: true }, {}).map((o) => o.id);
+    expect(ids).toEqual(['default', 'cli:gemini', 'api:zai']);
+  });
+  it('web: never offers CLI entries even when detect says installed (edge)', () => {
+    const ids = engineTabOptions(view(['anthropic']), { claude: true, opencode: true, gemini: true }, { web: true }).map((o) => o.id);
+    expect(ids).toEqual(['default', 'api:anthropic']);
+  });
+  it('no view / no detect → just default (defensive)', () => {
+    expect(engineTabOptions(null, null, {}).map((o) => o.id)).toEqual(['default']);
+  });
+});
+
+describe('modelChoicesFor — second dropdown per backend', () => {
+  it('cli backends: claude aliases, glm opencode ids, gemini ids (happy)', () => {
+    expect(modelChoicesFor('cli:claude')).toEqual(['', 'opus', 'sonnet', 'haiku']);
+    expect(modelChoicesFor('cli:glm')[0]).toBe('zai-coding-plan/glm-5.2');
+    expect(modelChoicesFor('cli:gemini')).toContain('gemini-2.5-pro');
+  });
+  it('api backends read the capability table via the injected accessor (happy)', () => {
+    const ids = modelChoicesFor('api:zai', modelsForProvider);
+    expect(ids.length).toBeGreaterThan(0);
+    expect(ids).toContain('glm-5.2');
+  });
+  it('api without accessor, unknown/default ids → [] (edge)', () => {
+    expect(modelChoicesFor('api:zai')).toEqual([]);
+    expect(modelChoicesFor('default')).toEqual([]);
+    expect(modelChoicesFor('junk')).toEqual([]);
+  });
+});
+
+describe('resolveEngineOverride — tab choice → engine:run dispatch', () => {
+  it('cli picks pass through; glm fills the Coding-Plan default model (happy)', () => {
+    expect(resolveEngineOverride('cli:gemini', '')).toEqual({ kind: 'cli', engine: 'gemini', model: '' });
+    expect(resolveEngineOverride('cli:glm', '')).toEqual({ kind: 'cli', engine: 'glm', model: 'zai-coding-plan/glm-5.2' });
+    expect(resolveEngineOverride('cli:claude', 'opus')).toEqual({ kind: 'cli', engine: 'claude', model: 'opus' });
+  });
+  it('api picks carry provider + model (happy)', () => {
+    expect(resolveEngineOverride('api:zai-coding', 'glm-5.2')).toEqual({ kind: 'api', provider: 'zai-coding', model: 'glm-5.2' });
+  });
+  it("'default', junk selections, and unknown api providers → null = follow Settings (edge)", () => {
+    expect(resolveEngineOverride('default', 'x')).toBeNull();
+    expect(resolveEngineOverride('', '')).toBeNull();
+    expect(resolveEngineOverride(undefined, undefined)).toBeNull();
+    expect(resolveEngineOverride('api:evil', '')).toBeNull();
+    expect(resolveEngineOverride('cli:rm-rf', '')).toBeNull();
+  });
+  it('aiConfigView exposes keyProviders names, never values (edge)', () => {
+    const { aiConfigView } = require('../../core/ai');
+    const v = aiConfigView({ keys: { anthropic: 'enc-secret', 'zai-coding': 'enc2', empty: '' } });
+    expect(v.keyProviders.sort()).toEqual(['anthropic', 'zai-coding']);
+    expect(JSON.stringify(v)).not.toContain('enc-secret');
   });
 });
