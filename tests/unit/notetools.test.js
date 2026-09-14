@@ -87,7 +87,9 @@ describe('collapsible slide images (8)', () => {
     expect(r).toContain('im.naturalHeight > 360');
     expect(r).toMatch(/classList\.contains\('kz-clip'\)\) im\.classList\.toggle\('kz-open'\)/);
     const css = read('renderer/styles.css');
-    expect(css).toMatch(/\.milkdown img\.kz-clip \{[^}]*height: 96px !important[^}]*zoom-in/);
+    // collapsed = whole-image thumbnail at fixed height, aspect PRESERVED (never a crop — 2026-09-15)
+    expect(css).toMatch(/\.milkdown img\.kz-clip \{[^}]*height: 150px !important[^}]*object-fit: contain[^}]*zoom-in/);
+    expect(css).not.toMatch(/img\.kz-clip \{[^}]*object-fit: cover/);
     expect(css).toMatch(/\.milkdown img\.kz-clip\.kz-open \{[^}]*height: auto !important/);
   });
   it('kz-clip also wins inside crepe milkdown-image-block (min-height:100px would beat height)', () => {
@@ -96,14 +98,13 @@ describe('collapsible slide images (8)', () => {
     // rules must override all three or slide clips render full-size and wreck the note layout
     const css = read('renderer/styles.css');
     expect(css).toMatch(/\.milkdown \.milkdown-image-block > \.image-wrapper img\.kz-clip \{[^}]*min-height: 0 !important/);
-    expect(css).toMatch(/\.milkdown \.milkdown-image-block > \.image-wrapper:has\(img\.kz-clip\) \{[^}]*width: 100%/);
+    expect(css).toMatch(/\.milkdown \.milkdown-image-block > \.image-wrapper:has\(img\.kz-clip\) \{[^}]*width: fit-content/);
     expect(css).toMatch(/\.milkdown \.milkdown-image-block > \.image-wrapper img\.kz-clip\.kz-open \{[^}]*height: auto !important/);
     expect(css).toMatch(/:not\(:has\(img\.kz-open\)\) > \.image-resize-handle \{ display: none/);
-    // crepe's inline node view (img.image-inline) sizes to intrinsic aspect — force full-width strip
-    expect(css).toMatch(/\.milkdown img\.image-inline\.kz-clip \{ width: 100% !important; max-width: 560px !important/);
+    // crepe's inline node view keeps intrinsic aspect — thumbnails just cap width at the editor
+    expect(css).toMatch(/\.milkdown img\.image-inline\.kz-clip \{ width: auto !important; max-width: 100% !important/);
     expect(css).toMatch(/\.milkdown img\.image-inline\.kz-clip\.kz-open \{ width: auto !important/);
-    // inline-flex span wrapper shrink-wraps, making img width:100% circular → widen the wrapper
-    expect(css).toMatch(/\.milkdown \.milkdown-image-inline:has\(> img\.kz-clip\) \{ width: 100%; max-width: 560px/);
+    expect(css).toMatch(/\.milkdown \.milkdown-image-inline:has\(> img\.kz-clip\) \{ width: auto; max-width: 100%/);
     expect(css).toMatch(/\.milkdown \.milkdown-image-inline:has\(> img\.kz-open\) \{ width: auto/);
   });
 });
