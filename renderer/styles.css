@@ -2486,23 +2486,22 @@ button.tg-chip { cursor: pointer; text-align: left; }
 .m.ai:hover .m-bacts, .m-bacts:focus-within { opacity: 1; }
 .m-bact { border: 1px solid var(--line-strong); background: var(--sheet); color: var(--muted); border-radius: 6px; font: 600 11.5px var(--font); padding: 3px 9px; cursor: pointer; }
 .m-bact:hover { color: var(--text); border-color: var(--accent); }
-/* ---- collapsible slide images in the editor ---- */
-.milkdown img.kz-clip { height: 96px !important; width: 100%; max-width: 560px; object-fit: cover; object-position: top; cursor: zoom-in; border-radius: 6px; filter: saturate(.9); border: 1px solid var(--line); }
-.milkdown img.kz-clip.kz-open { height: auto !important; max-width: 100%; object-fit: contain; cursor: zoom-out; filter: none; }
+/* ---- collapsible slide images in the editor ----
+   Collapsed = the WHOLE image scaled down at its own aspect ratio (a thumbnail), never a
+   cropped band — a top-strip crop read as "ภาพโดนตัด/พัง", not as "พับอยู่" (user, 2026-09-15). */
+.milkdown img.kz-clip { height: 150px !important; width: auto; max-width: 100%; object-fit: contain; cursor: zoom-in; border-radius: 6px; filter: saturate(.9); border: 1px solid var(--line); }
+.milkdown img.kz-clip.kz-open { height: auto !important; width: auto; max-width: 100%; object-fit: contain; cursor: zoom-out; filter: none; }
 /* crepe upgrades own-paragraph images to <milkdown-image-block>: its img carries min-height:100px
-   (beats our height even with !important) + the wrapper is fit-content centered + the component's
-   resize handle writes an inline height — a collapsed clip must win on all three */
-.milkdown .milkdown-image-block > .image-wrapper:has(img.kz-clip) { width: 100%; margin: 0; min-width: 0; }
-.milkdown .milkdown-image-block > .image-wrapper img.kz-clip { height: 96px !important; min-height: 0 !important; width: 100%; max-width: 560px; object-fit: cover; object-position: top; }
+   (beats our height even with !important) + the component's resize handle writes an inline
+   height — a collapsed clip must win on both, and shrink-wrap its wrapper to the thumbnail */
+.milkdown .milkdown-image-block > .image-wrapper:has(img.kz-clip) { width: fit-content; margin: 0; min-width: 0; }
+.milkdown .milkdown-image-block > .image-wrapper img.kz-clip { height: 150px !important; min-height: 0 !important; width: auto; max-width: 100%; object-fit: contain; }
 .milkdown .milkdown-image-block > .image-wrapper img.kz-clip.kz-open { height: auto !important; max-width: 100%; object-fit: contain; }
 .milkdown .milkdown-image-block > .image-wrapper:has(img.kz-clip):not(:has(img.kz-open)) > .image-resize-handle { display: none; }
-/* crepe's inline-image node view (img.image-inline) sizes to intrinsic aspect (~169px at 96h),
-   overriding our width:100% — force the same full-width strip as plain/block clips */
-.milkdown img.image-inline.kz-clip { width: 100% !important; max-width: 560px !important; }
+/* crepe's inline-image node view already sizes to intrinsic aspect — just cap the height */
+.milkdown img.image-inline.kz-clip { width: auto !important; max-width: 100% !important; }
 .milkdown img.image-inline.kz-clip.kz-open { width: auto !important; max-width: 100% !important; }
-/* the span wrapper is inline-flex shrink-wrap, so the img's width:100% resolves circularly back
-   to intrinsic — widen the wrapper itself when it holds a collapsed clip */
-.milkdown .milkdown-image-inline:has(> img.kz-clip) { width: 100%; max-width: 560px; }
+.milkdown .milkdown-image-inline:has(> img.kz-clip) { width: auto; max-width: 100%; }
 .milkdown .milkdown-image-inline:has(> img.kz-open) { width: auto; max-width: 100%; }
 /* ---- version history modal ---- */
 .hist-card { max-width: 720px; width: min(720px, 92vw); }
