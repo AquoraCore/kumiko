@@ -685,6 +685,8 @@ const I18N_EN = {
    'โมเดล (opencode)': 'Model (opencode)',
    'โมเดล (Gemini)': 'Model (Gemini)',
    'Gemini CLI ยังไม่ได้ล็อกอิน — เปิด Terminal รันคำสั่ง `gemini` หนึ่งครั้งเพื่อล็อกอิน Google แล้วลองใหม่': 'Gemini CLI is not logged in — open Terminal, run `gemini` once to sign in to Google, then try again',
+   'Claude CLI ยังไม่ได้ล็อกอิน — เปิด Terminal รัน `claude /login` แล้วลองใหม่': 'Claude CLI is not logged in — open Terminal, run `claude /login`, then try again',
+   ' เงียบเกิน 1 นาที — อาจยังไม่ได้ล็อกอินหรือเป็นเวอร์ชันเก่า ลองรันคำสั่งนี้ใน Terminal ดูอาการ หรือกด ⏹ เพื่อหยุด': ' has been silent for over a minute — it may be logged out or outdated. Try running it in Terminal to see why, or press ⏹ to stop',
    // ---- AI onboarding wizard (desktop only) ----
    'ตั้งค่า AI ของคุณ': 'Set up your AI',
    'เลือกว่าจะใช้ AI แบบไหน — เปลี่ยนได้ทีหลังที่ ⚙ ตั้งค่า': 'Pick how you want AI — you can change this later in ⚙ Settings',

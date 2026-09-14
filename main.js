@@ -5,7 +5,7 @@ const fs = require('fs');
 const chokidar = require('chokidar');
 const { wikiTargets, linksTo, rewriteLinkTargets } = require('./core/wikilinks');
 const { safeRel, baseName, vaultName } = require('./core/pathutil');
-const { aiConfigView, setConfigKey, buildApiRequest, parseSseDelta, parseSseEvent, modelSupportsVision, visionModelFor, buildEmbedRequest, parseEmbedResponse, resolveThinking, buildEngineInvocation, resolveEngineOverride, modelsForProvider } = require('./core/ai');
+const { aiConfigView, setConfigKey, buildApiRequest, parseSseDelta, parseSseEvent, modelSupportsVision, visionModelFor, buildEmbedRequest, parseEmbedResponse, resolveThinking, buildEngineInvocation, resolveEngineOverride, modelsForProvider, cliLoginHint } = require('./core/ai');
 const { spawn, spawnSync } = require('child_process');   // CLI (subscription) engine path — claude / opencode / gemini
 const os = require('os');
 // A GUI app launched from Finder/Dock inherits a MINIMAL PATH (/usr/bin:/bin:…) that does NOT
@@ -142,11 +142,20 @@ ipcMain.handle('ai:testConnection', async () => {
 // (this file never loads on web). Never throws — a missing `which` just reports all-false.
 ipcMain.handle('ai:detectClis', () => {
   const env = _richEnv();
+  const paths = {}, versions = {};
   const has = (bin) => {
-    try { return spawnSync('which', [bin], { env, encoding: 'utf8', timeout: 5000 }).status === 0; }
-    catch (_) { return false; }
+    try {
+      const r = spawnSync('which', [bin], { env, encoding: 'utf8', timeout: 5000 });
+      if (r.status !== 0) return false;
+      paths[bin] = (r.stdout || '').trim();
+      // version too — machines grow MULTIPLE installs (npm + native) and the shell may run
+      // a different one than the app; showing "path · version" makes that visible in-app
+      // instead of a support mystery (live case 2026-09-14: 2.1.81 vs 2.1.63).
+      try { const v = spawnSync(paths[bin], ['--version'], { env, encoding: 'utf8', timeout: 4000 }); versions[bin] = ((v.stdout || '').trim().split('\n')[0] || '').slice(0, 40); } catch (_) {}
+      return true;
+    } catch (_) { return false; }
   };
-  return { claude: has('claude'), opencode: has('opencode'), gemini: has('gemini') };
+  return { claude: has('claude'), opencode: has('opencode'), gemini: has('gemini'), paths, versions };
 });
 
 // ---- Collab auth token (phase 7b-4) -----------------------------------------
@@ -591,14 +600,24 @@ function runCliEngine({ engine, model, prompt, rid, emit }){
   engineProcs.set(rid, child);   // child.kill(signal) satisfies engine:stop
   child.on('error', (err) => { emit('\r\n[' + inv.cmd + ' error: ' + (err && err.message || err) + ' — ' + (String(err && err.code) === 'ENOENT' ? ('หา `' + inv.cmd + '` ไม่เจอ — ติดตั้งแล้วหรือยัง? (PATH: ' + env.PATH.split(path.delimiter).slice(0,3).join(', ') + '…)') : 'ติดตั้ง CLI แล้วหรือยัง?') + ']\r\n'); });
   if (child.stdin) { if (inv.stdin != null) { try { child.stdin.write(inv.stdin); } catch (_) {} } try { child.stdin.end(); } catch (_) {} }
-  if (child.stdout) child.stdout.on('data', (d) => emit(d.toString()));
+  // stall watchdog: an OUTDATED or un-logged-in CLI can hang forever with ZERO output
+  // (seen live: claude 2.1.81 + expired OAuth = silent infinite hang, 2026-09-14).
+  // One hint after 60 quiet seconds — the run keeps going, the user just isn't blind.
+  let _sawOutput = false;
+  const _stallTimer = setTimeout(() => {
+    if (!_sawOutput && engineProcs.get(rid) === child) emit('\r\n[cli-stalled:' + inv.cmd + ']\r\n');
+  }, 60000);
+  let _out = '';   // head of stdout — claude prints its auth failure THERE, not stderr
+  if (child.stdout) child.stdout.on('data', (d) => { _sawOutput = true; const s = d.toString(); if (_out.length < 4096) _out += s; emit(s); });
   let _err = '';
-  if (child.stderr) child.stderr.on('data', (d) => { const s = d.toString(); _err += s; emit(s); });
+  if (child.stderr) child.stderr.on('data', (d) => { _sawOutput = true; const s = d.toString(); _err += s; emit(s); });
   child.on('close', (code) => {
+    clearTimeout(_stallTimer);
     engineProcs.delete(rid); _lastEngineExit = Date.now();
-    // gemini login gate: OAuth traces + non-zero exit = the CLI was never signed in. Emit a stable
-    // marker; the renderer swaps it (via i18n) for a readable TH/EN hint instead of the raw dump.
-    if (code !== 0 && engine === 'gemini' && /OAuth|oauth2|_doSetupUser|Please sign in/.test(_err)) emit('\r\n[gemini-not-logged-in]\r\n');
+    // login gate (claude/gemini): dead CLI + auth traces = a stable marker; the renderer
+    // swaps it (via i18n) for a readable TH/EN hint instead of the raw dump.
+    const hint = cliLoginHint(engine, (code == null ? 0 : code), _err + '\n' + _out);
+    if (hint) emit('\r\n' + hint + '\r\n');
     win.webContents.send('engine:done', { runId: rid, code: (code == null ? 0 : code) });
   });
 }

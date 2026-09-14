@@ -5,6 +5,8 @@ function cleanChatText(s){
     // main.js emits a stable marker when the gemini CLI dies un-logged-in — swap it here (the
     // only seam every chat surface flows through) so TH/EN comes from i18n, not the main process
     .replace(/\[gemini-not-logged-in\]/g, t('Gemini CLI ยังไม่ได้ล็อกอิน — เปิด Terminal รันคำสั่ง `gemini` หนึ่งครั้งเพื่อล็อกอิน Google แล้วลองใหม่'))
+    .replace(/\[claude-not-logged-in\]/g, t('Claude CLI ยังไม่ได้ล็อกอิน — เปิด Terminal รัน `claude /login` แล้วลองใหม่'))
+    .replace(/\[cli-stalled:([^\]]+)\]/g, (_, cmd) => '⏳ ' + cmd + t(' เงียบเกิน 1 นาที — อาจยังไม่ได้ล็อกอินหรือเป็นเวอร์ชันเก่า ลองรันคำสั่งนี้ใน Terminal ดูอาการ หรือกด ⏹ เพื่อหยุด'))
     .replace(/Warning: no stdin data received[^\n]*\n?/g, '')
     .replace(/^\s*>\s*build\b.*$/gm, '')
     .replace(/\n{3,}/g, '\n\n');

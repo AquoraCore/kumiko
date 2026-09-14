@@ -397,3 +397,20 @@ describe('resolveEngineOverride — tab choice → engine:run dispatch', () => {
     expect(JSON.stringify(v)).not.toContain('enc-secret');
   });
 });
+
+describe('cliLoginHint — dead-CLI output → stable login marker', () => {
+  const { cliLoginHint } = require('../../core/ai');
+  it('claude auth failures on stdout → claude marker (happy)', () => {
+    expect(cliLoginHint('claude', 1, 'Failed to authenticate: OAuth session expired and could not be refreshed')).toBe('[claude-not-logged-in]');
+    expect(cliLoginHint('claude', 1, 'Not logged in · Please run /login')).toBe('[claude-not-logged-in]');
+  });
+  it('gemini OAuth traces → gemini marker (happy)', () => {
+    expect(cliLoginHint('gemini', 1, 'at _doSetupUser (file:...)')).toBe('[gemini-not-logged-in]');
+  });
+  it('exit 0, unknown engines, unrelated errors → null (edge)', () => {
+    expect(cliLoginHint('claude', 0, 'Failed to authenticate')).toBeNull();
+    expect(cliLoginHint('glm', 1, 'Failed to authenticate')).toBeNull();
+    expect(cliLoginHint('claude', 1, 'ENOENT something else')).toBeNull();
+    expect(cliLoginHint('gemini', 1, '')).toBeNull();
+  });
+});

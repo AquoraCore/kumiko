@@ -2365,6 +2365,18 @@ async function openAiSettings(tab){
     const cliNote=document.createElement('p'); cliNote.className='ai-note';
     cliNote.textContent=t('ใช้ subscription ที่ล็อกอินไว้ในเครื่องผ่าน CLI — ต้องติดตั้ง `claude` / `opencode` และล็อกอินแล้ว (ไม่ต้องใช้ API key)');
     cliSection.appendChild(cliNote);
+    // which binaries the APP will actually spawn (path · version) — a machine can hold
+    // several installs and the terminal may run a different one than Kumiko (2026-09-14)
+    if (isDesktop && window.api.aiDetectClis){
+      const whichNote=document.createElement('p'); whichNote.className='ai-note'; whichNote.style.fontFamily='var(--font-mono, monospace)'; whichNote.style.fontSize='11px';
+      cliSection.appendChild(whichNote);
+      window.api.aiDetectClis().then((d)=>{
+        if (!d) return;
+        const line=(bin)=> d[bin==='opencode'?'opencode':bin] ? (bin+' → '+((d.paths&&d.paths[bin])||'?')+((d.versions&&d.versions[bin])?(' · '+d.versions[bin]):'')) : null;
+        whichNote.textContent=['claude','opencode','gemini'].map(line).filter(Boolean).join('\n');
+        whichNote.style.whiteSpace='pre-line';
+      }).catch(()=>{});
+    }
     const syncCliEngine=()=>{ const free = (ceSel.value==='glm' || ceSel.value==='gemini');
       cmRow.style.display = free ? '' : 'none'; claudeRow.style.display = free ? 'none' : '';
       cmLab.textContent = (ceSel.value==='gemini') ? t('โมเดล (Gemini)') : t('โมเดล (opencode)');
@@ -2867,8 +2879,8 @@ async function openAiWizard(detect){
     cards.appendChild(b); return b;
   };
 
-  // Claude Code — existing subscription; ✓ badge when the CLI is detected
-  const clExtra = detect.claude ? badge(t('✓ ติดตั้งแล้ว')) : null;
+  // Claude Code — existing subscription; ✓ badge (with the detected version) when installed
+  const clExtra = detect.claude ? badge(t('✓ ติดตั้งแล้ว') + ((detect.versions && detect.versions.claude) ? ' · ' + detect.versions.claude.split(' ')[0] : '')) : null;
   mkCard('claude', 'Claude Code', t('ใช้ subscription Claude ที่มีอยู่'), clExtra);
 
   // Gemini CLI — free & recommended; show the install+login how-to when missing

@@ -109,6 +109,19 @@ function resolveEngineOverride(sel, model){
   return null;
 }
 
+// ---- CLI failure classifier: PURE ---------------------------------------------
+// Maps a dead CLI's output to a stable marker the chat swaps for a readable TH/EN
+// hint (see cleanChatText). `text` = stderr + head of stdout — claude prints its
+// auth failure on STDOUT ("Failed to authenticate … /login"), gemini traces OAuth
+// on STDERR. null = no known cause, show the raw output as before.
+function cliLoginHint(engine, code, text){
+  if (code === 0) return null;
+  const s = String(text || '');
+  if (engine === 'gemini' && /OAuth|oauth2|_doSetupUser|Please sign in/.test(s)) return '[gemini-not-logged-in]';
+  if (engine === 'claude' && /Failed to authenticate|Please run \/login|Not logged in|OAuth (session|token)/.test(s)) return '[claude-not-logged-in]';
+  return null;
+}
+
 // ---- AI onboarding wizard: PURE decision helpers ------------------------------
 // shouldShowAiWizard: does the FIRST-open-of-AI-chat wizard pop? Takes the SAFE view from
 // aiConfigView (never raw keys) + opts.web (renderer is the web build). Never at boot, never
@@ -265,7 +278,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     buildEngineInvocation, aiConfigView, setConfigKey,
     shouldShowAiWizard, aiWizardPatch,
-    engineTabOptions, modelChoicesFor, resolveEngineOverride,
+    engineTabOptions, modelChoicesFor, resolveEngineOverride, cliLoginHint,
     buildApiRequest, parseSseDelta, parseSseEvent,
     buildEmbedRequest, parseEmbedResponse,
     // capability table (models + thinking support) — re-exported for convenience
