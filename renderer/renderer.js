@@ -4040,8 +4040,40 @@ function renderSidebar(){
   if (!b.collapsed) renderSbDashList(b.body);
   const g = sbGroup('graph', 'graph', t('กราฟ'), { leaf: true, leafView: 'graph', onLeafClick: () => setMainView('graph') });
   host.appendChild(g.group);
-  const kv = sbGroup('canvas', 'graph', t('แคนวาส'), { leaf: true, leafView: 'canvas', onLeafClick: () => setMainView('canvas') });
+  // แคนวาส — board rows in the sidebar, exactly like dashboards (＋ on the group header);
+  // the in-canvas board <select>/＋บอร์ด are gone (user 2026-09-15)
+  const kvNames = (typeof kvBoardNames === 'function') ? kvBoardNames() : null;
+  const kv = sbGroup('canvas', 'graph', t('แคนวาส'), { addLabel: t('บอร์ดใหม่'), onAdd: () => { if (typeof kvNewBoardFlow === 'function') kvNewBoardFlow(); }, count: kvNames ? kvNames.length : 0 });
   host.appendChild(kv.group);
+  if (!kv.collapsed) renderSbKvList(kv.body, kvNames);
+}
+
+function renderSbKvList(body, names){
+  if (names === null){
+    // canvas state not loaded yet (first boot) — load it, then the sidebar re-renders itself
+    if (typeof kvEnsureLoaded === 'function') kvEnsureLoaded().then(() => renderSidebar()).catch(() => {});
+    return;
+  }
+  (names || []).forEach((nm, i) => {
+    const active = (mainView === 'canvas' && typeof kvCurBoard === 'function' && kvCurBoard() === i);
+    body.appendChild(sbLeafItem('graph', nm, active, () => { if (typeof kvOpenBoard === 'function') kvOpenBoard(i); }, (e) => openKvItemMenu(e.clientX, e.clientY, i)));
+  });
+}
+
+function openKvItemMenu(x, y, i){
+  if (typeof closeFolderMenu === 'function') closeFolderMenu();
+  const menu = document.createElement('div'); menu.className = 'db-menu'; menu.id = 'folderMenu';
+  const items = [
+    [t('เปลี่ยนชื่อ'), () => { if (typeof kvRenameBoard === 'function') kvRenameBoard(i); }],
+    [t('ลบบอร์ด'), () => { if (typeof kvDeleteBoard === 'function') kvDeleteBoard(i); }],
+  ];
+  items.forEach(([label, fn]) => {
+    const it = document.createElement('div'); it.className = 'db-mi' + (label.startsWith(t('ลบ')) ? ' db-mi-del' : '');
+    it.textContent = label; it.onclick = () => { if (typeof closeFolderMenu === 'function') closeFolderMenu(); fn(); }; menu.appendChild(it);
+  });
+  document.body.appendChild(menu);
+  menu.style.top = Math.min(y, window.innerHeight - 100) + 'px';
+  menu.style.left = Math.min(x, window.innerWidth - 210) + 'px';
 }
 
 /* ================= Trash view (ถังขยะ): list + restore + delete-forever ================= */

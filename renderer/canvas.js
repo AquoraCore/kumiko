@@ -73,8 +73,9 @@ async function renderCanvas() {
 function kvBuild(host) {
   host.innerHTML =
     '<div class="kv-bar">' +
-    '<select id="kvBoardSel" title="' + t('เลือกบอร์ด') + '"></select>' +
-    '<button id="kvAddB" class="ghost sm" title="' + t('สร้างบอร์ดใหม่') + '">＋ ' + t('บอร์ด') + '</button>' +
+    // board picking/adding moved to the sidebar list (like dashboards, user 2026-09-15) —
+    // the bar shows the OPEN board's name; rename/delete still act on it here
+    '<span class="kv-title" id="kvBoardTitle"></span>' +
     '<button id="kvRenB" class="ghost sm" title="' + t('เปลี่ยนชื่อบอร์ด') + '">✎</button>' +
     '<button id="kvDelB" class="ghost sm" title="' + t('ลบบอร์ดนี้') + '">🗑</button>' +
     '<span class="kv-cnt" id="kvCnt"></span>' +
@@ -117,21 +118,8 @@ function kvBuild(host) {
   document.getElementById('kvRz').onclick = () => { const st = kvState(); st.view = { tx: 40, ty: 30, scale: 1 }; kvApplyView(); kvSave(); };
   document.getElementById('kvArr').onclick = () => kvArrangeSettled(null);
   document.getElementById('kvHub').onclick = () => kvArrangeSettled(null, true);
-  document.getElementById('kvBoardSel').onchange = (e) => kvSwitchBoard(+e.target.value);
-  document.getElementById('kvAddB').onclick = () => {
-    const n = prompt(t('ชื่อบอร์ดใหม่'), t('บอร์ดใหม่')); if (!n) return;
-    KV.boards.push(window.CoreCanvas.newBoard(n.trim() || t('บอร์ดใหม่')));
-    kvSwitchBoard(KV.boards.length - 1);
-  };
-  document.getElementById('kvRenB').onclick = () => {
-    const n = prompt(t('ชื่อบอร์ด'), kvState().name); if (!n || !n.trim()) return;
-    kvState().name = n.trim(); kvSyncBoards(); kvSave();
-  };
-  document.getElementById('kvDelB').onclick = () => {
-    if (KV.boards.length <= 1) { alert(t('ต้องมีอย่างน้อย 1 บอร์ด')); return; }
-    if (!confirm(t('ลบบอร์ด') + ' "' + kvState().name + '" ?')) return;
-    KV.boards.splice(KV.cur, 1); kvSwitchBoard(Math.max(0, KV.cur - 1));
-  };
+  document.getElementById('kvRenB').onclick = () => kvRenameBoard(KV.cur);
+  document.getElementById('kvDelB').onclick = () => kvDeleteBoard(KV.cur);
   document.getElementById('kvAddS').onclick = () => {
     const st = kvState();
     kvAddCard({ id: st.seq++, type: 'sticky', body: '', x: 120 + Math.random() * 260, y: 120 + Math.random() * 160, w: 200 });
@@ -163,12 +151,43 @@ function kvApplyView() {
 }
 
 function kvSyncBoards() {
-  const sel = document.getElementById('kvBoardSel');
-  if (sel) sel.innerHTML = KV.boards.map((b, i) =>
-    '<option value="' + i + '"' + (i === KV.cur ? ' selected' : '') + '>' + String(b.name).replace(/</g, '&lt;') + '</option>').join('');
+  const ttl = document.getElementById('kvBoardTitle');
+  if (ttl) ttl.textContent = kvState() ? kvState().name : '';
+  if (typeof renderSidebar === 'function') renderSidebar();   // board rows live in the sidebar now
 }
 
 function kvSwitchBoard(i) { KV.cur = i; kvSave(); kvPaintBoard(); }
+
+// ---- sidebar board list API (mirrors dashboards: rows in the sidebar, ＋ on the group) ----
+async function kvEnsureLoaded() { if (!KV) await kvLoad(); return KV; }
+function kvBoardNames() { return KV ? KV.boards.map((b) => b.name) : null; }   // null = not loaded yet
+function kvCurBoard() { return KV ? KV.cur : -1; }
+async function kvOpenBoard(i) {
+  await kvEnsureLoaded();
+  if (i < 0 || i >= KV.boards.length) return;
+  KV.cur = i; kvSave();
+  if (typeof mainView !== 'undefined' && mainView !== 'canvas' && typeof setMainView === 'function') setMainView('canvas');
+  else await kvPaintBoard();
+}
+async function kvNewBoardFlow() {
+  await kvEnsureLoaded();
+  const n = prompt(t('ชื่อบอร์ดใหม่'), t('บอร์ดใหม่')); if (!n) return;
+  KV.boards.push(window.CoreCanvas.newBoard(n.trim() || t('บอร์ดใหม่')));
+  await kvOpenBoard(KV.boards.length - 1);
+}
+function kvRenameBoard(i) {
+  if (!KV || !KV.boards[i]) return;
+  const n = prompt(t('ชื่อบอร์ด'), KV.boards[i].name); if (!n || !n.trim()) return;
+  KV.boards[i].name = n.trim(); kvSyncBoards(); kvSave();
+}
+function kvDeleteBoard(i) {
+  if (!KV || !KV.boards[i]) return;
+  if (KV.boards.length <= 1) { alert(t('ต้องมีอย่างน้อย 1 บอร์ด')); return; }
+  if (!confirm(t('ลบบอร์ด') + ' "' + KV.boards[i].name + '" ?')) return;
+  KV.boards.splice(i, 1);
+  kvSwitchBoard(Math.min(Math.max(0, KV.cur - (i <= KV.cur ? 1 : 0)), KV.boards.length - 1));
+  kvSyncBoards();
+}
 
 function kvSyncCnt() {
   const st = kvState(), el = document.getElementById('kvCnt');

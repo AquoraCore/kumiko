@@ -2535,7 +2535,8 @@ button.tg-chip { cursor: pointer; text-align: left; }
 /* ================= Kumiko Canvas (แคนวาสสรุปงาน) ================= */
 #canvasView { flex-direction: column; }
 .kv-bar { flex: none; display: flex; gap: 8px; align-items: center; padding: 8px 12px; background: var(--surface); border-bottom: 1px solid var(--line); }
-.kv-bar #kvBoardSel { border: 1px solid var(--line-strong); background: var(--surface); color: var(--text); border-radius: 7px; font: 700 13px inherit; padding: 5px 9px; max-width: 280px; }
+/* board select/add moved to the sidebar (like dashboards) — the bar just names the open board */
+.kv-title { font: 700 14px var(--font); color: var(--text); max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kv-cnt { color: var(--muted); font-size: 11.5px; margin-right: auto; }
 .kv-world { flex: 1; position: relative; overflow: hidden; cursor: grab; background-image: radial-gradient(circle, var(--line-strong) 1px, transparent 1px); background-size: 26px 26px; background-color: var(--bg); }
 .kv-world.kv-grabbing { cursor: grabbing; }

@@ -241,7 +241,11 @@ describe('Canvas wiring (renderer + view plumbing)', () => {
     expect(r).toContain("v==='canvas' && typeof renderCanvas === 'function'");
     expect(r).toMatch(/v==='graph' \|\| v==='canvas' \|\| v==='table'.*vsSet\('lastOpen'/);
     expect(r).toContain("mainView==='canvas'");
-    expect(r).toMatch(/sbGroup\('canvas'.*leafView: 'canvas'/);
+    // sidebar = board LIST group like dashboards (＋ on the header, rows open boards) —
+    // the old single leaf + in-canvas board <select> are gone (user 2026-09-15)
+    expect(r).toMatch(/sbGroup\('canvas'.*addLabel.*kvNewBoardFlow/s);
+    expect(r).toContain('function renderSbKvList(');
+    expect(r).toContain('kvOpenBoard(i)');
     // lightbox hover ⛶ / ⌘click zones include the canvas
     expect(r).toMatch(/\['editorWrap', 'chatMessages', 'canvasView'\]/);
   });
