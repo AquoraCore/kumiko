@@ -417,3 +417,22 @@ describe('grid arrange wiring (renderer, G2)', () => {
     expect(read('renderer/styles.css')).toMatch(/kv-griding[^}]*98px 98px/);
   });
 });
+
+describe('view-class hygiene — no stale layout classes (screen-split regression)', () => {
+  // opening a PDF from the canvas view left `view-canvas` on #left alongside `view-pdf`,
+  // so BOTH layouts rendered and the screen split in half (user report 2026-09-22).
+  // Every hand-rolled remove list must clear every other view class.
+  const ALL = ['view-graph', 'view-table', 'view-dash', 'view-crate', 'view-trash', 'view-canvas', 'view-pdf'];
+  const listsIn = (src) => [...src.matchAll(/classList\.remove\(([^)]+)\)/g)]
+    .map((m) => m[1]).filter((s) => s.includes('view-'));
+  it('pdf.js openPdf clears every non-pdf view class (happy)', () => {
+    const lists = listsIn(read('renderer/pdf.js'));
+    expect(lists.length).toBeGreaterThan(0);
+    for (const l of lists) ALL.filter((c) => c !== 'view-pdf').forEach((c) => expect(l).toContain(c));
+  });
+  it('sidebar.js openCrate clears every non-crate view class (edge)', () => {
+    const lists = listsIn(read('renderer/sidebar.js'));
+    expect(lists.length).toBeGreaterThan(0);
+    for (const l of lists) ALL.filter((c) => c !== 'view-crate').forEach((c) => expect(l).toContain(c));
+  });
+});

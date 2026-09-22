@@ -138,7 +138,9 @@ async function openPdf(name){
   if (!_pdfIndexed.has(name)) { _pdfIndexed.add(name); Promise.resolve().then(() => _indexPdfOnce(name, true)).catch(() => {}); }
   if (typeof clearAutolink === 'function') clearAutolink();
   const left = document.getElementById('left');
-  if (left){ left.classList.remove('view-graph','view-table','view-dash','view-crate','view-trash'); left.classList.add('view-pdf'); }
+  // every other view class must go — a survivor means TWO layouts render at once and the
+  // screen splits (opening a PDF from the canvas view left view-canvas behind, 2026-09-22)
+  if (left){ left.classList.remove('view-graph','view-table','view-dash','view-crate','view-trash','view-canvas'); left.classList.add('view-pdf'); }
   mainView = 'pdf';
   document.querySelectorAll('.sb-views .sbv').forEach((b) => b.classList.remove('active'));
   document.querySelectorAll('#noteList .note-item').forEach((el) => el.classList.toggle('active', el.dataset.pdf === name));
