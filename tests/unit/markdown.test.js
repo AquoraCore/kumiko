@@ -476,6 +476,29 @@ describe('extractActions', () => {
     expect(h).toContain('[ใช้เครื่องมือ');
     expect(h).not.toContain('===');
   });
+  it('G2 grid verbs: CANVAS-PLACE (board=/note=/name=, at=, size=) + CANVAS-ARRANGE parse, ordered, stripped', () => {
+    const r = extractActions([
+      '===CANVAS-PLACE board=สรุปบท 13 note=OES Process seg=ภาพรวม at=0,2 size=4x3===',
+      '===CANVAS-PLACE name=DFD===',
+      '===CANVAS-ARRANGE board=สรุปบท 13 mode=hub===',
+      '===CANVAS-ARRANGE===',
+      'จัดเสร็จ',
+    ].join('\n'));
+    expect(r.canvasOps).toEqual([
+      { op: 'board', name: 'สรุปบท 13' },
+      { op: 'place', name: 'OES Process', seg: 'ภาพรวม', at: '0,2', size: '4x3' },
+      { op: 'place', name: 'DFD', seg: '', at: '', size: '' },
+      { op: 'board', name: 'สรุปบท 13' },
+      { op: 'arrange', mode: 'hub' },
+      { op: 'arrange', mode: 'grid' },
+    ]);
+    expect(r.canvasWrites).toBe(6);
+    expect(r.chat).toBe('จัดเสร็จ');
+  });
+  it('G2 edge: malformed place/arrange lines are ignored like the rest of the family', () => {
+    const r = extractActions('===CANVAS-PLACE at=0,0===\n===CANVAS-ARRANGE mode=zigzag===\n===CANVAS-PLACE name===');
+    expect(r.canvasOps).toEqual([]);   // no name=, unknown mode, bare name -> all dropped
+  });
 });
 
 // 2026-08-19 named section edits — the AI aimed section edits at named notes with no channel

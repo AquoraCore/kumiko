@@ -116,7 +116,9 @@ function kvBuild(host) {
   }, { passive: false });
 
   document.getElementById('kvRz').onclick = () => { const st = kvState(); st.view = { tx: 40, ty: 30, scale: 1 }; kvApplyView(); kvSave(); };
-  document.getElementById('kvArr').onclick = () => kvArrangeSettled(null);
+  // ⊞ grid arrange (G2): free cards get pulled onto the grid HERE — the only moment rule 5
+  // allows it — then everything with at/span settles on the square grid. ☉ hub unchanged.
+  document.getElementById('kvArr').onclick = () => { kvGridSuckIn(null); kvArrangeSettled(null, 'grid'); };
   document.getElementById('kvHub').onclick = () => kvArrangeSettled(null, true);
   document.getElementById('kvRenB').onclick = () => kvRenameBoard(KV.cur);
   document.getElementById('kvDelB').onclick = () => kvDeleteBoard(KV.cur);
@@ -202,6 +204,16 @@ async function kvPaintBoard() {
   for (const c of st.cards) if (c.type === 'note') await kvSectionsOf(c.rel);   // warm cache for sync render
   st.cards.forEach((c) => kvRenderCard(c));
   kvApplyView(); kvSyncBoards(); kvSyncCnt(); kvDrawWires();
+  // pending arrange flag (AI CANVAS-ARRANGE, or auto after place/add): the board is visible
+  // now, so run the mode and clear it — the settle loop re-checks visibility itself
+  if (st.needsArrange) {
+    const host = document.getElementById('canvasView');
+    if (host && host.offsetParent) {
+      const mode = st.needsArrange === 'hub' ? 'hub' : 'grid';
+      st.needsArrange = null;
+      kvArrangeSettled(null, mode);
+    }
+  }
 }
 
 function kvAddCard(card) {
@@ -239,11 +251,18 @@ function kvRenderCard(c) {
     if (e.target.classList.contains('kv-x')) return;
     e.preventDefault(); e.stopPropagation();
     const st = kvState(), sx = e.clientX, sy = e.clientY, ox = c.x, oy = c.y;
+    const snap = !!(c.at || kvGridUsed()), world = document.getElementById('kvWorld');
+    if (snap && world) world.classList.add('kv-griding');   // faint grid = snapping is live
     const mm = (ev) => {
       c.x = ox + (ev.clientX - sx) / st.view.scale; c.y = oy + (ev.clientY - sy) / st.view.scale;
       node.style.left = c.x + 'px'; node.style.top = c.y + 'px'; kvDrawWires();
     };
-    const mu = () => { removeEventListener('mousemove', mm, true); removeEventListener('mouseup', mu, true); kvSave(); };
+    const mu = () => {
+      removeEventListener('mousemove', mm, true); removeEventListener('mouseup', mu, true);
+      if (snap && world) world.classList.remove('kv-griding');
+      if (snap) kvSnapCard(c);   // px -> nearest cell -> px (rule 5)
+      kvSave();
+    };
     addEventListener('mousemove', mm, true); addEventListener('mouseup', mu, true);
   };
   node.appendChild(hd);
@@ -300,11 +319,18 @@ function kvRenderCard(c) {
   rs.onmousedown = (e) => {
     e.preventDefault(); e.stopPropagation();
     const st = kvState(), sx = e.clientX, ow = c.w;
+    const snap = !!(c.at || kvGridUsed()), world = document.getElementById('kvWorld');
+    if (snap && world) world.classList.add('kv-griding');
     const mm = (ev) => {
       c.w = Math.min(KV_MAX_W, Math.max(KV_MIN_W, ow + (ev.clientX - sx) / st.view.scale));
       node.style.width = c.w + 'px'; node.classList.toggle('kv-wide', c.w >= KV_BIG_W); kvDrawWires();
     };
-    const mu = () => { removeEventListener('mousemove', mm, true); removeEventListener('mouseup', mu, true); kvSave(); };
+    const mu = () => {
+      removeEventListener('mousemove', mm, true); removeEventListener('mouseup', mu, true);
+      if (snap && world) world.classList.remove('kv-griding');
+      if (snap) kvSnapCard(c);   // width px -> nearest cell span -> px (rule 5)
+      kvSave();
+    };
     addEventListener('mousemove', mm, true); addEventListener('mouseup', mu, true);
   };
   node.appendChild(rs);
@@ -466,11 +492,70 @@ function kvHubArrange() {
   kvDrawWires(); kvSave();
 }
 
+// ---------- square-grid layout (G2, 2026-09-22): cells, not pixels ----------
+// The AI/user states position in CELL units (at) and span (size); CoreCanvasGrid does the
+// pure math. This side measures REAL heights after render and writes results back into the
+// normal x/y/w state, so wires/zoom keep working unchanged.
+const kvHOf = (c) => { const n = kvCardEl(c.id); return n ? n.offsetHeight : 0; };
+const kvGridUsed = () => kvState().cards.some((c) => c.at);
+
+// Give free cards an at/span via firstFit. ids=null -> ALL free cards (the ⊞ button — the
+// ONE moment independent cards join the grid per rule 5); an id list only sucks those in.
+function kvGridSuckIn(ids) {
+  const st = kvState(), G = window.CoreCanvasGrid;
+  if (!G) return;
+  st.cards
+    .filter((c) => !c.at && (!Array.isArray(ids) || ids.includes(c.id)))
+    .sort((a, b) => (a.y - b.y) || (a.x - b.x))
+    .forEach((c) => {
+      c.span = G.spanFromPx(c.w, kvHOf(c) || 180);
+      const occ = st.cards.filter((o) => o.at && o.span).map((o) => ({ c: o.at.c, r: o.at.r, w: o.span.w, h: o.span.h }));
+      c.at = G.firstFit(occ, c.span, 8);
+    });
+}
+
+// Layout every grid card from measured heights: no overlap, no scroll, vertical centring in
+// the reserved block (centerDy). Cards without at are untouched (rule 5).
+function kvGridArrange() {
+  const st = kvState(), G = window.CoreCanvasGrid;
+  if (!G) return;
+  const lay = G.layoutGrid(st.cards
+    .filter((c) => c.at && c.span)
+    .map((c) => ({ id: c.id, c: c.at.c, r: c.at.r, w: c.span.w, h: c.span.h, measuredH: kvHOf(c) })));
+  for (const c of st.cards) {
+    const L = lay[c.id];
+    if (!L) continue;
+    c.at = { c: L.c, r: L.r };
+    c.w = L.wPx; c.x = L.x; c.y = L.y + L.centerDy;
+    const n = kvCardEl(c.id);
+    if (n) { n.style.left = c.x + 'px'; n.style.top = c.y + 'px'; n.style.width = c.w + 'px'; n.classList.toggle('kv-wide', c.w >= KV_BIG_W); }
+  }
+  kvDrawWires(); kvSave();
+}
+
+// Drop/resize snap: nearest cell -> back to px. A collision hands over to a full grid settle.
+function kvSnapCard(c) {
+  const st = kvState(), G = window.CoreCanvasGrid;
+  if (!G) return;
+  c.at = G.pxToCell(c.x, c.y);
+  c.span = G.spanFromPx(c.w, kvHOf(c) || 180);
+  const p = G.cellToPx(c.at, c.span);
+  c.w = p.w; c.x = p.x; c.y = p.y;
+  const n = kvCardEl(c.id);
+  if (n) { n.style.left = c.x + 'px'; n.style.top = c.y + 'px'; n.style.width = c.w + 'px'; n.classList.toggle('kv-wide', c.w >= KV_BIG_W); }
+  const clash = st.cards.some((o) => o.id !== c.id && o.at && o.span &&
+    c.at.c < o.at.c + o.span.w && o.at.c < c.at.c + c.span.w &&
+    c.at.r < o.at.r + o.span.h && o.at.r < c.at.r + c.span.h);
+  kvDrawWires();
+  if (clash) kvArrangeSettled(null, 'grid');
+}
+
 // Arrange keeps re-running until measured heights STOP CHANGING: a big mermaid card can take
 // seconds to render, and a single pass taken too early measures bare headers, packs tightly,
 // then the late diagrams grow into their neighbours (log 2026-09-09, Cheat Sheet board).
+// mode: true/'hub' = hub · 'grid' = square grid · else shelf (ids subset).
 let kvArrT = null;
-function kvArrangeSettled(ids, hub) {
+function kvArrangeSettled(ids, mode) {
   clearTimeout(kvArrT);
   let tries = 0, prev = '';
   const pass = () => {
@@ -478,7 +563,7 @@ function kvArrangeSettled(ids, hub) {
     // wait instead of arranging garbage, and never let a 0-height pass count as "settled"
     const host = document.getElementById('canvasView');
     if (!host || !host.offsetParent) { if (tries++ < 12) kvArrT = setTimeout(pass, 700); return; }
-    hub ? kvHubArrange() : kvAutoArrange(ids);
+    mode === 'grid' ? kvGridArrange() : (mode ? kvHubArrange() : kvAutoArrange(ids));
     const sig = kvState().cards.map((c) => { const n = kvCardEl(c.id); return n ? n.offsetHeight : 0; }).join(',');
     if (sig !== prev && tries++ < 12) { prev = sig; kvArrT = setTimeout(pass, 700); }
   };
@@ -518,13 +603,19 @@ async function kvApplyAiOps(ops) {
     }
   }
   const r = window.CoreCanvas.applyVerbOps(KV, ops, { resolveNote, sectionsOf: kvSectionsSync });
+  // grid (G2): a batch that placed/added cards pulls the NEW cards onto the grid and flags a
+  // grid arrange — explicit CANVAS-ARRANGE (either mode) already set by the AI wins.
+  const batchPlaced = (r.addedIds || []).length > 0 || ops.some((o) => o.op === 'place' || o.op === 'add');
+  if (batchPlaced) {
+    if ((r.addedIds || []).length) kvGridSuckIn(r.addedIds);
+    const st = kvState();
+    if (!st.needsArrange) st.needsArrange = 'grid';
+  }
   kvSave();
   if (typeof mainView !== 'undefined' && mainView === 'canvas') { try { await kvPaintBoard(); } catch (_) {} }
-  // re-place ONLY the new cards from measured heights once media has settled (mermaid/images
-  // grow after paint; the op-time guess can overlap tall neighbours). Runs even while the
-  // view is closed — next open paints, then the timer measures real nodes.
-  if ((r.addedIds || []).length) {
-    setTimeout(() => { try { if (typeof mainView !== 'undefined' && mainView === 'canvas') kvArrangeSettled(r.addedIds); } catch (_) {} }, 900);
+  // belt for slow media: one delayed grid settle when the view is open (mermaid grows late)
+  if (batchPlaced) {
+    setTimeout(() => { try { if (typeof mainView !== 'undefined' && mainView === 'canvas') kvArrangeSettled(null, 'grid'); } catch (_) {} }, 900);
   }
   const msg = '🖼 ' + t('แคนวาส') + ': ' + (r.applied.length ? r.applied.join(' · ') : t('ไม่มีอะไรเปลี่ยน')) +
     (r.errors.length ? ' — ⚠ ' + r.errors.join(' · ') : '');

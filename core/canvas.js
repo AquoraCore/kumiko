@@ -10,6 +10,14 @@
 
   var INTRO = '(บทนำ)';
 
+  // core/canvasgrid.js (loads before this file in every entrypoint; require under Node)
+  var GRID = null;
+  function grid() {
+    if (!GRID) GRID = (typeof self !== 'undefined' && self.CoreCanvasGrid) ||
+      (typeof require === 'function' ? require('./canvasgrid.js') : null);
+    return GRID;
+  }
+
   // Split a note into heading sections. Text before the first heading becomes INTRO (only
   // kept when non-empty). Headings inside code fences don't split. Duplicate heading names
   // get " (2)", " (3)"… so seg references stay unambiguous.
@@ -120,9 +128,19 @@
       var id = Math.floor(+c.id); if (!(id > 0)) return;
       var type = c.type === 'sticky' ? 'sticky' : 'note';
       if (type === 'note' && !c.rel) return;
+      // grid fields are optional: a card without at/span stays a free-px card (rule 5)
+      var at = (c.at && isFinite(+c.at.c) && isFinite(+c.at.r))
+        ? { c: Math.max(0, Math.floor(+c.at.c)), r: Math.max(0, Math.floor(+c.at.r)) } : undefined;
+      var span = (c.span && isFinite(+c.span.w) && isFinite(+c.span.h))
+        ? { w: Math.max(1, Math.floor(+c.span.w)), h: Math.max(1, Math.floor(+c.span.h)) } : undefined;
+      // width follows the cell span exactly (rule 1) whenever the card is on the grid —
+      // no 200px floor there, the span IS the layout (a 1-cell card is 84px by design)
+      var w = span && grid() ? grid().spanToPx(span.w)
+        : Math.min(1400, Math.max(200, +c.w || (type === 'sticky' ? 200 : 264)));
       out.cards.push({
         id: id, type: type, rel: type === 'note' ? String(c.rel) : undefined,
-        x: +c.x || 0, y: +c.y || 0, w: Math.min(1400, Math.max(200, +c.w || (type === 'sticky' ? 200 : 264))),
+        x: +c.x || 0, y: +c.y || 0, w: w,
+        at: at, span: span,
         segs: type === 'note' ? (Array.isArray(c.segs) ? c.segs.map(String) : []) : undefined,
         body: type === 'sticky' ? String(c.body || '') : undefined,
       });
@@ -247,6 +265,55 @@
             applied.push('เอา "' + titleOfRel(rel) + '" ออกจากบอร์ด');
           }
         }
+        return;
+      }
+      // grid placement (G2): card position/size in CELL units — at=c,r size=WxH. The card
+      // gets at/span; existing card -> moved, no card -> created like add. Real pixel math
+      // happens at render (layoutGrid), this only stores the intent.
+      if (o.op === 'place') {
+        var rel3 = ctx.resolveNote(o.name);
+        if (!rel3) { errors.push('ไม่พบโน้ต "' + o.name + '"'); return; }
+        var secs3 = ctx.sectionsOf(rel3) || [];
+        if (!secs3.length) { errors.push('โน้ต "' + o.name + '" ไม่มีเนื้อหาให้วาง'); return; }
+        var at3 = null, span3 = null;
+        var am = o.at ? /^\s*(\d+)\s*,\s*(\d+)\s*$/.exec(String(o.at)) : null;
+        if (o.at && !am) { errors.push('ตำแหน่ง at="' + o.at + '" อ่านไม่ได้ (รูปแบบ คอลัมน์,แถว)'); return; }
+        if (am) at3 = { c: +am[1], r: +am[2] };
+        var zm = o.size ? /^\s*(\d+)\s*[xX×]\s*(\d+)\s*$/.exec(String(o.size)) : null;
+        if (o.size && !zm) { errors.push('ขนาด size="' + o.size + '" อ่านไม่ได้ (รูปแบบ กว้างxสูง)'); return; }
+        if (zm) span3 = { w: +zm[1], h: +zm[2] };
+        if (!span3) span3 = { w: 2, h: 1 };   // spec default
+        var card3 = findCard(rel3);
+        if (!card3) {
+          var names3 = secs3.map(function (s) { return s.name; });
+          var want3 = o.seg ? pickName(names3, o.seg) : null;
+          if (o.seg && !want3) { errors.push('ไม่พบหัวข้อ "' + o.seg + '" ในโน้ต "' + o.name + '"'); want3 = null; }
+          var p3 = nextPos();
+          card3 = { id: board.seq++, type: 'note', rel: rel3, x: p3.x, y: p3.y,
+            w: grid() ? grid().spanToPx(span3.w) : 264, segs: [want3 || secs3[0].name] };
+          board.cards.push(card3);
+          addedIds.push(card3.id);
+        } else if (o.seg) {
+          var hit3 = pickName(secs3.map(function (s) { return s.name; }), o.seg);
+          if (!hit3) errors.push('ไม่พบหัวข้อ "' + o.seg + '" ในโน้ต "' + o.name + '"');
+          else if (card3.segs.indexOf(hit3) < 0) card3.segs.push(hit3);   // placing a seg = showing it
+        }
+        if (!at3) {   // no at given -> first free top-left on the board's grid
+          var occ = [];
+          board.cards.forEach(function (c) { if (c.at && c.span) occ.push({ c: c.at.c, r: c.at.r, w: c.span.w, h: c.span.h }); });
+          at3 = grid() ? grid().firstFit(occ, span3, 8) : { c: 0, r: 0 };
+        }
+        card3.at = { c: at3.c, r: at3.r };
+        card3.span = { w: span3.w, h: span3.h };
+        card3.w = grid() ? grid().spanToPx(span3.w) : card3.w;
+        var px3 = grid() ? grid().cellToPx(card3.at, card3.span) : null;
+        if (px3) { card3.x = px3.x; card3.y = px3.y; }
+        applied.push('วาง "' + titleOfRel(rel3) + '" ที่คอลัมน์ ' + card3.at.c + ' แถว ' + card3.at.r + ' (' + card3.span.w + '×' + card3.span.h + ' ช่อง)');
+        return;
+      }
+      if (o.op === 'arrange') {
+        board.needsArrange = o.mode === 'hub' ? 'hub' : 'grid';   // renderer consumes it at paint
+        applied.push('จัดบอร์ดแบบ' + (board.needsArrange === 'hub' ? 'ศูนย์กลาง' : 'กริด'));
         return;
       }
       if (o.op === 'wire' || o.op === 'unwire') {

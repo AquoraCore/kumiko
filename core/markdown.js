@@ -336,7 +336,7 @@
     var out = { reads: [], searches: [], renames: [], deletes: [], targets: [],
       listTags: false, notesByTag: [], setTags: [], addTags: [], removeTags: [], renameTags: [],
       canvasList: false, canvasOps: [], planSteps: [], planDone: null };
-    var chat = s.replace(/^[ \t]*===(READ-NOTE|SEARCH|RENAME-NOTE|DELETE-NOTE|SET-CAPTURE-TARGET|LIST-TAGS|NOTES-BY-TAG|SET-TAGS|ADD-TAGS|REMOVE-TAGS|RENAME-TAG|CANVAS-LIST|CANVAS-BOARD|CANVAS-ADD|CANVAS-REMOVE|CANVAS-WIRE|CANVAS-UNWIRE|CANVAS-STICKY|PLAN-STEP|PLAN-DONE)(?: (.+?))?===[ \t]*$/gm, function (_, verb, arg) {
+    var chat = s.replace(/^[ \t]*===(READ-NOTE|SEARCH|RENAME-NOTE|DELETE-NOTE|SET-CAPTURE-TARGET|LIST-TAGS|NOTES-BY-TAG|SET-TAGS|ADD-TAGS|REMOVE-TAGS|RENAME-TAG|CANVAS-LIST|CANVAS-BOARD|CANVAS-ADD|CANVAS-REMOVE|CANVAS-WIRE|CANVAS-UNWIRE|CANVAS-STICKY|CANVAS-PLACE|CANVAS-ARRANGE|PLAN-STEP|PLAN-DONE)(?: (.+?))?===[ \t]*$/gm, function (_, verb, arg) {
       arg = (arg || '').trim();
       var m;
       if (verb === 'READ-NOTE') { m = arg.match(/^name=(.+)$/); if (m) out.reads.push(m[1].trim()); }
@@ -369,6 +369,22 @@
       }
       else if (verb === 'CANVAS-UNWIRE') { m = arg.match(/^from=(.+?) to=(.+)$/); if (m) out.canvasOps.push({ op: 'unwire', from: m[1].trim(), to: m[2].trim() }); }
       else if (verb === 'CANVAS-STICKY') { m = arg.match(/^text=(.+)$/); if (m) out.canvasOps.push({ op: 'sticky', text: m[1].trim() }); }
+      // ---- grid verbs (G2): position in CELL units — the mock's board=/note= spellings are
+      // accepted alongside the family's name=; board= emits the board-select op first ----
+      else if (verb === 'CANVAS-PLACE') {
+        m = arg.match(/^(?:board=(.+?) )?(?:name|note)=(.+?)(?: seg=(.+?))?(?: at=(\S+?))?(?: size=(\S+?))?$/);
+        if (m) {
+          if (m[1]) out.canvasOps.push({ op: 'board', name: m[1].trim() });
+          out.canvasOps.push({ op: 'place', name: m[2].trim(), seg: m[3] ? m[3].trim() : '', at: m[4] || '', size: m[5] || '' });
+        }
+      }
+      else if (verb === 'CANVAS-ARRANGE') {
+        m = arg.match(/^(?:board=(.+?) )?(?:mode=(grid|hub))?$/);
+        if (m) {
+          if (m[1]) out.canvasOps.push({ op: 'board', name: m[1].trim() });
+          out.canvasOps.push({ op: 'arrange', mode: m[2] || 'grid' });
+        }
+      }
       // ---- plan verbs (mid-plan status lines; the plan card/file is the executor's side) ----
       else if (verb === 'PLAN-STEP') {
         m = arg.match(/^n=(\d+)(?: status=(done|doing|blocked))?(?: note=(.*))?$/);

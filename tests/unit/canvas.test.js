@@ -304,9 +304,8 @@ describe('auto-arrange (2026-09-09: tall cards overlapped the fixed-stride guess
     expect(c).toContain('function kvAutoArrange(ids)');
     expect(c).toMatch(/n \? n\.offsetHeight : 220/);                      // REAL heights, not a stride guess
     expect(c).toMatch(/others\.map\(\(c\) => c\.y \+ hOf\(c\)\)/);        // id-list mode stacks below existing content
-    expect(c).toContain("getElementById('kvArr').onclick = () => kvArrangeSettled(null)");
+    expect(c).toMatch(/kvArr'\)\.onclick = \(\) => \{ kvGridSuckIn\(null\); kvArrangeSettled\(null, 'grid'\); \}/);   // ⊞ = grid (G2)
     expect(c).toMatch(/sig !== prev && tries\+\+ < 12/);   // re-runs until heights settle (late mermaid growth)
-    expect(c).toMatch(/r\.addedIds \|\| \[\]\)\.length[\s\S]{0,200}kvArrangeSettled\(r\.addedIds\)/);
   });
 });
 
@@ -318,7 +317,103 @@ describe('hub layout (2026-09-09: overview card centred, details flank it)', () 
     expect(c).toMatch(/leftH <= rightH/);                                                            // height-balanced columns
     expect(c).toMatch(/linkedToHub\(b\) - linkedToHub\(a\)/);                                        // hub-wired cards sit nearest
     expect(c).toContain("getElementById('kvHub').onclick = () => kvArrangeSettled(null, true)");
-    expect(c).toMatch(/hub \? kvHubArrange\(\) : kvAutoArrange\(ids\)/);                             // settle loop covers both modes
+    expect(c).toMatch(/mode === 'grid' \? kvGridArrange\(\) : \(mode \? kvHubArrange\(\) : kvAutoArrange\(ids\)\)/);   // settle loop covers all modes
     expect(c).toMatch(/!host \|\| !host\.offsetParent/);   // hidden view measures 0 — wait, don't arrange garbage
+  });
+});
+
+describe('grid verbs (G2, 2026-09-22): place + arrange + normBoard at/span', () => {
+  const mkCtx2 = () => ({
+    resolveNote: (nm) => ({ 'DFD': 'A/DFD.md', 'AP-CD': 'A/AP-CD.md' }[nm] || null),
+    sectionsOf: (rel) => rel === 'A/DFD.md'
+      ? [{ name: 'Level 0', text: 'x' }, { name: 'Level 1', text: 'y' }]
+      : [{ name: 'Process', text: 'z' }],
+  });
+  it('place: creates a card with at/span, width follows the span exactly (rule 1)', () => {
+    const st = CC.normState(null);
+    const r = CC.applyVerbOps(st, [{ op: 'place', name: 'DFD', seg: 'Level 1', at: '2,1', size: '4x3' }], mkCtx2());
+    expect(r.errors).toEqual([]);
+    const c = st.boards[0].cards[0];
+    expect(c.at).toEqual({ c: 2, r: 1 });
+    expect(c.span).toEqual({ w: 4, h: 3 });
+    expect(c.w).toBe(4 * 84 + 3 * 14);            // spanToPx — no 200px floor on grid cards
+    expect(c.x).toBe(20 + 2 * 98); expect(c.y).toBe(20 + 98);
+    expect(c.segs).toEqual(['Level 1']);
+    expect(r.addedIds).toEqual([c.id]);
+  });
+  it('place: existing card -> moved (seg added if missing), never duplicated', () => {
+    const st = CC.normState(null), ctx = mkCtx2();
+    CC.applyVerbOps(st, [{ op: 'place', name: 'DFD', at: '0,0', size: '2x2' }], ctx);
+    const id0 = st.boards[0].cards[0].id;
+    const r = CC.applyVerbOps(st, [{ op: 'place', name: 'DFD', seg: 'Level 1', at: '3,0', size: '2x1' }], ctx);
+    expect(r.errors).toEqual([]);
+    expect(r.addedIds).toEqual([]);
+    const b = st.boards[0];
+    expect(b.cards.length).toBe(1);
+    expect(b.cards[0].id).toBe(id0);
+    expect(b.cards[0].at).toEqual({ c: 3, r: 0 });
+    expect(b.cards[0].span).toEqual({ w: 2, h: 1 });
+    expect(b.cards[0].segs).toEqual(['Level 0', 'Level 1']);   // first place defaulted, second added its seg
+  });
+  it('place: no at -> firstFit free top-left; no size -> default 2x1', () => {
+    const st = CC.normState(null), ctx = mkCtx2();
+    CC.applyVerbOps(st, [{ op: 'place', name: 'DFD', at: '0,0', size: '4x1' }], ctx);   // occupies cols 0-3
+    CC.applyVerbOps(st, [{ op: 'place', name: 'AP-CD' }], ctx);                          // no at, no size
+    const b = st.boards[0];
+    expect(b.cards[1].at).toEqual({ c: 4, r: 0 });   // first free slot right of the 4-wide card
+    expect(b.cards[1].span).toEqual({ w: 2, h: 1 });
+  });
+  it('place: unparseable at/size -> per-item errors, nothing placed', () => {
+    const st = CC.normState(null), ctx = mkCtx2();
+    const r = CC.applyVerbOps(st, [
+      { op: 'place', name: 'DFD', at: 'left,top', size: '4x3' },
+      { op: 'place', name: 'DFD', at: '0,0', size: 'big' },
+      { op: 'place', name: 'ไม่มีโน้ตนี้', at: '0,0' },
+    ], ctx);
+    expect(r.errors.length).toBe(3);
+    expect(st.boards[0].cards.length).toBe(0);
+  });
+  it('arrange: sets the board flag (grid default, hub on demand)', () => {
+    const st = CC.normState(null);
+    CC.applyVerbOps(st, [{ op: 'arrange', mode: '' }], mkCtx2());
+    expect(st.boards[0].needsArrange).toBe('grid');
+    CC.applyVerbOps(st, [{ op: 'arrange', mode: 'hub' }], mkCtx2());
+    expect(st.boards[0].needsArrange).toBe('hub');
+  });
+  it('normBoard: keeps at/span, derives w from span; old free cards pass through untouched', () => {
+    const s = CC.normState({ boards: [{
+      name: 'b', cards: [
+        { id: 1, type: 'note', rel: 'a.md', x: 111, y: 222, w: 999, segs: ['x'], at: { c: 2, r: 3 }, span: { w: 3, h: 2 } },
+        { id: 2, type: 'note', rel: 'b.md', x: 5, y: 6, w: 300, segs: ['y'], at: 'junk', span: null },
+        { id: 3, type: 'sticky', body: 'ok', x: 7, y: 8, w: 200 },
+      ],
+    }] });
+    const cs = s.boards[0].cards;
+    expect(cs[0].at).toEqual({ c: 2, r: 3 });
+    expect(cs[0].span).toEqual({ w: 3, h: 2 });
+    expect(cs[0].w).toBe(3 * 84 + 2 * 14);   // span wins over the stored w
+    expect(cs[1].at).toBeUndefined();        // garbage at -> free card
+    expect(cs[1].w).toBe(300);
+    expect(cs[2].at).toBeUndefined();        // sticky untouched
+  });
+});
+
+describe('grid arrange wiring (renderer, G2)', () => {
+  it('canvas.js: kvGridArrange/kvGridSuckIn/kvSnapCard + needsArrange + drop snap + prompt + script include', () => {
+    const c = read('renderer/canvas.js');
+    expect(c).toContain('function kvGridArrange()');
+    expect(c).toContain('window.CoreCanvasGrid');
+    expect(c).toMatch(/G\.layoutGrid\(/);
+    expect(c).toContain('function kvGridSuckIn(ids)');
+    expect(c).toContain('function kvSnapCard(c)');
+    expect(c).toMatch(/G\.pxToCell\(c\.x, c\.y\)/);
+    expect(c).toMatch(/G\.spanFromPx\(c\.w, kvHOf\(c\) \|\| 180\)/);
+    expect(c).toMatch(/st\.needsArrange[\s\S]{0,200}kvArrangeSettled\(null, mode\)/);   // flag consumed at paint
+    expect(c).toMatch(/batchPlaced[\s\S]{0,220}needsArrange = 'grid'/);                 // auto grid after place/add
+    expect(c).toContain("world.classList.add('kv-griding')");
+    expect(read('renderer/renderer.js')).toContain('===CANVAS-PLACE board=');
+    expect(read('renderer/index.html')).toContain('../core/canvasgrid.js');
+    expect(read('web/index.html')).toContain('/core/canvasgrid.js?v=__ASSET_VERSION__');
+    expect(read('renderer/styles.css')).toMatch(/kv-griding[^}]*98px 98px/);
   });
 });

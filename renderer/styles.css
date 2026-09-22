@@ -2540,6 +2540,13 @@ button.tg-chip { cursor: pointer; text-align: left; }
 .kv-cnt { color: var(--muted); font-size: 11.5px; margin-right: auto; }
 .kv-world { flex: 1; position: relative; overflow: hidden; cursor: grab; background-image: radial-gradient(circle, var(--line-strong) 1px, transparent 1px); background-size: 26px 26px; background-color: var(--bg); }
 .kv-world.kv-grabbing { cursor: grabbing; }
+/* G2 grid snap hint: faint 98px grid (84px cell + 14px gutter, 20px board pad) — only while
+   dragging/resizing a card on a grid board, removed on drop */
+.kv-world.kv-griding .kv-pz {
+  background-image: linear-gradient(to right, rgba(140,140,140,.22) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(140,140,140,.22) 1px, transparent 1px);
+  background-size: 98px 98px; background-position: 20px 20px;
+}
 .kv-pz { position: absolute; transform-origin: 0 0; }
 .kv-wires { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
 .kv-card { position: absolute; width: 264px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 10px; box-shadow: 0 3px 14px rgba(90, 70, 50, .12); user-select: none; }
