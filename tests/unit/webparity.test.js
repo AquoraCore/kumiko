@@ -15,3 +15,16 @@ describe('web/renderer HTML parity — no dead terminal controls ship', () => {
     for (const html of [web, desk]) expect(html).toContain('id="aiPanelToggle"');
   });
 });
+
+describe('KUMIKO* root files hidden from lists — same rule on every surface', () => {
+  const read = (p) => fs.readFileSync(path.join(__dirname, '..', '..', p), 'utf8');
+  it('desktop walker (main.js walkNotes) uses the root-level KUMIKO prefix rule', () => {
+    expect(read('main.js')).toContain("!(base === '' && ent.name.startsWith('KUMIKO'))");
+  });
+  it('cloud walker (server/notestore.js) uses the same rule', () => {
+    expect(read('server/notestore.js')).toContain("!(base === '' && ent.name.startsWith('KUMIKO'))");
+  });
+  it('web client filter (web/api-web.js) hides root-level KUMIKO* notes too', () => {
+    expect(read('web/api-web.js')).toContain("n.indexOf('/') !== -1 || n.indexOf('KUMIKO') !== 0");
+  });
+});

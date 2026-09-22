@@ -597,8 +597,10 @@ describe('2026-08-19 log fixes', () => {
   });
 
   it('KUMIKO.md is hidden from every list on BOTH platforms, with a Settings doorway', () => {
-    expect(mainL).toMatch(/ent\.name\.endsWith\('\.md'\) && rel !== 'KUMIKO\.md'/);
-    expect(webL).toMatch(/filter\(function \(n\) \{ return n !== 'KUMIKO\.md' && n !== 'KUMIKO-MEMORY\.md'; \}\)/);
+    // 2026-09-22: the exact-name rule grew into a root-level KUMIKO* prefix rule (covers
+    // KUMIKO-LOG.md + "KUMIKO-PLAN — …" notes too)
+    expect(mainL).toMatch(/ent\.name\.endsWith\('\.md'\) && !\(base === '' && ent\.name\.startsWith\('KUMIKO'\)\)/);
+    expect(webL).toMatch(/filter\(function \(n\) \{ return n\.indexOf\('\/'\) !== -1 \|\| n\.indexOf\('KUMIKO'\) !== 0; \}\)/);
     expect(rendererL).toContain("kmBtn.textContent=t('เปิดแก้')");
   });
 });
@@ -683,10 +685,10 @@ describe('PDF-Text is hidden from the user, visible to RAG', () => {
     expect(webP).toMatch(/graphData[\s\S]{0,220}PDF-Text/);
   });
 
-  it('the RAG walker does NOT filter PDF-Text (only KUMIKO.md is walker-hidden)', () => {
+  it('the RAG walker does NOT filter PDF-Text (only KUMIKO* root files are walker-hidden)', () => {
     const walk = mainP.slice(mainP.indexOf('function walkNotes'), mainP.indexOf('function walkNotes') + 900);
     expect(walk).not.toContain('PDF-Text');
-    expect(walk).toContain("rel !== 'KUMIKO.md'");
+    expect(walk).toContain("ent.name.startsWith('KUMIKO')");
   });
 });
 

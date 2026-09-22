@@ -7,6 +7,9 @@ function createNoteStore(rootDir) {
     return path.join(rootDir, encodeURIComponent(String(userId)), encodeURIComponent(String(vaultId)));
   }
 
+  // KUMIKO* root files (rules / memory / worklog / plan notes) are hidden from every
+  // list-driven surface (parity with the desktop walker) — root level only; read/write
+  // by direct rel still works.
   function walk(dir, base) {
     base = base || '';
     let out = [];
@@ -16,7 +19,7 @@ function createNoteStore(rootDir) {
       if (ent.name.startsWith('.')) continue;
       const rel = base ? base + '/' + ent.name : ent.name;
       if (ent.isDirectory()) out = out.concat(walk(path.join(dir, ent.name), rel));
-      else if (ent.name.endsWith('.md')) out.push(rel);
+      else if (ent.name.endsWith('.md') && !(base === '' && ent.name.startsWith('KUMIKO'))) out.push(rel);
     }
     return out;
   }

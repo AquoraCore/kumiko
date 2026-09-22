@@ -95,9 +95,10 @@ function createWebApi(opts) {
       const res = await req('GET', '/notes');
       if (!res || !res.ok) return { notes: [], folders: [], pdfs: [] };
       const data = await res.json();
-      // KUMIKO.md + KUMIKO-MEMORY.md are hidden from every list-driven surface (parity with
-      // the desktop walker)
-      notes = ((data && data.notes) || []).filter(function (n) { return n !== 'KUMIKO.md' && n !== 'KUMIKO-MEMORY.md'; });
+      // KUMIKO* root files (rules / memory / worklog / plan notes) are hidden from every
+      // list-driven surface (parity with the desktop walker); root level only — a note in
+      // a subfolder named KUMIKO… stays visible
+      notes = ((data && data.notes) || []).filter(function (n) { return n.indexOf('/') !== -1 || n.indexOf('KUMIKO') !== 0; });
     } catch (_) {
       return { notes: [], folders: [], pdfs: [] };
     }

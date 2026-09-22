@@ -81,12 +81,48 @@
     return round < cap && (round < 2 || !!o.progressed);
   }
 
+  // Work-log entry (KUMIKO-LOG.md) for a FINISHED plan: date/title header, result line
+  // (done/total, optional minutes when startedAt+endedAt are present, optional summary) and
+  // EVERY step line kept verbatim as a record — real marks (blocked shows [!]), notes and
+  // [[wikilinks]] intact. meta = { date, summary, startedAt?, endedAt? }.
+  function planLogEntry(plan, meta) {
+    var p = plan || {}; meta = meta || {};
+    var prog = planProgress(p);
+    var mins = 0;
+    if (meta.startedAt && meta.endedAt && Number(meta.endedAt) > Number(meta.startedAt)) {
+      mins = Math.max(1, Math.round((Number(meta.endedAt) - Number(meta.startedAt)) / 60000));
+    }
+    var out = '## ' + String(meta.date || '') + ' · ' + String(p.title || '') + '\n\n';
+    out += '✓ ' + prog.done + '/' + prog.total + ' ขั้น' +
+      (mins ? ' · ใช้เวลา ' + mins + ' นาที' : '') +
+      (meta.summary ? ' — ' + meta.summary : '') + '\n';
+    (p.steps || []).forEach(function (st) {
+      var line = '- [' + (MARK_BY_STATUS[st.status] || ' ') + '] ' + String(st.text == null ? '' : st.text);
+      if (st.note) line += ' — ' + st.note;
+      out += line + '\n';
+    });
+    return out;
+  }
+
+  // Newest-first insert into the worklog: the entry goes right under the file header
+  // (H1 + blank + intro line + blank). A file without that shape (hand-edited away) keeps
+  // its content and gets the entry at the very top — newest still reads first.
+  function planLogPrepend(cur, entry) {
+    var s = String(cur == null ? '' : cur);
+    if (!s.trim()) return String(entry);
+    var m = s.match(/^#[^\n]*\n\n[^\n]*\n\n/);
+    if (!m) return String(entry) + '\n' + s;
+    return m[0] + String(entry) + '\n' + s.slice(m[0].length).replace(/^\n+/, '');
+  }
+
   return {
     PLAN_ROUND_CAP: PLAN_ROUND_CAP,
     parsePlan: parsePlan,
     serializePlan: serializePlan,
     applyStepUpdate: applyStepUpdate,
     planProgress: planProgress,
-    planAllowContinue: planAllowContinue
+    planAllowContinue: planAllowContinue,
+    planLogEntry: planLogEntry,
+    planLogPrepend: planLogPrepend
   };
 });

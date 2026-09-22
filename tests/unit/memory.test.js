@@ -212,8 +212,9 @@ describe('wiring guards', () => {
     expect(c).toContain('openMemoryDesk');
   });
   it('KUMIKO-MEMORY.md is hidden from lists in BOTH shells and AI-write-protected', () => {
-    expect(read('main.js')).toContain("rel !== 'KUMIKO-MEMORY.md'");
-    expect(read('web/api-web.js')).toContain("n !== 'KUMIKO-MEMORY.md'");
+    // 2026-09-22: hidden via the root-level KUMIKO* prefix rule (with KUMIKO-LOG/PLAN files)
+    expect(read('main.js')).toContain("ent.name.startsWith('KUMIKO')");
+    expect(read('web/api-web.js')).toContain("n.indexOf('KUMIKO') !== 0");
     const r = read('renderer/renderer.js');
     expect(r).toMatch(/_aiProtectedName[\s\S]{0,200}'kumiko-memory'/);
     // rules desk must NOT open for the memory file

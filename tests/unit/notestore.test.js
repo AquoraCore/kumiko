@@ -113,4 +113,37 @@ describe('note store (cloud)', () => {
       await s.close();
     }
   }, 20000);
+
+  it('KUMIKO* root files: hidden from the list, still readable by direct rel (plan/worklog parity)', async () => {
+    const s = await startServer({ port: 0, dataDir: tmpDir() });
+    const base = 'http://127.0.0.1:' + s.port;
+    try {
+      const token = await signup(base, 'plan@b.com');
+      const put = (name) => fetch(base + '/notes', {
+        method: 'PUT', headers: authHeaders(token),
+        body: JSON.stringify({ name, content: '# ' + name }),
+      });
+      await put('KUMIKO.md');
+      await put('KUMIKO-MEMORY.md');
+      await put('KUMIKO-LOG.md');
+      await put('KUMIKO-PLAN — สรุป DS.md');
+      await put('KUMIKOIDEAS ของฉัน.md');        // edge: ANY root KUMIKO prefix hides
+      await put('วิชาเรียน/KUMIKO-PLAN — ในโฟลเดอร์.md');   // edge: subfolder KUMIKO file stays visible
+      await put('ปกติ.md');
+
+      const r = await fetch(base + '/notes', { headers: authHeaders(token) });
+      const list = (await r.json()).notes;
+      for (const hidden of ['KUMIKO.md', 'KUMIKO-MEMORY.md', 'KUMIKO-LOG.md', 'KUMIKO-PLAN — สรุป DS.md', 'KUMIKOIDEAS ของฉัน.md']) {
+        expect(list).not.toContain(hidden);
+      }
+      expect(list).toContain('วิชาเรียน/KUMIKO-PLAN — ในโฟลเดอร์.md');
+      expect(list).toContain('ปกติ.md');
+
+      // hidden from the list ≠ gone: direct-rel reads still work (cards/links open them)
+      const rd = await fetch(base + '/notes/content?name=' + encodeURIComponent('KUMIKO-PLAN — สรุป DS.md'), { headers: authHeaders(token) });
+      expect((await rd.json()).content).toBe('# KUMIKO-PLAN — สรุป DS.md');
+    } finally {
+      await s.close();
+    }
+  }, 20000);
 });

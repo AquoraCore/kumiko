@@ -1087,7 +1087,7 @@ function kumikoToolsPrompt(){
     '===CANVAS-PLACE board=ชื่อบอร์ด note=ชื่อโน้ต [seg=ชื่อท่อน] at=คอลัมน์,แถว size=กว้างxสูง=== — วาง/ย้ายการ์ดบนกริดแคนวาสเป็น "ช่อง" (จำนวนเต็ม เริ่ม 0,0 ที่ซ้ายบน; ละ at= ระบบหาที่ว่างให้; ละ size= ได้ 2x1; size แนะนำ: การ์ดเด่น 4x3, ปกติ 2x2, นิยามสั้น 2x1) · ===CANVAS-ARRANGE board=ชื่อบอร์ด [mode=grid|hub]=== — สั่งจัดบอร์ดให้เรียบร้อย\n' +
     'กติกากริดแคนวาส: ห้ามคำนวณพิกเซลเอง ให้คิดเป็นช่องเสมอ; ความสูงที่สั่งเป็นขั้นต่ำ ระบบยืดการ์ดให้พอดีเนื้อหาจริง (ไม่มี scroll ในการ์ด ไม่มีทางซ้อนกัน); จบการวาง/จัดบอร์ดให้เรียก CANVAS-ARRANGE\n' +
     'แผนงาน: งานที่ต้องแตะหลายโน้ต/หลายขั้นตอน (มากกว่า 2 ขั้น) ห้ามลงมือทันที — เสนอแผนแล้วรอผู้ใช้กดเริ่ม:\n===KUMIKO-PLAN title=ชื่อแผน===\n- ขั้นที่ 1\n- ขั้นที่ 2\n' + window.CoreMarkdown.NOTE_CLOSE + '\n' +
-    'ระหว่างทำแผน (มีแผน active): จบแต่ละขั้นพิมพ์ ===PLAN-STEP n=เลขขั้น status=done note=สรุปสั้น=== · ติดขัดใช้ status=blocked พร้อมเหตุผลใน note= · เสร็จทุกขั้นพิมพ์ ===PLAN-DONE summary=สรุปงาน===\n' +
+    'ระหว่างทำแผน (มีแผน active): จบแต่ละขั้นพิมพ์ ===PLAN-STEP n=เลขขั้น status=done note=สรุปสั้น=== · ติดขัดใช้ status=blocked พร้อมเหตุผลใน note= · เมื่อทุกขั้นเสร็จต้องปิดแผนด้วย ===PLAN-DONE summary=สรุปสั้นๆ=== เสมอ และห้ามสร้าง/เขียน KUMIKO-LOG.md เอง — ระบบจดลงสมุดงานให้เอง\n' +
     'เส้นแนะนำจาก [[ลิงก์]] ในเนื้อหาเกิดเองบนแคนวาส — WIRE เฉพาะคู่ที่ไม่มีลิงก์ถึงกัน\n' +
     'ข้อห้าม: KUMIKO.md แก้ผ่านบล็อก KUMIKO-RULE และ KUMIKO-MEMORY.md แก้ผ่าน REMEMBER/FORGET เท่านั้น — ห้ามใช้ช่องทางแก้/สร้าง/ลบโน้ตกับสองไฟล์นี้\n' +
     'รูปแบบคำตอบ: โค้ดหลายบรรทัดให้ใช้ ```<ภาษา> เปิด-ปิดเสมอ (เช่น ```python) ห้ามเขียนโค้ดทีละบรรทัดด้วย backtick เดี่ยว · ตาราง markdown ให้มีแถวหัวเสมอ หรือเว้นหัวว่างด้วย | | | ได้\n' +
@@ -1443,12 +1443,13 @@ async function planStatusBlock(s){
 async function planRoundPrompt(s, instruction){
   const st = await planStatusBlock(s);
   return st + instruction + '\n' +
-    'ทำตามแผนทีละขั้น: เมื่อขั้นเสร็จให้พิมพ์ ===PLAN-STEP n=เลขขั้น status=done note=สรุปสั้น=== ทุกครั้ง · ติดขัดใช้ status=blocked พร้อมเหตุผลใน note= · เสร็จทุกขั้นพิมพ์ ===PLAN-DONE summary=สรุปงาน===\n' +
+    'ทำตามแผนทีละขั้น: เมื่อขั้นเสร็จให้พิมพ์ ===PLAN-STEP n=เลขขั้น status=done note=สรุปสั้น=== ทุกครั้ง · ติดขัดใช้ status=blocked พร้อมเหตุผลใน note= · เมื่อทุกขั้นเสร็จต้องปิดแผนด้วย ===PLAN-DONE summary=สรุปสั้นๆ=== เสมอ ห้ามสร้าง KUMIKO-LOG.md เอง (ระบบจดให้)\n' +
     noteEditCapabilityPrompt() + pdfClipCapabilityPrompt() + kumikoToolsPrompt();
 }
 
 // Fire one continuation round of the plan loop (same engine plumbing as the tool loop).
 function firePlanRound(s, instruction){
+  if (s.plan) s.plan.rounds = (s.plan.rounds || 0) + 1;   // the plan's OWN counter — never reset by the tool-round path
   planRoundPrompt(s, instruction).then((prompt) => {
     s.messages.push({ role: 'ai', text: '', _acc: '', sources: [] });
     s.running = true;
@@ -1478,14 +1479,13 @@ async function planContinueRound(s){
     return false;
   }
   if (prog.blocked) { renderPlanRunCard(); return false; }   // blocked → the card asks, no auto-continue
-  if (!CP.planAllowContinue({ round: s._toolRounds || 0, cap: CP.PLAN_ROUND_CAP, progressed: s._lastRoundProgressed })) {
+  if (!CP.planAllowContinue({ round: (s.plan.rounds || 0), cap: CP.PLAN_ROUND_CAP, progressed: s._lastRoundProgressed })) {
     s.plan.active = false;   // stall cut: the file stays; resume by typing or ▶ ทำต่อ
     s.messages.push({ role: 'ai', text: t('แผนหยุดชั่วคราว: รอบล่าสุดไม่มีความคืบหน้า — พิมพ์สั่งต่อหรือปรับแผนได้') });
     persistSessions(); renderHead();
     if (s.id === activeId) renderChat(); else renderPlanRunCard();
     return false;
   }
-  s._toolRounds = (s._toolRounds || 0) + 1;
   firePlanRound(s, t('ทำขั้นถัดไปตามแผนต่อ'));
   return true;
 }
@@ -1508,6 +1508,37 @@ async function applyPlanVerbs(s, acts){
   persistSessions();
   renderPlanRunCard();
   renderHead();
+}
+
+// ---- plan lifecycle: finish → KUMIKO-LOG.md entry + plan file to trash ----
+// The worklog is a REAL root note (hidden from sidebars like every KUMIKO* root file);
+// the AI never writes it — only these buttons do. Trashing uses the app's existing
+// note:delete (soft, restorable) — never a hard delete.
+const PLAN_LOG_REL = 'KUMIKO-LOG.md';
+async function planFinishAndLog(s){
+  const CP = window.CorePlan;
+  if (!CP || !s.plan || !s.plan.rel) return;
+  let body = '';
+  try { body = String(await window.api.readNote(s.plan.rel) || ''); } catch (_) {}
+  const plan = CP.parsePlan(body);
+  // PLAN-DONE summary when the AI closed it; otherwise the plan title (1c: all-done
+  // without PLAN-DONE still counts as finished, summarized by its name)
+  const summary = (s.plan.finished && s.plan.finished !== t('เสร็จตามแผน')) ? s.plan.finished : (plan.title || s.plan.title || '');
+  const entry = CP.planLogEntry(plan, { date: new Date().toISOString().slice(0, 10), summary, startedAt: s.plan.t0 || 0, endedAt: Date.now() });
+  let cur = '';
+  try { cur = String(await window.api.readNote(PLAN_LOG_REL) || ''); } catch (_) {}
+  const head = '# KUMIKO-LOG\n\n' + t('สมุดบันทึกงานที่ AI ทำตามแผน') + '\n\n';
+  try { await window.api.saveNote(PLAN_LOG_REL, cur.trim() ? CP.planLogPrepend(cur, entry) : head + entry); } catch (_) { return; }
+  try { await window.api.deleteNote(s.plan.rel); } catch (_) {}
+  s.plan = null; s._planLogged = true;
+  persistSessions(); renderHead(); renderPlanRunCard();
+}
+// Discard: plan file to trash, no log entry, state cleared.
+async function planDiscard(s){
+  if (!s.plan || !s.plan.rel) return;
+  try { await window.api.deleteNote(s.plan.rel); } catch (_) {}
+  s.plan = null;
+  persistSessions(); renderHead(); renderPlanRunCard();
 }
 
 // Stage-1 proposal card (dashed indigo, mock): the steps as read-only list + ▶ / ✎ / ยกเลิก.
@@ -1535,7 +1566,7 @@ function planProposalCard(bubble, m, s){
     go.disabled = true;
     try {
       const rel = await ensurePlanNote(p.title, p.steps);
-      s.plan = { rel, title: p.title || '', active: true, t0: Date.now() };
+      s.plan = { rel, title: p.title || '', active: true, t0: Date.now(), rounds: 0 };
       delete m.planProposal;   // consumed
       s._toolRounds = 0; s._lastRoundProgressed = true;
       persistSessions(); renderTabs(); renderHead(); renderChat();
@@ -1557,13 +1588,26 @@ async function renderPlanRunCard(){
   const box = document.getElementById('chatMessages');
   const old = document.getElementById('planRunCard'); if (old) old.remove();
   const s = (typeof activeSession === 'function') ? activeSession() : null;
-  if (!box || !s || !s.plan || !s.plan.rel || !window.CorePlan) return;
+  if (!box || !s || !window.CorePlan) return;
+  // after ✓ บันทึกลงสมุดงาน: one short line + a link into the worklog (s.plan is gone)
+  if (s._planLogged) {
+    const done = document.createElement('div'); done.id = 'planRunCard'; done.className = 'plan-card plan-run plan-logged';
+    const ln = document.createElement('button'); ln.type = 'button'; ln.className = 'plan-loglink';
+    ln.textContent = '✓ ' + t('บันทึกแล้ว · เปิดสมุดงาน');
+    ln.onclick = () => openNote(PLAN_LOG_REL);
+    const x = document.createElement('button'); x.type = 'button'; x.className = 'plan-skip'; x.textContent = '×'; x.title = t('ปิด');
+    x.onclick = () => { delete s._planLogged; done.remove(); };
+    done.appendChild(ln); done.appendChild(x);
+    box.insertBefore(done, box.firstChild);
+    return;
+  }
+  if (!s.plan || !s.plan.rel) return;
   const seq = ++__planCardSeq;
   const body = String(await window.api.readNote(s.plan.rel) || '');
   if (seq !== __planCardSeq) return;   // a newer render superseded this one mid-read
   const plan = window.CorePlan.parsePlan(body);
   const prog = window.CorePlan.planProgress(plan);
-  s.plan._prog = { done: prog.done, total: prog.total };
+  s.plan._prog = { done: prog.done, total: prog.total, blocked: prog.blocked };
   const chip = document.getElementById('shPlanChip');
   if (chip) chip.textContent = '📋 ' + (prog.total ? prog.done + '/' + prog.total : '…');
   const card = document.createElement('div'); card.id = 'planRunCard'; card.className = 'plan-card plan-run';
@@ -1610,9 +1654,13 @@ async function renderPlanRunCard(){
     fin.textContent = '✓ ' + t('เสร็จตามแผน') + (s.plan.finished && s.plan.finished !== t('เสร็จตามแผน') ? ' — ' + s.plan.finished : '');
     card.appendChild(fin);
     const acts = document.createElement('div'); acts.className = 'plan-acts';
+    const log = mk(t('✓ บันทึกลงสมุดงาน'), 'plan-go');
+    log.onclick = () => { log.disabled = true; planFinishAndLog(s); };
+    const keep = mk(t('เก็บไฟล์แผนไว้'), 'plan-edt');
+    keep.onclick = () => { s.plan = null; persistSessions(); renderHead(); renderPlanRunCard(); };
     const x = mk('×', 'plan-skip'); x.title = t('ปิดการ์ดแผน');
     x.onclick = () => { s.plan = null; persistSessions(); renderHead(); renderPlanRunCard(); };
-    acts.appendChild(x); card.appendChild(acts);
+    acts.appendChild(log); acts.appendChild(keep); acts.appendChild(x); card.appendChild(acts);
   } else {
     const acts = document.createElement('div'); acts.className = 'plan-acts';
     if (s.plan.active) {
@@ -1625,14 +1673,20 @@ async function renderPlanRunCard(){
         acts.appendChild(skip);
       }
     } else {
+      // paused / stalled: resume, finish-and-log (unfinished steps recorded as-is), or drop
       const resume = mk(t('▶ ทำต่อ'), 'plan-go');
       resume.onclick = () => {
         if (isRunning(s.id)) return;
         s.plan.active = true; s._toolRounds = 0; s._lastRoundProgressed = true;
         persistSessions(); renderHead(); renderPlanRunCard();
-        firePlanRound(s, t('ทำขั้นถัดไปตามแผนต่อ'));
+        s.plan.rounds = 0;   // human pressed resume — fresh round budget
+        firePlanRound(s, t('ทำต่อจากขั้นถัดไปตามไฟล์แผน ') + s.plan.rel);
       };
-      acts.appendChild(resume);
+      const finlog = mk(t('จบและบันทึกลงสมุดงาน'), 'plan-edt');
+      finlog.onclick = () => { finlog.disabled = true; planFinishAndLog(s); };
+      const drop = mk(t('ทิ้งแผน'), 'plan-skip');
+      drop.onclick = () => planDiscard(s);
+      acts.appendChild(resume); acts.appendChild(finlog); acts.appendChild(drop);
     }
     card.appendChild(acts);
   }
@@ -1651,6 +1705,7 @@ async function planSkipStep(s, n){
   await renderPlanRunCard(); renderHead();
   if (!isRunning(s.id)) {
     s._toolRounds = 0; s._lastRoundProgressed = true;
+    s.plan.rounds = 0;   // human skipped a step — fresh round budget
     firePlanRound(s, t('ผู้ใช้ข้ามขั้น ') + n + t(' — ทำขั้นถัดไปตามแผนต่อ'));
   }
 }
@@ -3484,6 +3539,18 @@ applyRightMode();
 loadSessions();
 syncEngineFromSession();
 renderSessions();
+// restored plans outlive app restarts: if the plan note itself is gone (trashed/deleted by
+// hand), drop the state silently — the note is the source of truth, not the session pointer
+(async () => {
+  let dirty = false;
+  for (const s of sessions) {
+    if (!s.plan || !s.plan.rel) continue;
+    let body = '';
+    try { body = String(await window.api.readNote(s.plan.rel) || ''); } catch (_) {}
+    if (!body) { s.plan = null; dirty = true; }
+  }
+  if (dirty) { persistSessions(); renderHead(); if (typeof renderPlanRunCard === 'function') renderPlanRunCard(); }
+})();
 document.getElementById('chatClearBtn').onclick = () => { const s = activeSession(); s.messages = []; persistSessions(); renderChat(); };
 
 const savedTheme = localStorage.getItem('theme');

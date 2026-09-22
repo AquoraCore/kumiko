@@ -729,10 +729,11 @@ function walkNotes(dir, base){
     if (ent.name.startsWith('.')) continue;
     const rel = base ? base + '/' + ent.name : ent.name;
     if (ent.isDirectory()) { if (IGNORE_DIRS.has(ent.name)) continue; out = out.concat(walkNotes(path.join(dir, ent.name), rel)); }
-    // KUMIKO.md (standing rules) + KUMIKO-MEMORY.md (memory layer) are the AI's own files —
-    // hidden from every list-driven surface (sidebar, graph, @-mentions, RAG) by user request;
-    // read/written directly by name (rules desk / memory desk).
-    else if (ent.name.endsWith('.md') && rel !== 'KUMIKO.md' && rel !== 'KUMIKO-MEMORY.md') out.push(rel);
+    // KUMIKO* root files (KUMIKO.md rules, KUMIKO-MEMORY.md, KUMIKO-LOG.md worklog,
+    // "KUMIKO-PLAN — ….md" plan notes) are the AI's own files — hidden from every
+    // list-driven surface (sidebar, graph, @-mentions, RAG) by prefix rule, ROOT level
+    // only; they stay real notes: open/read/write directly by rel always works.
+    else if (ent.name.endsWith('.md') && !(base === '' && ent.name.startsWith('KUMIKO'))) out.push(rel);
   }
   return out;
 }
