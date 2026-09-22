@@ -2627,3 +2627,43 @@ button.tg-chip { cursor: pointer; text-align: left; }
 .host-dev-ua { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .host-dev-t { font-size: 10.5px; }
 .host-warn a { color: var(--accent); }
+
+/* ---- Plan Mode (2026-09-22): proposal card (dashed) + run-status card (solid) ----
+   Indigo (--wa-indigo, already dark-themed) is the plan seal — same family as the memory
+   hanko; the card rides indigo-on-paper, mock tones: done ✓ #3f7d4e / doing #fdf6f0 /
+   blocked #a04434. */
+.plan-card { margin: 6px 2px 2px; padding: 9px 11px; background: var(--ai-bubble); border-radius: var(--r-paper); display: flex; flex-direction: column; gap: 7px; min-width: 0; font-size: 12.5px; }
+.plan-prop { border: 1.5px dashed var(--wa-indigo); background: color-mix(in srgb, var(--wa-indigo) 5%, var(--ai-bubble)); }
+.plan-run { border: 1.5px solid color-mix(in srgb, var(--wa-indigo) 55%, var(--line-strong)); }
+#planRunCard { margin: 0 0 8px; }
+.plan-head { display: flex; align-items: baseline; gap: 8px; color: var(--wa-indigo); font: 700 12.5px var(--font); min-width: 0; }
+.plan-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-count { flex: none; font: 700 12px var(--mono); padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--wa-indigo) 14%, transparent); }
+.plan-t0 { flex: none; font: 400 10.5px var(--font); color: var(--muted); }
+.plan-bar { height: 5px; border-radius: 3px; background: color-mix(in srgb, var(--wa-indigo) 14%, var(--line)); overflow: hidden; }
+.plan-bar i { display: block; height: 100%; background: var(--wa-indigo); border-radius: 3px; transition: width .3s ease; }
+.plan-steps { display: flex; flex-direction: column; gap: 3px; }
+.plan-step { display: flex; align-items: baseline; gap: 6px; padding: 3px 7px; border-radius: 6px; color: var(--text); overflow-wrap: anywhere; }
+.plan-step.done { color: #3f7d4e; }
+.plan-step.doing { background: #fdf6f0; font-weight: 600; }
+.plan-step.doing .spin-kaza { flex: none; align-self: center; background: var(--wa-indigo); }
+.plan-step.blocked { color: #a04434; background: color-mix(in srgb, #a04434 7%, transparent); flex-wrap: wrap; }
+.plan-step.todo { color: var(--muted); }
+.plan-step-acts { display: inline-flex; gap: 5px; margin-left: auto; }
+.plan-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+.plan-acts button { font: 600 11.5px var(--font); border-radius: var(--r-frame); padding: 3px 10px; cursor: pointer; }
+.plan-go { border: 1px solid var(--wa-indigo); background: var(--wa-indigo); color: #fff; }
+.plan-go:hover { filter: brightness(1.12); }
+.plan-go:disabled { opacity: .5; cursor: default; }
+.plan-edt { border: 1px solid var(--wa-indigo); background: transparent; color: var(--wa-indigo); }
+.plan-edt:hover { background: color-mix(in srgb, var(--wa-indigo) 10%, transparent); }
+.plan-skip { border: 1px solid var(--line-strong); background: transparent; color: var(--muted); }
+.plan-skip:hover { color: var(--text); border-color: var(--muted); }
+.plan-donebar { background: #3f7d4e; color: #fff; border-radius: 6px; padding: 6px 10px; font: 600 12px var(--font); }
+/* header chip 📋 x/y (session head, next to the name) */
+.sh-plan-chip { flex: none; border: 1px solid var(--wa-indigo); color: var(--wa-indigo); background: color-mix(in srgb, var(--wa-indigo) 7%, transparent); border-radius: 999px; font: 700 11px var(--mono); padding: 2px 9px; cursor: pointer; }
+.sh-plan-chip:hover { background: var(--wa-indigo); color: #fff; }
+:root[data-theme="dark"] .plan-step.done { color: #7fb98f; }
+:root[data-theme="dark"] .plan-step.doing { background: #2e2a26; }
+:root[data-theme="dark"] .plan-step.blocked { color: #d98a76; background: color-mix(in srgb, #a04434 22%, transparent); }
+:root[data-theme="dark"] .plan-donebar { background: #33684a; }

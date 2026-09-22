@@ -70,6 +70,8 @@ function chatDisplayText(s, streaming){
       if ((ac.renameTags || []).length) bits.push('🏷 ' + t('เปลี่ยนชื่อแท็ก') + ': ' + ac.renameTags.map((x) => '#' + x.from + (x.to ? ' → #' + x.to : ' (เอาออก)')).join(', '));
       if (ac.canvasList) bits.push('🖼 ' + t('ดูบอร์ดแคนวาส'));
       if ((ac.canvasOps || []).length) bits.push('🖼 ' + t('จัดแคนวาส') + ': ' + ac.canvasOps.length);
+      if ((ac.planSteps || []).length) bits.push('📋 ' + t('แผน') + ': ' + ac.planSteps.map((x) => t('ขั้น') + ' ' + x.n + ' ' + ({ done: '✓', doing: '…', blocked: '✗' })[x.status]).join(', '));
+      if (ac.planDone) bits.push('📋 ' + t('จบแผน') + (ac.planDone.summary ? ': ' + ac.planDone.summary : ''));
       createdLine += '\n\n*' + bits.join(' · ') + '*';
     }
   } catch (_) {}
@@ -80,6 +82,10 @@ function chatDisplayText(s, streaming){
   try {
     const mm = window.CoreMarkdown && window.CoreMarkdown.extractMemories && window.CoreMarkdown.extractMemories(s);
     if (mm && (mm.memories.length || mm.forgets.length)) { s = mm.chat; createdLine += '\n\n*🧠 ' + t('เสนอความจำ — ยืนยันที่การ์ดด้านล่าง') + '*'; }
+  } catch (_) {}
+  try {
+    const pp = window.CoreMarkdown && window.CoreMarkdown.extractPlanProposals && window.CoreMarkdown.extractPlanProposals(s);
+    if (pp && pp.plans.length) { s = pp.chat; createdLine += '\n\n*📋 ' + t('เสนอแผนงาน — ยืนยันที่การ์ดด้านล่าง') + '*'; }
   } catch (_) {}
   try {
     const su = window.CoreMarkdown && window.CoreMarkdown.extractSectionUpdates && window.CoreMarkdown.extractSectionUpdates(s);
@@ -167,7 +173,8 @@ let liveBubble = null;     // ai bubble DOM element of the active session's runn
 function persistSessions(){
   try {
     const slim = sessions.map((s) => ({ id: s.id, name: s.name, icon: s.icon, engine: s.engine, model: s.model, engineSel: s.engineSel, modelSel: s.modelSel, scope: s.scope,
-      messages: s.messages.map((m) => ({ role: m.role, text: m.text, thumbs: m.thumbs, stopped: m.stopped || undefined, think: m.think || undefined, visionModel: m.visionModel || undefined })) }));
+      messages: s.messages.map((m) => ({ role: m.role, text: m.text, thumbs: m.thumbs, stopped: m.stopped || undefined, think: m.think || undefined, visionModel: m.visionModel || undefined })),
+      plan: (s.plan && s.plan.rel) ? { rel: s.plan.rel, title: s.plan.title || '', active: !!s.plan.active, t0: s.plan.t0 || 0, finished: s.plan.finished || undefined } : undefined }));
     vsSet('aiSessions', { sessions: slim, activeId });
   } catch (_) {}
 }
@@ -183,6 +190,10 @@ function loadSessions(){
       engineSel: (typeof s.engineSel === 'string' && (s.engineSel === 'default' || /^(cli|api):/.test(s.engineSel))) ? s.engineSel : 'default',
       modelSel: (typeof s.modelSel === 'string') ? s.modelSel : '',
       scope: s.scope || 'free', running: false,
+      // plan-mode state (Plan Mode 2026-09-22): { rel, title, active, t0, finished } — the
+      // plan NOTE is the source of truth; this only says the session has one and whether the
+      // auto-continue loop is live
+      plan: (s.plan && typeof s.plan.rel === 'string' && s.plan.rel) ? { rel: s.plan.rel, title: s.plan.title || '', active: !!s.plan.active, t0: s.plan.t0 || 0, finished: s.plan.finished || undefined } : null,
       // repair legacy empty AI bubbles (pre-fix saves) into a visible failure line
       messages: Array.isArray(s.messages) ? s.messages.map((m) => ({ role: m.role,
         text: (m.role === 'ai' && !(m.text || '').trim()) ? t('⚠ engine ไม่ตอบกลับ (คำตอบว่าง) — ลองส่งข้อความเดิมอีกครั้ง') : m.text })) : [] }));
@@ -235,6 +246,16 @@ function renderHead(){
   const s = activeSession(); head.innerHTML = '';
   const nm = document.createElement('span'); nm.className = 'sh-nm'; nm.innerHTML = icoSvg(s.icon || 'note', 'sm'); nm.appendChild(document.createTextNode(' ' + s.name));
   head.appendChild(nm);
+  // plan-mode progress chip (📋 3/7): live while the plan's auto-continue loop runs. Counts
+  // come from the renderPlanRunCard cache (the plan NOTE is the source of truth, read async).
+  if (s.plan && s.plan.active) {
+    const chip = document.createElement('button'); chip.type = 'button'; chip.className = 'sh-plan-chip'; chip.id = 'shPlanChip';
+    const p = s.plan._prog;
+    chip.textContent = '📋 ' + (p && p.total ? p.done + '/' + p.total : '…');
+    chip.title = t('แผนงานกำลังทำ — คลิกเพื่อไปที่การ์ดแผน');
+    chip.onclick = (e) => { e.stopPropagation(); const m = document.getElementById('chatMessages'); if (m) m.scrollTo({ top: 0, behavior: 'smooth' }); };
+    head.appendChild(chip);
+  }
   // Scope dropdown removed — context is now injected automatically by PRIORITY
   // (open note first, then RAG-related notes). See buildPriorityContext in renderer.js.
   const sp = document.createElement('span'); sp.className = 'sh-sp'; head.appendChild(sp);
@@ -330,6 +351,8 @@ function renderChat(){
         }
         if (acts.children.length) b.appendChild(acts);
       }
+      // plan proposal card (dashed, mock stage 1) rides the bubble until the user decides
+      if (m.planProposal && typeof planProposalCard === 'function') { try { planProposalCard(b, m, s); } catch (_) {} }
       if (running) liveBubble = b;
     }
     else if (window.CoreMarkdown && window.CoreMarkdown._mdEsc) { b.innerHTML = _linkify(window.CoreMarkdown._mdEsc(m.text)); }
@@ -346,6 +369,7 @@ function renderChat(){
     box.appendChild(wrap);
   });
   if (keep != null) box.scrollTop = keep; else chatScroll(true);
+  if (typeof renderPlanRunCard === 'function') { try { renderPlanRunCard(); } catch (_) {} }
   if (typeof updateSendButton === 'function') updateSendButton();
 }
 function renderSessions(){ renderTabs(); renderHead(); renderChat(); }
@@ -498,6 +522,14 @@ window.api.onEngineDone(async (payload) => {
     if (failed && typeof salvagePartialNoteBlock === 'function') { try { await salvagePartialNoteBlock(last.text); } catch (_) {} }
   }
   s.running = false;
+  // ===KUMIKO-PLAN=== proposal: hang the (dashed) plan card on this bubble — set BEFORE the
+  // render below so the card is there on the first paint; consumed by the user's ▶/ยกเลิก
+  if (last && last.role === 'ai' && !last.stopped && window.CoreMarkdown && window.CoreMarkdown.extractPlanProposals) {
+    try {
+      const pp = window.CoreMarkdown.extractPlanProposals(last.text || '');
+      if (pp.plans && pp.plans.length) last.planProposal = pp.plans[0];
+    } catch (_) {}
+  }
   persistSessions(); renderTabs();
   if (runId === activeId) renderChat();
   // ---- Kumiko tool lines: file verbs run now; READ/SEARCH turns the reply into an
@@ -507,9 +539,16 @@ window.api.onEngineDone(async (payload) => {
   const acts = (window.CoreMarkdown && window.CoreMarkdown.extractActions && !(last && last.stopped))
     ? window.CoreMarkdown.extractActions((last && last.text) || '') : { any: false, needsContinue: false };
   if (last && last.role === 'ai' && acts.any && typeof runKumikoVerbs === 'function') {
-    try { await runKumikoVerbs(acts); } catch (_) {}
+    try { await runKumikoVerbs(acts, s); } catch (_) {}
   }
-  if (last && last.role === 'ai' && acts.needsContinue && (s._toolRounds || 0) < 2 && typeof buildToolResults === 'function') {
+  // plan round budget (Plan Mode): rounds 0-1 free like the plain tool loop; after that each
+  // round must have carried PLAN-STEP progress, up to PLAN_ROUND_CAP. Without a plan the old
+  // hard-2 gate applies unchanged.
+  s._lastRoundProgressed = !!((acts.planSteps || []).length);
+  const allowNext = (s.plan && s.plan.active && window.CorePlan)
+    ? window.CorePlan.planAllowContinue({ round: s._toolRounds || 0, cap: window.CorePlan.PLAN_ROUND_CAP, progressed: s._lastRoundProgressed })
+    : (s._toolRounds || 0) < 2;
+  if (last && last.role === 'ai' && !last.stopped && acts.needsContinue && allowNext && typeof buildToolResults === 'function') {
     s._toolRounds = (s._toolRounds || 0) + 1;
     try {
       const results = await buildToolResults(acts);
@@ -520,10 +559,12 @@ window.api.onEngineDone(async (payload) => {
       if (runId === activeId) renderChat();
       const toolImgs = (window.__toolImages || []).slice(0, 4); window.__toolImages = [];
       window.api.runEngine({ override: { sel: s.engineSel, model: s.modelSel },
-        prompt: buildToolContinuationPrompt(lastUser ? lastUser.text : '', results, (acts.chat || '').slice(0, 600)), runId: s.id, images: toolImgs });
+        prompt: await buildToolContinuationPrompt(lastUser ? lastUser.text : '', results, (acts.chat || '').slice(0, 600)), runId: s.id, images: toolImgs });
       return;   // an "ask" reply never runs the write executors — the NEXT reply acts
     } catch (_) { s.running = false; }
   }
+  // plan auto-continue runs LAST (below): this reply's note verbs/reviews must execute
+  // before the next plan round starts — the plan's WORK rides those blocks.
   s._toolRounds = 0;
   window.__aiReadTarget = null;   // implicit section target only lives within one tool round
   window.__toolImages = [];
@@ -547,6 +588,11 @@ window.api.onEngineDone(async (payload) => {
   // ===REMEMBER===/===FORGET=== proposals: memory confirm card (user accepts → KUMIKO-MEMORY.md)
   if (runId === activeId && last && last.role === 'ai' && typeof maybeProposeMemories === 'function') {
     try { const mp = maybeProposeMemories(last.text || ''); if (mp && mp.catch) mp.catch(() => {}); } catch (_) {}
+  }
+  // ---- plan auto-continue (Plan Mode): with an ACTIVE plan every finished round rolls into
+  // the next step. Runs LAST so this reply's note executors (above) land before round N+1.
+  if (last && last.role === 'ai' && !last.stopped && s.plan && s.plan.active && typeof planContinueRound === 'function') {
+    try { await planContinueRound(s); } catch (_) {}
   }
 });
 

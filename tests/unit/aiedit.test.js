@@ -151,7 +151,8 @@ describe('AI slide-clip (===PDF-CLIP===) chain', () => {
     expect(renderer2).toContain('function pdfClipCapabilityPrompt');
     expect(renderer2).toMatch(/pdfClipCapabilityPrompt\(\)\{\n  if \(!\(typeof currentPdf === 'string' && currentPdf\)\) return '';/);
     // wired into BOTH prompt branches + the tool-continuation prompt (2026-08-19)
-    expect((renderer2.match(/noteEditCapabilityPrompt\(\) \+ pdfClipCapabilityPrompt\(\)/g) || []).length).toBe(3);
+    // + the plan-round prompt (Plan Mode 2026-09-22) — at least the original three
+    expect((renderer2.match(/noteEditCapabilityPrompt\(\) \+ pdfClipCapabilityPrompt\(\)/g) || []).length).toBeGreaterThanOrEqual(3);
   });
 
   it('commands run on turn end and each page renders OFFSCREEN', () => {
@@ -511,7 +512,11 @@ describe('Kumiko tools (read/search loop + file verbs)', () => {
   });
 
   it('READ/SEARCH replies continue the SAME session with real content, bounded to 2 rounds', () => {
-    expect(chatT).toMatch(/acts\.needsContinue && \(s\._toolRounds \|\| 0\) < 2/);
+    // Plan Mode (2026-09-22): the gate is now `allowNext` — without an active plan it still
+    // resolves to the plain 2-round budget; with one it defers to CorePlan.planAllowContinue
+    expect(chatT).toMatch(/acts\.needsContinue && allowNext/);
+    expect(chatT).toMatch(/: \(s\._toolRounds \|\| 0\) < 2;/);
+    expect(chatT).toContain('planAllowContinue({ round: s._toolRounds || 0');
     expect(chatT).toContain('buildToolResults(acts)');
     expect(chatT).toContain('buildToolContinuationPrompt(');
     // an "ask" reply skips the write executors (the NEXT reply acts)

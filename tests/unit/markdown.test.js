@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mdToHtml, _mdInline, stripMdFence, extractNoteUpdate, extractPdfClips, extractNewNotes, extractSectionUpdates, replaceSection, stripNoteBlocks, extractKumikoRules, extractActions, linkifyRefs, historyText, NOTE_OPEN, NOTE_CLOSE } from '../../core/markdown.js';
+import { mdToHtml, _mdInline, stripMdFence, extractNoteUpdate, extractPdfClips, extractNewNotes, extractSectionUpdates, replaceSection, stripNoteBlocks, extractKumikoRules, extractPlanProposals, extractActions, linkifyRefs, historyText, NOTE_OPEN, NOTE_CLOSE } from '../../core/markdown.js';
 
 describe('mdToHtml (happy)', () => {
   it('renders **bold** as <strong>', () => {
@@ -693,5 +693,59 @@ describe('light syntax highlight (pure regex, on ESCAPED text)', () => {
   it('the new highlight code uses no regex lookbehind (Safari < 16.4 cannot even parse it)', () => {
     const src = require('fs').readFileSync(require('path').join(__dirname, '../../core/markdown.js'), 'utf8');
     expect(src).not.toMatch(/\(\?[<=]/);
+  });
+});
+
+// Plan Mode (2026-09-22): ===KUMIKO-PLAN=== proposes a multi-step plan (confirm-gated card),
+// ===PLAN-STEP n= status= note==== reports step progress mid-run, ===PLAN-DONE summary====
+// closes the plan. Plan blocks must never render raw in the bubble.
+describe('extractPlanProposals', () => {
+  it('HAPPY: parses title + step bullets, strips the block from chat', () => {
+    const r = extractPlanProposals('วางแผนให้ก่อนนะ\n===KUMIKO-PLAN title=สรุปวิชา DS===\n- ขั้น 1 รวบรวมโน้ต\n- ขั้น 2 เขียนสรุป\n===END-NOTE===\nเรียบร้อย');
+    expect(r.plans).toEqual([{ title: 'สรุปวิชา DS', steps: ['ขั้น 1 รวบรวมโน้ต', 'ขั้น 2 เขียนสรุป'] }]);
+    expect(r.chat).toBe('วางแผนให้ก่อนนะ\n\nเรียบร้อย');
+  });
+  it('EDGE: no END-NOTE → eats the suffix (same as the rule grammar); title keeps spaces', () => {
+    const r = extractPlanProposals('===KUMIKO-PLAN title=แผน สรุป ทั้งวิชา===\n- ขั้นเดียว');
+    expect(r.plans).toEqual([{ title: 'แผน สรุป ทั้งวิชา', steps: ['ขั้นเดียว'] }]);
+    expect(r.chat).toBe('');
+  });
+  it('EDGE: no proposal → empty; non-bullet body lines ignored; max 1 plan kept', () => {
+    expect(extractPlanProposals('ธรรมดา').plans).toEqual([]);
+    const r = extractPlanProposals('===KUMIKO-PLAN title=T===\nคำอธิบายไม่ใช่ขั้น\n- ขั้นจริง\n===END-NOTE===\n===KUMIKO-PLAN title=สอง===\n- อีกแผน\n===END-NOTE===');
+    expect(r.plans).toHaveLength(1);
+    expect(r.plans[0].steps).toEqual(['ขั้นจริง']);
+  });
+  it('plan blocks are stripped by stripNoteBlocks and collapsed by historyText', () => {
+    const msg = 'hi\n===KUMIKO-PLAN title=T===\n- ขั้น\n===END-NOTE===';
+    expect(stripNoteBlocks(msg)).not.toContain('ขั้น');
+    expect(historyText(msg)).toContain('[เสนอแผนงาน');
+    expect(historyText(msg)).not.toContain('===');
+  });
+});
+
+describe('extractActions — plan verbs', () => {
+  it('HAPPY: PLAN-STEP lines land in planSteps in order and are stripped from chat', () => {
+    const r = extractActions('กำลังทำ\n===PLAN-STEP n=2 status=done note=ผ่านรีวิว 3 hunks===\n===PLAN-STEP n=3 status=blocked note=ไม่พบไฟล์===\n===PLAN-STEP n=4 status=doing===\nจบรอบ');
+    expect(r.planSteps).toEqual([
+      { n: 2, status: 'done', note: 'ผ่านรีวิว 3 hunks' },
+      { n: 3, status: 'blocked', note: 'ไม่พบไฟล์' },
+      { n: 4, status: 'doing', note: '' },
+    ]);
+    expect(r.chat).toBe('กำลังทำ\n\nจบรอบ');
+    expect(r.any).toBe(true);
+    expect(r.needsContinue).toBe(false);   // plan verbs never trigger the ask-verb loop
+  });
+  it('HAPPY: PLAN-DONE captures the summary', () => {
+    const r = extractActions('===PLAN-DONE summary=สรุปทุกบทเรียบร้อย===');
+    expect(r.planDone).toEqual({ summary: 'สรุปทุกบทเรียบร้อย' });
+    expect(r.any).toBe(true);
+    expect(r.chat).toBe('');
+  });
+  it('EDGE: plain text with no verbs → plan fields empty', () => {
+    const r = extractActions('คำตอบธรรมดา');
+    expect(r.planSteps).toEqual([]);
+    expect(r.planDone).toBeNull();
+    expect(r.any).toBe(false);
   });
 });

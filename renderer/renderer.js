@@ -1084,6 +1084,8 @@ function kumikoToolsPrompt(){
     '===CANVAS-BOARD name=ชื่อบอร์ด=== — เลือกหรือสร้างบอร์ด (คำสั่งแคนวาสบรรทัดถัด ๆ ไปลงบอร์ดนี้)\n' +
     '===CANVAS-ADD name=ชื่อโน้ต segs=หัวข้อ A | หัวข้อ B w=640=== — วางโน้ตเป็นการ์ดโชว์ท่อนเต็มของหัวข้อที่เลือก (segs ต้องเป็นชื่อหัวข้อจริงในโน้ต — ใช้ CANVAS-LIST/READ-NOTE ดูก่อน; ไม่ใส่ segs=หัวข้อแรก; w กว้าง≥560 แสดง diagram เต็ม) · ===CANVAS-REMOVE name=… seg=…===\n' +
     '===CANVAS-WIRE from=โน้ต fromseg=หัวข้อ to=โน้ต toseg=หัวข้อ=== — โยงเส้นถาวรระหว่างท่อน (fromseg/toseg ไม่บังคับ) · ===CANVAS-UNWIRE from=… to=…=== · ===CANVAS-STICKY text=โน้ตแปะสั้น ๆ===\n' +
+    'แผนงาน: งานที่ต้องแตะหลายโน้ต/หลายขั้นตอน (มากกว่า 2 ขั้น) ห้ามลงมือทันที — เสนอแผนแล้วรอผู้ใช้กดเริ่ม:\n===KUMIKO-PLAN title=ชื่อแผน===\n- ขั้นที่ 1\n- ขั้นที่ 2\n' + window.CoreMarkdown.NOTE_CLOSE + '\n' +
+    'ระหว่างทำแผน (มีแผน active): จบแต่ละขั้นพิมพ์ ===PLAN-STEP n=เลขขั้น status=done note=สรุปสั้น=== · ติดขัดใช้ status=blocked พร้อมเหตุผลใน note= · เสร็จทุกขั้นพิมพ์ ===PLAN-DONE summary=สรุปงาน===\n' +
     'เส้นแนะนำจาก [[ลิงก์]] ในเนื้อหาเกิดเองบนแคนวาส — WIRE เฉพาะคู่ที่ไม่มีลิงก์ถึงกัน\n' +
     'ข้อห้าม: KUMIKO.md แก้ผ่านบล็อก KUMIKO-RULE และ KUMIKO-MEMORY.md แก้ผ่าน REMEMBER/FORGET เท่านั้น — ห้ามใช้ช่องทางแก้/สร้าง/ลบโน้ตกับสองไฟล์นี้\n' +
     'รูปแบบคำตอบ: โค้ดหลายบรรทัดให้ใช้ ```<ภาษา> เปิด-ปิดเสมอ (เช่น ```python) ห้ามเขียนโค้ดทีละบรรทัดด้วย backtick เดี่ยว · ตาราง markdown ให้มีแถวหัวเสมอ หรือเว้นหัวว่างด้วย | | | ได้\n' +
@@ -1289,7 +1291,7 @@ function _noteRelFromName(name){
 }
 // File verbs — executed immediately. Rename/target are undo-able by nature; delete goes to
 // the trash and asks the user ONCE (the same confirm the sidebar uses).
-async function runKumikoVerbs(acts){
+async function runKumikoVerbs(acts, s){
   for (const r of (acts.renames || [])) {
     if (_aiProtectedName(r.from) || _aiProtectedName(r.to)) { _aiProtectToast(); continue; }
     const from = _resolveNoteRel(r.from);
@@ -1330,6 +1332,11 @@ async function runKumikoVerbs(acts){
   }
   if (acts.tagWrites && typeof runTagVerbs === 'function') { try { await runTagVerbs(acts); } catch (_) {} }
   if ((acts.canvasOps || []).length && typeof kvApplyAiOps === 'function') { try { await kvApplyAiOps(acts.canvasOps); } catch (_) {} }
+  // ---- PLAN-STEP / PLAN-DONE: fold the AI's status lines into the plan note, then the
+  // card + chip re-render from the file (the plan note is the single source of truth) ----
+  if (s && s.plan && ((acts.planSteps || []).length || acts.planDone)) {
+    try { await applyPlanVerbs(s, acts); } catch (_) {}
+  }
 }
 // READ/SEARCH results → the text block fed back to the AI in the continuation turn.
 async function buildToolResults(acts){
@@ -1382,15 +1389,268 @@ async function buildToolResults(acts){
 }
 // The continuation prompt: tool results + the original question + full write capabilities,
 // so the AI can now act on REAL content (the whole point of the loop).
-function buildToolContinuationPrompt(userMsg, results, ownPlan){
+async function buildToolContinuationPrompt(userMsg, results, ownPlan){
   // ownPlan = what the AI TOLD the user before reaching for the tool ("จะแปลทั้งฉบับ…").
   // Without it the model lost its own intent and once echoed the read content back verbatim
   // as a same-name NEW-NOTE (log 2026-08-24).
-  return 'คุณขอข้อมูลด้วยเครื่องมือ และนี่คือผลลัพธ์:\n\n' + results + '\n\n' +
+  // A mid-plan tool round also carries the live plan status, so the next reply keeps
+  // numbering its ===PLAN-STEP=== lines against the real file.
+  let planCtx = '';
+  const ps = (typeof activeSession === 'function') ? activeSession() : null;
+  if (ps && ps.plan && ps.plan.active && ps.plan.rel) { try { planCtx = await planStatusBlock(ps); } catch (_) {} }
+  return planCtx + 'คุณขอข้อมูลด้วยเครื่องมือ และนี่คือผลลัพธ์:\n\n' + results + '\n\n' +
     (ownPlan ? 'สิ่งที่คุณบอกผู้ใช้ไว้ก่อนใช้เครื่องมือ (ทำตามนี้ให้จบ): ' + ownPlan + '\n' : '') +
     'ห้ามคัดลอกเนื้อหาที่อ่านมาส่งกลับโดยไม่แก้ — ใช้มันทำงานตามที่รับปากไว้ และถ้าจะแก้โน้ตเดิม ใช้ UPDATED-NOTE name= ไม่ใช่ NEW-NOTE\n' +
     noteEditCapabilityPrompt() + pdfClipCapabilityPrompt() + kumikoToolsPrompt() +
     '\nตอบคำถามเดิมของผู้ใช้ต่อให้จบโดยใช้ข้อมูลข้างบน: ' + userMsg;
+}
+
+// ---- Plan Mode (2026-09-22): propose → ▶ start → bounded auto-continue rounds ----------
+// The plan lives in a REAL note ("KUMIKO-PLAN — <title>.md") the user can open and edit by
+// hand; PLAN-STEP verbs, skip buttons and the progress chip all read/write that same file.
+// s.plan = { rel, title, active, t0, finished } on the session (persisted in the slim map).
+
+// Fresh plan note: all steps todo, step 1 doing. A file with open steps already at the base
+// name (the user pressed ✎ first and edited it) is RESUMED, never overwritten.
+async function ensurePlanNote(title, steps){
+  const base = 'KUMIKO-PLAN — ' + String(title || t('แผนงาน')).replace(/[\\/:*?"<>|#]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+  const rel0 = base + '.md';
+  let body = '';
+  try { body = String(await window.api.readNote(rel0) || ''); } catch (_) {}
+  if (body && /- \[ \]/.test(body)) return rel0;
+  let final = base, i = 2;
+  while (await window.api.readNote(final + '.md')) final = base + ' ' + (i++);
+  const plan = { title: title || '', steps: (steps || []).map((tx) => ({ text: String(tx || ''), status: 'todo', note: '' })) };
+  if (plan.steps.length) plan.steps[0].status = 'doing';
+  await window.api.saveNote(final + '.md', window.CorePlan.serializePlan(plan));
+  try { await refreshList(final + '.md', { keepView: true }); } catch (_) {}
+  return final + '.md';
+}
+
+// The live plan file + "ขั้นถั้นไปคือ n" — attached to EVERY round while a plan is active.
+async function planStatusBlock(s){
+  if (!s.plan || !s.plan.rel) return '';
+  const body = String(await window.api.readNote(s.plan.rel) || '');
+  if (!body) return '';
+  const plan = window.CorePlan.parsePlan(body);
+  let next = 0;
+  plan.steps.forEach((st, i) => { if (!next && (st.status === 'todo' || st.status === 'doing')) next = i + 1; });
+  return 'แผนงานที่กำลังทำ (ไฟล์ ' + s.plan.rel + ' — ไฟล์นี้คือสถานะจริง):\n' + body + '\nขั้นถัดไปคือ ขั้นที่ ' + next + '\n';
+}
+
+async function planRoundPrompt(s, instruction){
+  const st = await planStatusBlock(s);
+  return st + instruction + '\n' +
+    'ทำตามแผนทีละขั้น: เมื่อขั้นเสร็จให้พิมพ์ ===PLAN-STEP n=เลขขั้น status=done note=สรุปสั้น=== ทุกครั้ง · ติดขัดใช้ status=blocked พร้อมเหตุผลใน note= · เสร็จทุกขั้นพิมพ์ ===PLAN-DONE summary=สรุปงาน===\n' +
+    noteEditCapabilityPrompt() + pdfClipCapabilityPrompt() + kumikoToolsPrompt();
+}
+
+// Fire one continuation round of the plan loop (same engine plumbing as the tool loop).
+function firePlanRound(s, instruction){
+  planRoundPrompt(s, instruction).then((prompt) => {
+    s.messages.push({ role: 'ai', text: '', _acc: '', sources: [] });
+    s.running = true;
+    persistSessions(); renderTabs();
+    if (s.id === activeId) renderChat();
+    window.api.runEngine({ override: { sel: s.engineSel, model: s.modelSel }, prompt, runId: s.id, images: [] });
+  }).catch(() => {});
+}
+
+// Called from onEngineDone after every finished round while a plan is ACTIVE. Fires the next
+// round, or stops the loop: finished plan → green bar; blocked step → card asks the user;
+// stalled round (no PLAN-STEP progress, past the free rounds) → pause + system-ish line.
+async function planContinueRound(s){
+  const CP = window.CorePlan;
+  if (!CP || !s.plan || !s.plan.active) return false;
+  const body = String(await window.api.readNote(s.plan.rel) || '');
+  if (!body) {   // the plan note was deleted/trashed — the plan is over, drop the state
+    s.plan = null;
+    persistSessions(); renderHead(); renderPlanRunCard();
+    return false;
+  }
+  const prog = CP.planProgress(CP.parsePlan(body));
+  if (prog.total && prog.done + prog.blocked >= prog.total) {
+    s.plan.active = false;
+    s.plan.finished = s.plan.finished || t('เสร็จตามแผน');
+    persistSessions(); renderHead(); renderPlanRunCard();
+    return false;
+  }
+  if (prog.blocked) { renderPlanRunCard(); return false; }   // blocked → the card asks, no auto-continue
+  if (!CP.planAllowContinue({ round: s._toolRounds || 0, cap: CP.PLAN_ROUND_CAP, progressed: s._lastRoundProgressed })) {
+    s.plan.active = false;   // stall cut: the file stays; resume by typing or ▶ ทำต่อ
+    s.messages.push({ role: 'ai', text: t('แผนหยุดชั่วคราว: รอบล่าสุดไม่มีความคืบหน้า — พิมพ์สั่งต่อหรือปรับแผนได้') });
+    persistSessions(); renderHead();
+    if (s.id === activeId) renderChat(); else renderPlanRunCard();
+    return false;
+  }
+  s._toolRounds = (s._toolRounds || 0) + 1;
+  firePlanRound(s, t('ทำขั้นถัดไปตามแผนต่อ'));
+  return true;
+}
+
+// PLAN-STEP / PLAN-DONE executor: fold the status lines into the plan note (applyStepUpdate
+// is pure + identity-returns on bad input, so malformed lines simply no-op), write back, then
+// the card + chip re-render from the file.
+async function applyPlanVerbs(s, acts){
+  const CP = window.CorePlan; if (!CP || !s.plan || !s.plan.rel) return;
+  const body = String(await window.api.readNote(s.plan.rel) || '');
+  if (!body) return;
+  let plan = CP.parsePlan(body);
+  for (const st of (acts.planSteps || []).slice(0, 10)) plan = CP.applyStepUpdate(plan, st.n, st.status, st.note);
+  const md = CP.serializePlan(plan);
+  if (md !== body) { try { await window.api.saveNote(s.plan.rel, md); } catch (_) {} }
+  if (acts.planDone) {
+    s.plan.active = false;
+    s.plan.finished = (acts.planDone.summary || t('เสร็จตามแผน')).slice(0, 300);
+  }
+  persistSessions();
+  renderPlanRunCard();
+  renderHead();
+}
+
+// Stage-1 proposal card (dashed indigo, mock): the steps as read-only list + ▶ / ✎ / ยกเลิก.
+// Hangs off the AI bubble (m.planProposal) and is consumed by ▶ or ยกเลิก; ✎ keeps it so the
+// user can still press ▶ after hand-editing the created file.
+function planProposalCard(bubble, m, s){
+  const p = m.planProposal; if (!p || !window.CorePlan) return;
+  const card = document.createElement('div'); card.className = 'plan-card plan-prop';
+  const hd = document.createElement('div'); hd.className = 'plan-head';
+  hd.textContent = '📋 ' + t('แผนงานที่เสนอ') + (p.title ? ' — ' + p.title : '');
+  card.appendChild(hd);
+  const ol = document.createElement('div'); ol.className = 'plan-steps';
+  (p.steps || []).forEach((st, i) => {
+    const r = document.createElement('div'); r.className = 'plan-step todo';
+    r.textContent = (i + 1) + '. ' + st;
+    ol.appendChild(r);
+  });
+  card.appendChild(ol);
+  const acts = document.createElement('div'); acts.className = 'plan-acts';
+  const mk = (label, cls) => { const b = document.createElement('button'); b.type = 'button'; b.className = cls; b.textContent = label; return b; };
+  const go = mk(t('▶ เริ่มตามแผน'), 'plan-go');
+  const ed = mk(t('✎ แก้แผนก่อน'), 'plan-edt');
+  const no = mk(t('ยกเลิก'), 'plan-skip');
+  go.onclick = async () => {
+    go.disabled = true;
+    try {
+      const rel = await ensurePlanNote(p.title, p.steps);
+      s.plan = { rel, title: p.title || '', active: true, t0: Date.now() };
+      delete m.planProposal;   // consumed
+      s._toolRounds = 0; s._lastRoundProgressed = true;
+      persistSessions(); renderTabs(); renderHead(); renderChat();
+      firePlanRound(s, t('เริ่มทำตามแผนในไฟล์ ') + s.plan.rel + t(' จากขั้นที่ 1'));
+    } catch (_) { go.disabled = false; }
+  };
+  ed.onclick = () => { ensurePlanNote(p.title, p.steps).then((rel) => openNote(rel)).catch(() => {}); };   // edit by hand — NOT active
+  no.onclick = () => { delete m.planProposal; persistSessions(); renderChat(); };
+  acts.appendChild(go); acts.appendChild(ed); acts.appendChild(no);
+  card.appendChild(acts);
+  bubble.appendChild(card);
+}
+
+// The ONE run-status card (mock stages 2-3): pinned at the top of #chatMessages as a
+// separate element (never a history message), re-rendered from the plan file after every
+// round/step/skip. Shows while the session HAS a plan: running / paused / blocked / finished.
+let __planCardSeq = 0;
+async function renderPlanRunCard(){
+  const box = document.getElementById('chatMessages');
+  const old = document.getElementById('planRunCard'); if (old) old.remove();
+  const s = (typeof activeSession === 'function') ? activeSession() : null;
+  if (!box || !s || !s.plan || !s.plan.rel || !window.CorePlan) return;
+  const seq = ++__planCardSeq;
+  const body = String(await window.api.readNote(s.plan.rel) || '');
+  if (seq !== __planCardSeq) return;   // a newer render superseded this one mid-read
+  const plan = window.CorePlan.parsePlan(body);
+  const prog = window.CorePlan.planProgress(plan);
+  s.plan._prog = { done: prog.done, total: prog.total };
+  const chip = document.getElementById('shPlanChip');
+  if (chip) chip.textContent = '📋 ' + (prog.total ? prog.done + '/' + prog.total : '…');
+  const card = document.createElement('div'); card.id = 'planRunCard'; card.className = 'plan-card plan-run';
+  const mk = (label, cls) => { const b = document.createElement('button'); b.type = 'button'; b.className = cls; b.textContent = label; return b; };
+  // head: title + live count + start time (เวลาเริ่ม, mock)
+  const hd = document.createElement('div'); hd.className = 'plan-head';
+  const ht = document.createElement('span'); ht.className = 'plan-title'; ht.textContent = '📋 ' + (s.plan.title || plan.title || t('แผนงาน'));
+  const hc = document.createElement('span'); hc.className = 'plan-count'; hc.textContent = prog.done + '/' + prog.total;
+  hd.appendChild(ht); hd.appendChild(hc);
+  if (s.plan.t0) { const hm = document.createElement('span'); hm.className = 'plan-t0'; hm.textContent = t('เริ่ม') + ' ' + new Date(s.plan.t0).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); hd.appendChild(hm); }
+  card.appendChild(hd);
+  // progress bar (done share of total)
+  const bar = document.createElement('div'); bar.className = 'plan-bar';
+  const fill = document.createElement('i'); fill.style.width = (prog.total ? Math.round(prog.done / prog.total * 100) : 0) + '%';
+  bar.appendChild(fill); card.appendChild(bar);
+  // steps ✓ / doing+spinner / ✗+note+buttons / ○
+  const ol = document.createElement('div'); ol.className = 'plan-steps';
+  plan.steps.forEach((st, i) => {
+    const n = i + 1;
+    const r = document.createElement('div'); r.className = 'plan-step ' + st.status;
+    if (st.status === 'done') { r.textContent = '✓ ' + st.text + (st.note ? ' — ' + st.note : ''); }
+    else if (st.status === 'doing') {
+      const sp = document.createElement('i'); sp.className = 'spin-kaza sm';
+      r.appendChild(sp); r.appendChild(document.createTextNode(' ' + st.text));
+    }
+    else if (st.status === 'blocked') {
+      r.appendChild(document.createTextNode('✗ ' + st.text + (st.note ? ' — ' + st.note : '')));
+      const row = document.createElement('span'); row.className = 'plan-step-acts';
+      const sk = mk(t('ข้ามขั้นนี้ไปต่อ'), 'plan-skip');
+      const end = mk(t('จบงานตรงนี้'), 'plan-edt');
+      sk.onclick = () => planSkipStep(s, n);
+      end.onclick = () => { s.plan = null; persistSessions(); renderHead(); renderPlanRunCard(); };
+      row.appendChild(sk); row.appendChild(end);
+      r.appendChild(row);
+    }
+    else { r.textContent = '○ ' + st.text; }
+    ol.appendChild(r);
+  });
+  card.appendChild(ol);
+  // state row: finished → green bar; running → ⏸ + ข้ามขั้นนี้; paused → ▶ ทำต่อ
+  const settled = prog.total && prog.done + prog.blocked >= prog.total;
+  if (s.plan.finished || settled) {
+    const fin = document.createElement('div'); fin.className = 'plan-donebar';
+    fin.textContent = '✓ ' + t('เสร็จตามแผน') + (s.plan.finished && s.plan.finished !== t('เสร็จตามแผน') ? ' — ' + s.plan.finished : '');
+    card.appendChild(fin);
+    const acts = document.createElement('div'); acts.className = 'plan-acts';
+    const x = mk('×', 'plan-skip'); x.title = t('ปิดการ์ดแผน');
+    x.onclick = () => { s.plan = null; persistSessions(); renderHead(); renderPlanRunCard(); };
+    acts.appendChild(x); card.appendChild(acts);
+  } else {
+    const acts = document.createElement('div'); acts.className = 'plan-acts';
+    if (s.plan.active) {
+      const pause = mk(t('⏸ หยุดชั่วคราว'), 'plan-edt');
+      pause.onclick = () => { s.plan.active = false; persistSessions(); renderHead(); renderPlanRunCard(); };
+      acts.appendChild(pause);
+      if (prog.doing) {
+        const skip = mk(t('ข้ามขั้นนี้'), 'plan-skip');
+        skip.onclick = () => planSkipStep(s, prog.doing);
+        acts.appendChild(skip);
+      }
+    } else {
+      const resume = mk(t('▶ ทำต่อ'), 'plan-go');
+      resume.onclick = () => {
+        if (isRunning(s.id)) return;
+        s.plan.active = true; s._toolRounds = 0; s._lastRoundProgressed = true;
+        persistSessions(); renderHead(); renderPlanRunCard();
+        firePlanRound(s, t('ทำขั้นถัดไปตามแผนต่อ'));
+      };
+      acts.appendChild(resume);
+    }
+    card.appendChild(acts);
+  }
+  box.insertBefore(card, box.firstChild);
+}
+
+// Skip: mark the step done ("ข้ามโดยผู้ใช้"), write the file, fire the next round. A user
+// press is a fresh budget — the stall gate shouldn't kill a round the user explicitly asked for.
+async function planSkipStep(s, n){
+  if (!s.plan || !s.plan.rel || !window.CorePlan) return;
+  const body = String(await window.api.readNote(s.plan.rel) || '');
+  if (!body) return;
+  const plan = window.CorePlan.applyStepUpdate(window.CorePlan.parsePlan(body), n, 'done', t('ข้ามโดยผู้ใช้'));
+  try { await window.api.saveNote(s.plan.rel, window.CorePlan.serializePlan(plan)); } catch (_) {}
+  s.plan.active = true;
+  await renderPlanRunCard(); renderHead();
+  if (!isRunning(s.id)) {
+    s._toolRounds = 0; s._lastRoundProgressed = true;
+    firePlanRound(s, t('ผู้ใช้ข้ามขั้น ') + n + t(' — ทำขั้นถัดไปตามแผนต่อ'));
+  }
 }
 
 // ===KUMIKO-RULE=== executor: show a confirm card above the chat input — the user accepts or
@@ -3070,7 +3330,11 @@ async function sendChat(){
   const mem = (typeof kumikoMemoryPrompt === 'function') ? await kumikoMemoryPrompt(msg) : '';
   const reviewFb = reviewOutcomeLine();
   s._toolRounds = 0;   // fresh user message → fresh read/search budget
-  const finalPrompt = context
+  // an ACTIVE or PAUSED plan attaches its live status to typed messages too — the user
+  // steers mid-plan, and "ทำต่อ"/"ปรับแผน" after a pause must reach an AI that knows the file
+  let planCtx = '';
+  if (s.plan && s.plan.rel && !s.plan.finished && typeof planStatusBlock === 'function') { try { planCtx = await planStatusBlock(s); } catch (_) {} }
+  const finalPrompt = planCtx + (context
     ? ('คำถามล่าสุดของผู้ใช้: ' + msg + '\n\n' +
        rules + mem + reviewFb +
        'ด้านล่างคือบริบทจากโน้ตของผู้ใช้ เรียงตามความสำคัญ (บนสุด = เอกสารที่เปิดอยู่ — ยึดเป็นหลัก)\n' +
@@ -3079,7 +3343,7 @@ async function sendChat(){
        context + '\n\n' +
        (history ? 'บทสนทนาก่อนหน้า:\n' + history + '\n\n' : '') +
        'ตอบคำถามนี้: ' + msg)
-    : (rules + mem + reviewFb + noteEditCapabilityPrompt() + pdfClipCapabilityPrompt() + kumikoLearnPrompt() + kumikoMemoryLearnPrompt() + kumikoToolsPrompt() + (history ? 'บทสนทนาก่อนหน้า:\n' + history + '\n\n' : '') + 'ผู้ใช้: ' + msg);
+    : (rules + mem + reviewFb + noteEditCapabilityPrompt() + pdfClipCapabilityPrompt() + kumikoLearnPrompt() + kumikoMemoryLearnPrompt() + kumikoToolsPrompt() + (history ? 'บทสนทนาก่อนหน้า:\n' + history + '\n\n' : '') + 'ผู้ใช้: ' + msg));
   beginAiTurn(msg || t('(ส่งภาพ)'), sources, images);
   window.api.runEngine({ override: { sel: s.engineSel, model: s.modelSel }, prompt: finalPrompt, runId: s.id, images: images.map((im) => im.uri) });
 }

@@ -314,7 +314,7 @@
   // PDF's capture target. Fix for "แนบรูปแล้วเข้าโน้ต DFD เสมอ".
   function stripNoteBlocks(text) {
     var s = String(text == null ? '' : text);
-    var re = /^[ \t]*===(?:UPDATED-NOTE|UPDATED-SECTION|NEW-NOTE|KUMIKO-RULE|REMEMBER)[^\n]*===[ \t]*$/m;
+    var re = /^[ \t]*===(?:UPDATED-NOTE|UPDATED-SECTION|NEW-NOTE|KUMIKO-RULE|KUMIKO-PLAN|REMEMBER)[^\n]*===[ \t]*$/m;
     var guard = 0;
     while (guard++ < 20) {
       var m = s.match(re);
@@ -335,8 +335,8 @@
     var s = String(text == null ? '' : text);
     var out = { reads: [], searches: [], renames: [], deletes: [], targets: [],
       listTags: false, notesByTag: [], setTags: [], addTags: [], removeTags: [], renameTags: [],
-      canvasList: false, canvasOps: [] };
-    var chat = s.replace(/^[ \t]*===(READ-NOTE|SEARCH|RENAME-NOTE|DELETE-NOTE|SET-CAPTURE-TARGET|LIST-TAGS|NOTES-BY-TAG|SET-TAGS|ADD-TAGS|REMOVE-TAGS|RENAME-TAG|CANVAS-LIST|CANVAS-BOARD|CANVAS-ADD|CANVAS-REMOVE|CANVAS-WIRE|CANVAS-UNWIRE|CANVAS-STICKY)(?: (.+?))?===[ \t]*$/gm, function (_, verb, arg) {
+      canvasList: false, canvasOps: [], planSteps: [], planDone: null };
+    var chat = s.replace(/^[ \t]*===(READ-NOTE|SEARCH|RENAME-NOTE|DELETE-NOTE|SET-CAPTURE-TARGET|LIST-TAGS|NOTES-BY-TAG|SET-TAGS|ADD-TAGS|REMOVE-TAGS|RENAME-TAG|CANVAS-LIST|CANVAS-BOARD|CANVAS-ADD|CANVAS-REMOVE|CANVAS-WIRE|CANVAS-UNWIRE|CANVAS-STICKY|PLAN-STEP|PLAN-DONE)(?: (.+?))?===[ \t]*$/gm, function (_, verb, arg) {
       arg = (arg || '').trim();
       var m;
       if (verb === 'READ-NOTE') { m = arg.match(/^name=(.+)$/); if (m) out.reads.push(m[1].trim()); }
@@ -369,6 +369,12 @@
       }
       else if (verb === 'CANVAS-UNWIRE') { m = arg.match(/^from=(.+?) to=(.+)$/); if (m) out.canvasOps.push({ op: 'unwire', from: m[1].trim(), to: m[2].trim() }); }
       else if (verb === 'CANVAS-STICKY') { m = arg.match(/^text=(.+)$/); if (m) out.canvasOps.push({ op: 'sticky', text: m[1].trim() }); }
+      // ---- plan verbs (mid-plan status lines; the plan card/file is the executor's side) ----
+      else if (verb === 'PLAN-STEP') {
+        m = arg.match(/^n=(\d+)(?: status=(done|doing|blocked))?(?: note=(.*))?$/);
+        if (m) out.planSteps.push({ n: parseInt(m[1], 10), status: m[2] || 'done', note: (m[3] || '').trim() });
+      }
+      else if (verb === 'PLAN-DONE') { m = arg.match(/^summary=(.*)$/); if (m) out.planDone = { summary: m[1].trim() }; }
       return '';
     }).replace(/\n{3,}/g, '\n\n').trim();
     out.reads = out.reads.slice(0, 3);
@@ -380,11 +386,13 @@
     out.setTags = out.setTags.slice(0, 5); out.addTags = out.addTags.slice(0, 5); out.removeTags = out.removeTags.slice(0, 5);
     out.renameTags = out.renameTags.slice(0, 2);
     out.canvasOps = out.canvasOps.slice(0, 20);
+    out.planSteps = out.planSteps.slice(0, 10);
     out.chat = chat;
     out.needsContinue = !!(out.reads.length || out.searches.length || out.listTags || out.notesByTag.length || out.canvasList);
     out.tagWrites = out.setTags.length + out.addTags.length + out.removeTags.length + out.renameTags.length;
     out.canvasWrites = out.canvasOps.length;
-    out.any = out.needsContinue || !!(out.renames.length || out.deletes.length || out.targets.length || out.tagWrites || out.canvasWrites);
+    out.planWrites = out.planSteps.length + (out.planDone ? 1 : 0);
+    out.any = out.needsContinue || !!(out.renames.length || out.deletes.length || out.targets.length || out.tagWrites || out.canvasWrites || out.planWrites);
     return out;
   }
 
@@ -458,6 +466,32 @@
       return '';
     });
     return { memories: memories, forgets: forgets, chat: s.replace(/\n{3,}/g, '\n\n').trim() };
+  }
+
+  // ===KUMIKO-PLAN title=…=== … ===END-NOTE=== — the AI PROPOSES a multi-step work plan
+  // (jobs touching many notes / >2 steps). Never auto-started: the executor shows a plan
+  // card and only the user's ▶ creates the plan note and starts the round loop.
+  // -> { plans: [{title, steps:[string]}] (max 1, array per convention), chat: block removed }.
+  function extractPlanProposals(text) {
+    var s = String(text == null ? '' : text);
+    var plans = [], guard = 0;
+    var re = /^[ \t]*===KUMIKO-PLAN(?:[ \t]+title=(.+?))?===[ \t]*\r?\n?/m;
+    while (guard++ < 3) {
+      var m = s.match(re);
+      if (!m) break;
+      var rest = s.slice(m.index + m[0].length);
+      var j = rest.indexOf(NOTE_CLOSE);
+      var body = j < 0 ? rest : rest.slice(0, j);   // no close yet -> take the remainder (same as rules)
+      var end = j < 0 ? s.length : m.index + m[0].length + j + NOTE_CLOSE.length;
+      var steps = [];
+      body.split('\n').forEach(function (ln) {
+        var sm = /^\s*-\s+(.+?)\s*$/.exec(ln);
+        if (sm) steps.push(sm[1].slice(0, 200));
+      });
+      if (steps.length) plans.push({ title: (m[1] || '').trim().slice(0, 120), steps: steps.slice(0, 30) });
+      s = s.slice(0, m.index) + s.slice(end);
+    }
+    return { plans: plans.slice(0, 1), chat: s.replace(/\n{3,}/g, '\n\n').trim() };
   }
 
   function extractPdfClips(text) {
@@ -544,6 +578,8 @@
     if (kr.rules.length) s = kr.chat + ' [เสนอกติกาการทำงาน ' + kr.rules.length + ' ข้อแล้ว]';
     var mm = extractMemories(s);
     if (mm.memories.length || mm.forgets.length) s = mm.chat + ' [เสนอความจำ ' + (mm.memories.length + mm.forgets.length) + ' ใบแล้ว]';
+    var pl = extractPlanProposals(s);
+    if (pl.plans.length) s = pl.chat + ' [เสนอแผนงาน "' + pl.plans[0].title + '" แล้ว]';
     var ac = extractActions(s);
     if (ac.any) s = ac.chat + ' [ใช้เครื่องมือ' + (ac.reads.length ? ' อ่าน:' + ac.reads.join(',') : '') + (ac.searches.length ? ' ค้น:' + ac.searches.join(',') : '') + (ac.renames.length || ac.deletes.length || ac.targets.length ? ' จัดการไฟล์' : '') + ' แล้ว]';
     s = s.trim();
@@ -552,6 +588,6 @@
   }
   return {
     mdToHtml: mdToHtml, _mdInline: _mdInline, _mdEsc: _mdEsc, stripMdFence: stripMdFence,
-    extractNoteUpdate: extractNoteUpdate, extractPdfClips: extractPdfClips, extractNewNotes: extractNewNotes, extractSectionUpdates: extractSectionUpdates, replaceSection: replaceSection, stripNoteBlocks: stripNoteBlocks, extractKumikoRules: extractKumikoRules, extractMemories: extractMemories, extractActions: extractActions, ensureSlideClips: ensureSlideClips, linkifyRefs: linkifyRefs, resolveRefTarget: resolveRefTarget, historyText: historyText, NOTE_OPEN: NOTE_OPEN, NOTE_CLOSE: NOTE_CLOSE
+    extractNoteUpdate: extractNoteUpdate, extractPdfClips: extractPdfClips, extractNewNotes: extractNewNotes, extractSectionUpdates: extractSectionUpdates, replaceSection: replaceSection, stripNoteBlocks: stripNoteBlocks, extractKumikoRules: extractKumikoRules, extractMemories: extractMemories, extractPlanProposals: extractPlanProposals, extractActions: extractActions, ensureSlideClips: ensureSlideClips, linkifyRefs: linkifyRefs, resolveRefTarget: resolveRefTarget, historyText: historyText, NOTE_OPEN: NOTE_OPEN, NOTE_CLOSE: NOTE_CLOSE
   };
 });
