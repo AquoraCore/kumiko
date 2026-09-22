@@ -129,3 +129,52 @@ describe('firstFit', () => {
     expect(G.firstFit([], { w: 10, h: 1 }, 8)).toEqual({ c: 0, r: 0 });
   });
 });
+
+describe('adoptFreeCards (grid always-on)', () => {
+  it('happy: free cards keep their approximate position — px -> cell, span from width, h min 1', () => {
+    const p = G.cellToPx({ c: 2, r: 0 }, { w: 1, h: 1 });
+    const m = G.adoptFreeCards([
+      { id: 'a', x: p.x, y: p.y, w: 84 },            // lands on c:2 r:0
+      { id: 'b', x: 20, y: 20 + 98, w: 84 + 98 },    // c:0 r:1, 2 cells wide
+    ]);
+    expect(m.a).toEqual({ at: { c: 2, r: 0 }, span: { w: 1, h: 1 } });
+    expect(m.b).toEqual({ at: { c: 0, r: 1 }, span: { w: 2, h: 1 } });
+  });
+  it('collision with a PLACED card -> free takes the next firstFit slot', () => {
+    const m = G.adoptFreeCards([
+      { id: 'f', x: 0, y: 0, w: 84, at: { c: 0, r: 0 }, span: { w: 2, h: 1 } },
+      { id: 'q', x: 20, y: 20, w: 84 },               // natural (0,0) is taken (2 wide)
+    ]);
+    expect(m.q.at).toEqual({ c: 2, r: 0 });
+    expect(m.f).toBeUndefined();                      // placed cards are never re-adopted
+  });
+  it('collision BETWEEN adoptees -> later card (sorted y then x) is the one that moves', () => {
+    const m = G.adoptFreeCards([
+      { id: 'late', x: 20, y: 30, w: 84 },            // bigger y -> processed later
+      { id: 'early', x: 25, y: 20, w: 84 },           // smaller y -> keeps the natural cell
+    ]);
+    expect(m.early.at).toEqual({ c: 0, r: 0 });
+    expect(m.late.at).toEqual({ c: 1, r: 0 });        // firstFit beside it
+  });
+  it('edge: negative px clamps to 0,0 · no free cards -> {} · input NEVER mutated', () => {
+    const cards = [
+      { id: 'n', x: -500, y: -500, w: 84 },
+      { id: 'z', x: 9, y: 9, w: 84, at: { c: 3, r: 3 }, span: { w: 1, h: 1 } },
+    ];
+    const snap = JSON.stringify(cards);
+    const m = G.adoptFreeCards(cards);
+    expect(m.n.at).toEqual({ c: 0, r: 0 });
+    expect(m.z).toBeUndefined();
+    expect(JSON.stringify(cards)).toBe(snap);
+    expect(G.adoptFreeCards([cards[1]])).toEqual({});
+    expect(G.adoptFreeCards([])).toEqual({});
+  });
+});
+
+describe('bgFor (world background tracks the view)', () => {
+  it('dots anchored at the cell origin (PAD + tx/ty), one PITCH tile scaled by view.scale', () => {
+    expect(G.bgFor({ tx: 0, ty: 0, scale: 1 })).toEqual({ position: '20px 20px', size: '98px 98px' });
+    expect(G.bgFor({ tx: -120.5, ty: 40, scale: 2 })).toEqual({ position: '-100.5px 60px', size: '196px 196px' });
+    expect(G.bgFor(null)).toEqual({ position: '20px 20px', size: '98px 98px' });   // safe defaults
+  });
+});

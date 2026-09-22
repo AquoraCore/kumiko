@@ -116,8 +116,8 @@ function kvBuild(host) {
   }, { passive: false });
 
   document.getElementById('kvRz').onclick = () => { const st = kvState(); st.view = { tx: 40, ty: 30, scale: 1 }; kvApplyView(); kvSave(); };
-  // ⊞ grid arrange (G2): free cards get pulled onto the grid HERE — the only moment rule 5
-  // allows it — then everything with at/span settles on the square grid. ☉ hub unchanged.
+  // ⊞ grid arrange: grid is always-on now (adopt at paint + birth), so this is just a
+  // force re-settle. ☉ hub maps its result back onto cells (see kvHubArrange).
   document.getElementById('kvArr').onclick = () => { kvGridSuckIn(null); kvArrangeSettled(null, 'grid'); };
   document.getElementById('kvHub').onclick = () => kvArrangeSettled(null, true);
   document.getElementById('kvRenB').onclick = () => kvRenameBoard(KV.cur);
@@ -148,8 +148,15 @@ function kvBuild(host) {
 }
 
 function kvApplyView() {
-  const st = kvState(), pz = document.getElementById('kvPz');
+  const st = kvState(), pz = document.getElementById('kvPz'), world = document.getElementById('kvWorld');
   if (pz) pz.style.transform = 'translate(' + st.view.tx + 'px,' + st.view.ty + 'px) scale(' + st.view.scale + ')';
+  // background follows the pan/zoom (user 2026-09-22): the 1-PITCH dot tile is anchored to
+  // the cell origin and scaled with the view, so dots always sit on real cell corners
+  if (world && window.CoreCanvasGrid) {
+    const bg = window.CoreCanvasGrid.bgFor(st.view);
+    world.style.backgroundPosition = bg.position;
+    world.style.backgroundSize = bg.size;
+  }
 }
 
 function kvSyncBoards() {
@@ -200,13 +207,18 @@ function kvSyncCnt() {
 async function kvPaintBoard() {
   const st = kvState(), pz = document.getElementById('kvPz');
   if (!pz) return;
+  // grid ALWAYS-ON (user 2026-09-22): a board with any free card adopts it at paint time —
+  // opening a legacy board = it enters the grid immediately, no ⊞ needed. Adopt happens
+  // ONLY here, so boards the user never opened are never written (migration rule).
+  const adopting = st.cards.some((c) => !c.at);
   [...pz.querySelectorAll('.kv-card')].forEach((n) => n.remove());
   for (const c of st.cards) if (c.type === 'note') await kvSectionsOf(c.rel);   // warm cache for sync render
   st.cards.forEach((c) => kvRenderCard(c));
   kvApplyView(); kvSyncBoards(); kvSyncCnt(); kvDrawWires();
+  if (adopting) kvGridAdopt();
   // pending arrange flag (AI CANVAS-ARRANGE, or auto after place/add): the board is visible
   // now, so run the mode and clear it — the settle loop re-checks visibility itself
-  if (st.needsArrange) {
+  if (st.needsArrange || adopting) {
     const host = document.getElementById('canvasView');
     if (host && host.offsetParent) {
       const mode = st.needsArrange === 'hub' ? 'hub' : 'grid';
@@ -217,9 +229,18 @@ async function kvPaintBoard() {
 }
 
 function kvAddCard(card) {
-  const st = kvState();
+  const st = kvState(), G = window.CoreCanvasGrid;
+  // grid always-on: every new card is BORN on the grid — firstFit from the current board,
+  // px geometry straight from the cell, then one settle stretch. No free cards remain.
+  if (G && !card.at) {
+    card.span = G.spanFromPx(card.w, 180);
+    card.at = G.firstFit(st.cards.filter((o) => o.at && o.span).map((o) => ({ c: o.at.c, r: o.at.r, w: o.span.w, h: o.span.h })), card.span, 8);
+    const p = G.cellToPx(card.at, card.span);
+    card.x = p.x; card.y = p.y; card.w = p.w;
+  }
   st.cards.push(card);
   kvRenderCard(card); kvSyncCnt(); kvDrawWires(); kvSave();
+  kvArrangeSettled(null, 'grid');
 }
 
 function kvRemoveCard(card) {
@@ -251,16 +272,16 @@ function kvRenderCard(c) {
     if (e.target.classList.contains('kv-x')) return;
     e.preventDefault(); e.stopPropagation();
     const st = kvState(), sx = e.clientX, sy = e.clientY, ox = c.x, oy = c.y;
-    const snap = !!(c.at || kvGridUsed()), world = document.getElementById('kvWorld');
-    if (snap && world) world.classList.add('kv-griding');   // faint grid = snapping is live
+    const world = document.getElementById('kvWorld');
+    if (world) world.classList.add('kv-griding');   // faint grid = snapping is live
     const mm = (ev) => {
       c.x = ox + (ev.clientX - sx) / st.view.scale; c.y = oy + (ev.clientY - sy) / st.view.scale;
       node.style.left = c.x + 'px'; node.style.top = c.y + 'px'; kvDrawWires();
     };
     const mu = () => {
       removeEventListener('mousemove', mm, true); removeEventListener('mouseup', mu, true);
-      if (snap && world) world.classList.remove('kv-griding');
-      if (snap) kvSnapCard(c);   // px -> nearest cell -> px (rule 5)
+      if (world) world.classList.remove('kv-griding');
+      kvSnapCard(c);   // px -> nearest cell -> px (always-on grid)
       kvSave();
     };
     addEventListener('mousemove', mm, true); addEventListener('mouseup', mu, true);
@@ -319,16 +340,16 @@ function kvRenderCard(c) {
   rs.onmousedown = (e) => {
     e.preventDefault(); e.stopPropagation();
     const st = kvState(), sx = e.clientX, ow = c.w;
-    const snap = !!(c.at || kvGridUsed()), world = document.getElementById('kvWorld');
-    if (snap && world) world.classList.add('kv-griding');
+    const world = document.getElementById('kvWorld');
+    if (world) world.classList.add('kv-griding');
     const mm = (ev) => {
       c.w = Math.min(KV_MAX_W, Math.max(KV_MIN_W, ow + (ev.clientX - sx) / st.view.scale));
       node.style.width = c.w + 'px'; node.classList.toggle('kv-wide', c.w >= KV_BIG_W); kvDrawWires();
     };
     const mu = () => {
       removeEventListener('mousemove', mm, true); removeEventListener('mouseup', mu, true);
-      if (snap && world) world.classList.remove('kv-griding');
-      if (snap) kvSnapCard(c);   // width px -> nearest cell span -> px (rule 5)
+      if (world) world.classList.remove('kv-griding');
+      kvSnapCard(c);   // width px -> nearest cell span -> px (always-on grid)
       kvSave();
     };
     addEventListener('mousemove', mm, true); addEventListener('mouseup', mu, true);
@@ -488,6 +509,16 @@ function kvHubArrange() {
     if (leftH <= rightH) { c.x = hub.x - GAP - c.w; c.y = 60 + leftH; leftH += h + VGAP; }
     else { c.x = hub.x + hub.w + GAP; c.y = 60 + rightH; rightH += h + VGAP; }
   }
+  // grid always-on: map the hub result back to CELLS — pxToCell per card, collisions
+  // resolved by firstFit in y,x order (same machinery as adopt) — then a full grid layout.
+  // The hub still FEELS centred, but every card lands on a real cell.
+  const G = window.CoreCanvasGrid;
+  if (G) {
+    const got = G.adoptFreeCards(st.cards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w })));
+    for (const c of st.cards) { const a = got[c.id]; if (a) { c.at = a.at; c.span = a.span; } }
+    kvGridArrange();
+    return;
+  }
   st.cards.forEach((c) => { const n = kvCardEl(c.id); if (n) { n.style.left = c.x + 'px'; n.style.top = c.y + 'px'; } });
   kvDrawWires(); kvSave();
 }
@@ -497,7 +528,21 @@ function kvHubArrange() {
 // pure math. This side measures REAL heights after render and writes results back into the
 // normal x/y/w state, so wires/zoom keep working unchanged.
 const kvHOf = (c) => { const n = kvCardEl(c.id); return n ? n.offsetHeight : 0; };
-const kvGridUsed = () => kvState().cards.some((c) => c.at);
+
+// Always-on adopt (pure core fn): every free card gets at/span AT its current position.
+// Called from kvPaintBoard only — a board is migrated the first time it is OPENED, never
+// from a background write (migration rule).
+function kvGridAdopt() {
+  const st = kvState(), G = window.CoreCanvasGrid;
+  if (!G) return;
+  const got = G.adoptFreeCards(st.cards);
+  for (const c of st.cards) {
+    const a = got[c.id];
+    if (a) { c.at = a.at; c.span = a.span; }
+    else if (c.at && !c.span) c.span = G.spanFromPx(c.w, 0);   // stray at without span
+  }
+  kvSave();
+}
 
 // Give free cards an at/span via firstFit. ids=null -> ALL free cards (the ⊞ button — the
 // ONE moment independent cards join the grid per rule 5); an id list only sucks those in.

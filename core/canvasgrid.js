@@ -91,9 +91,48 @@
     return { c: 0, r: 0 };   // ponytail: 500 rows of 8 cols is ~3400 cells; beyond that just stack at origin
   }
 
+  // Grid always-on (user 2026-09-22): free cards (no `at`) join the grid AT their current
+  // position — px -> nearest cell, span from the px width, h minimum 1 (layout stretches to
+  // the real height later). A natural cell colliding with a placed card or an earlier adoptee
+  // hands the LATER card (sorted by y then x) to firstFit. Returns map id -> {at, span} for
+  // the ADOPTED cards only; never mutates. Passing no `at` for everyone = pure px->cell map
+  // (the hub layout reuses it to land its result on cells).
+  function adoptFreeCards(cards) {
+    var occ = [], free = [];
+    (Array.isArray(cards) ? cards : []).forEach(function (c) {
+      if (!c) return;
+      if (c.at) {
+        var sp = c.span || spanFromPx(c.w, 0);
+        occ.push({ c: Math.max(0, Math.floor(+c.at.c || 0)), r: Math.max(0, Math.floor(+c.at.r || 0)),
+          w: Math.max(1, Math.floor(+sp.w || 1)), h: Math.max(1, Math.floor(+sp.h || 1)) });
+      } else free.push(c);
+    });
+    var out = {};
+    free.slice().sort(function (a, b) { return ((+a.y || 0) - (+b.y || 0)) || ((+a.x || 0) - (+b.x || 0)); })
+      .forEach(function (c) {
+        var span = { w: spanFromPx(c.w, 0).w, h: 1 };
+        var at = pxToCell(+c.x || 0, +c.y || 0);
+        var box = { c: at.c, r: at.r, w: span.w, h: span.h };
+        var hit = false;
+        for (var j = 0; j < occ.length; j++) if (rectsOverlap(box, occ[j])) { hit = true; break; }
+        if (hit) at = firstFit(occ, span, 8);
+        out[c.id] = { at: { c: at.c, r: at.r }, span: { w: span.w, h: span.h } };
+        occ.push({ c: at.c, r: at.r, w: span.w, h: span.h });
+      });
+    return out;
+  }
+
+  // World background follows the pan/zoom view: the 1-PITCH dot tile is positioned so dots
+  // sit on REAL cell corners (PAD origin) and scaled by the view — pure string math.
+  function bgFor(view) {
+    var tx = +((view && view.tx) || 0), ty = +((view && view.ty) || 0), s = +((view && view.scale) || 1);
+    return { position: (PAD + tx) + 'px ' + (PAD + ty) + 'px', size: (PITCH * s) + 'px ' + (PITCH * s) + 'px' };
+  }
+
   return {
     CELL: CELL, GAP: GAP, PAD: PAD, PITCH: PITCH,
     cellToPx: cellToPx, pxToCell: pxToCell, spanFromPx: spanFromPx, rowsNeeded: rowsNeeded,
     spanToPx: spanToPx, layoutGrid: layoutGrid, firstFit: firstFit,
+    adoptFreeCards: adoptFreeCards, bgFor: bgFor,
   };
 });
