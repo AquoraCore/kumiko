@@ -496,11 +496,104 @@ function _waitClockRefresh(el, m){
   const sec = Math.max(0, Math.round((Date.now() - (m._t0 || Date.now())) / 1000));
   c.textContent = sec >= 5 ? (Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0')) : '';
 }
+// ---- W2 live activity console: spinner + the 3 most recent activity rows at the end of
+// the live bubble, so a long turn never reads as frozen (verbs/note blocks are stripped
+// from the visible text). The console node is built ONCE per bubble and only text nodes
+// update afterwards — rebuilding innerHTML per token restarts the CSS spin (buildWaitInto
+// lesson, log 2026-08-25). liveActivity() itself is throttled to 400ms, not per token.
+function _actMs(sec){ return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0'); }
+function _liveAct(m){
+  const now = Date.now();
+  if (!m._actAt || now - m._actAt >= 400) {
+    m._actAt = now;
+    m._act = (window.CoreMarkdown && window.CoreMarkdown.liveActivity)
+      ? window.CoreMarkdown.liveActivity(m._acc || m.text || '', t) : { rows: [], writing: null };
+  }
+  return m._act || { rows: [], writing: null };
+}
+function _actClock(el, m){
+  const c = el.querySelector('.act-con .clock'); if (!c) return;
+  c.textContent = _actMs(Math.max(0, Math.round((Date.now() - (m._t0 || Date.now())) / 1000)));
+}
+function _actRowsSync(list, show, m, sec){
+  if (!m._actSeen) m._actSeen = {};
+  while (list.children.length > show.length) list.lastChild.remove();
+  show.forEach((r, i) => {
+    const k = r.k || (r.ic + ':' + r.label);
+    if (!m._actSeen[k]) m._actSeen[k] = sec;
+    let div = list.children[i];
+    if (!div) { div = document.createElement('div'); list.appendChild(div); }
+    const cls = 'act-row' + (i === show.length - 1 ? ' cur' : '') + (r.ghost ? ' ghost' : '');
+    if (div.dataset.k !== k) {
+      div.dataset.k = k; div.className = cls; div.textContent = '';
+      const ic = document.createElement('span'); ic.className = 'ic'; ic.textContent = r.ic;
+      const lb = document.createElement('span'); lb.className = 'lbl';
+      const ts = document.createElement('span'); ts.className = 'ts';
+      div.appendChild(ic); div.appendChild(lb); div.appendChild(ts);
+    } else { div.className = cls; }
+    div.querySelector('.lbl').textContent = r.label;
+    div.querySelector('.ts').textContent = _actMs(m._actSeen[k]);
+  });
+}
+function _actConsole(el, m, act, thinkOnly){
+  if (!el.querySelector('.act-con')) {
+    const con = document.createElement('div'); con.className = 'act-con';
+    const head = document.createElement('div'); head.className = 'act-head';
+    const kz = document.createElement('i'); kz.className = 'spin-kaza lg';
+    const lbl = document.createElement('span'); lbl.className = 'act-lbl';
+    const ck = document.createElement('span'); ck.className = 'clock';
+    head.appendChild(kz); head.appendChild(lbl); head.appendChild(ck);
+    con.appendChild(head);
+    const list = document.createElement('div'); list.className = 'act-rows';
+    con.appendChild(list);
+    el.appendChild(con);
+    if (!m._t0) m._t0 = Date.now();
+    // clock heartbeat — same pattern as the wait state; self-clears when the console goes
+    const iv = setInterval(() => {
+      if (!document.contains(el) || !el.querySelector('.act-con')) { clearInterval(iv); return; }
+      _actClock(el, m);
+    }, 1000);
+  }
+  _actClock(el, m);
+  // head status: reasoning > plan step > writing > generic work
+  const s = (typeof activeSession === 'function') ? activeSession() : null;
+  const p = (s && s.plan && s.plan.active) ? s.plan._prog : null;
+  el.querySelector('.act-lbl').textContent = thinkOnly ? t('กำลังคิด…')
+    : p ? t('กำลังทำขั้น') + ' ' + (p.total ? p.done : '…') + '/' + (p.total || '…') + ' ' + t('ของแผน')
+    : act.writing ? t('กำลังเขียนโน้ต…') : t('กำลังทำงาน…');
+  // rows: history dimmed, the bottom row (.cur) is the live write or the newest row
+  const rows = act.rows.slice();
+  if (thinkOnly) {
+    const tail = String(m.think || '').trim().split('\n').filter((l) => l.trim()).pop() || '';
+    rows.push({ k: 'ghost', ic: '💭', label: tail.length > 60 ? '…' + tail.slice(-59) : tail, ghost: true });
+  } else if (act.writing) {
+    rows.push({ k: 'writing', ic: '✍️', label: t('กำลังเขียนโน้ต') + (act.writing.name ? ' "' + act.writing.name + '"' : '') +
+      ' — ' + act.writing.chars + ' ' + t('ตัวอักษร') + '…' });
+  }
+  _actRowsSync(el.querySelector('.act-rows'), rows.slice(-3), m,
+    Math.max(0, Math.round((Date.now() - (m._t0 || Date.now())) / 1000)));
+}
 function renderLive(m, running){
   if (!liveBubble) return;
-  const txt = (m.text && !/^⚠/.test(m.text)) ? _linkify(mdToHtml(chatDisplayText(m.text, running))) : (m.text ? '' : '');
-  if (!txt && !m.text) { buildWaitInto(liveBubble, m); return; }
+  const txt = (m.text && !/^⚠/.test(m.text)) ? _linkify(mdToHtml(chatDisplayText(m.text, running))) : '';
+  const thinkOnly = !m.text && !!(m.think && m.think.trim());
+  const act = running ? _liveAct(m) : { rows: [], writing: null };
+  // "nothing at all yet": no text, no thinking, no activity -> keep the wait state
+  if (!txt && !thinkOnly && !act.rows.length && !act.writing) { buildWaitInto(liveBubble, m); return; }
   liveBubble.classList.remove('m-wait');
+  if (running) {
+    // console layout: .act-txt + .act-con are stable nodes; innerHTML churn stays inside
+    // the text pane so the once-built spinner keeps its CSS animation
+    let pane = liveBubble.querySelector('.act-txt');
+    if (!pane) {
+      liveBubble.innerHTML = '';
+      pane = document.createElement('div'); pane.className = 'act-txt';
+      liveBubble.appendChild(pane);
+    }
+    pane.innerHTML = thinkBlockHtml(m, false) + txt;
+    _actConsole(liveBubble, m, act, thinkOnly);
+    return;
+  }
   liveBubble.innerHTML = thinkBlockHtml(m, false) + txt;
 }
 function thinkBlockHtml(m, open){
@@ -525,7 +618,7 @@ window.api.onEngineDone(async (payload) => {
     delete s._stopReq;
     if (stopped) { last.stopped = true; last.text = shown; last._justStopped = true; }   // one-shot "ลมหยุด" decel on next render
     else last.text = shown || t('⚠ engine ไม่ตอบกลับ (คำตอบว่าง') + (failed ? t(' · exit ') + payload.code : '') + t(') — ลองส่งข้อความเดิมอีกครั้ง');
-    delete last._acc; delete last._t0;
+    delete last._acc; delete last._t0; delete last._act; delete last._actAt; delete last._actSeen;
     // stream died mid note-block (abort/timeout/error): salvage the partial draft instead of
     // letting a half-written note evaporate with the protocol text
     if (failed && typeof salvagePartialNoteBlock === 'function') { try { await salvagePartialNoteBlock(last.text); } catch (_) {} }

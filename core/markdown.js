@@ -521,6 +521,62 @@
     return { pages: pages, chat: chat };
   }
 
+  // ---- live activity console (mock W2 2026-09-22): what the AI is doing RIGHT NOW, read
+  // from the raw streaming buffer — the display strip empties the bubble of verbs/note
+  // blocks, so without this a long turn reads as frozen. Pure: rows keep first-seen order
+  // (READ-NOTE merges into one row), a note block still OPEN becomes `writing`
+  // (name + current body length) instead of a finished row. T = the renderer's translate
+  // fn for i18n (identity default, so tests see the Thai source strings). No lookbehind.
+  function liveActivity(acc, T) {
+    T = typeof T === 'function' ? T : function (x) { return x; };
+    var s = String(acc == null ? '' : acc);
+    var rows = [], writing = null;
+    var readRow = null, readNames = [], tagRow = null, tagN = 0, cvRow = null, cvN = 0, noteK = 0;
+    var re = /^[ \t]*===(READ-NOTE|SEARCH|SET-TAGS|ADD-TAGS|REMOVE-TAGS|RENAME-TAG|CANVAS-BOARD|CANVAS-ADD|CANVAS-REMOVE|CANVAS-WIRE|CANVAS-UNWIRE|CANVAS-STICKY|CANVAS-PLACE|CANVAS-ARRANGE|PLAN-STEP|NEW-NOTE|UPDATED-NOTE|UPDATED-SECTION)((?:[^=\n]|=(?!==))*)===[ \t]*$/gm;
+    // minimal arg validation per canvas write-op (mirrors extractActions' drops)
+    var CV_OK = { 'CANVAS-BOARD': /^name=/, 'CANVAS-ADD': /^name=/, 'CANVAS-REMOVE': /^name=/,
+      'CANVAS-WIRE': /^from=/, 'CANVAS-UNWIRE': /^from=.+ to=/, 'CANVAS-STICKY': /^text=/,
+      'CANVAS-PLACE': /(?:^|\s)(?:name|note)=/, 'CANVAS-ARRANGE': /^(?:board=.+? )?(?:mode=(grid|hub))?$/ };
+    var m;
+    while ((m = re.exec(s))) {
+      var verb = m[1], arg = (m[2] || '').trim();
+      if (verb === 'NEW-NOTE' || verb === 'UPDATED-NOTE' || verb === 'UPDATED-SECTION') {
+        var rest = s.slice(m.index + m[0].length);
+        var j = rest.indexOf(NOTE_CLOSE);   // no close yet (still streaming) -> open block
+        var nm = ((arg.match(/name=([^=]+?)(?: heading=|$)/) || [])[1] || (arg.match(/heading=(.+)$/) || [])[1] || '').trim();
+        if (j < 0) writing = { name: nm, chars: rest.replace(/^\r?\n/, '').length };
+        else rows.push({ k: 'note:' + (noteK++), ic: '✍️', label: T('เขียนโน้ต') + (nm ? ' "' + nm + '"' : '') + T(' เสร็จ') });
+      }
+      else if (verb === 'READ-NOTE') {
+        var rm = arg.match(/^name=(.+)$/); if (!rm) continue;
+        if (!readRow) { readRow = { k: 'read', ic: '🔎', label: '' }; rows.push(readRow); }
+        readNames.push(rm[1].trim());
+        readRow.label = T('อ่าน') + ': ' + readNames.join(' · ');
+      }
+      else if (verb === 'SEARCH') {
+        var qm = arg.match(/^query=(.+)$/); if (!qm) continue;
+        rows.push({ k: 'search:' + qm[1].trim(), ic: '🔎', label: T('ค้นหา') + ': ' + qm[1].trim() });
+      }
+      else if (verb === 'SET-TAGS' || verb === 'ADD-TAGS' || verb === 'REMOVE-TAGS' || verb === 'RENAME-TAG') {
+        var ok = (verb === 'RENAME-TAG') ? /^from=.+/.test(arg) : /^name=.+? tags=/.test(arg);
+        if (!ok) continue;
+        if (!tagRow) { tagRow = { k: 'tag', ic: '🏷', label: '' }; rows.push(tagRow); }
+        tagRow.label = T('แก้แท็ก') + ': ' + (++tagN) + T(' รายการ');
+      }
+      else if (CV_OK[verb]) {
+        if (!CV_OK[verb].test(arg)) continue;
+        if (!cvRow) { cvRow = { k: 'canvas', ic: '🖼', label: '' }; rows.push(cvRow); }
+        cvRow.label = T('จัดแคนวาส') + ': ' + (++cvN) + T(' รายการ');
+      }
+      else if (verb === 'PLAN-STEP') {
+        var pm = arg.match(/^n=(\d+)(?: status=(done|doing|blocked))?(?: note=(.*))?$/); if (!pm) continue;
+        rows.push({ k: 'plan:' + pm[1], ic: '📋', label: T('ขั้น') + ' ' + pm[1] + ' ' +
+          ({ done: '✓', doing: '…', blocked: '✗' })[pm[2] || 'done'] + (pm[3] ? ' ' + pm[3].trim() : '') });
+      }
+    }
+    return { rows: rows, writing: writing };
+  }
+
   // Make chat references clickable: @[Name] mentions and [source: Name] citations become
   // <a class="at-ref" data-ref="Name"> anchors the chat click-handler resolves to a note/PDF.
   // Runs on ALREADY-ESCAPED html (mdToHtml output or escaped user text) — never on raw input.
@@ -604,6 +660,6 @@
   }
   return {
     mdToHtml: mdToHtml, _mdInline: _mdInline, _mdEsc: _mdEsc, stripMdFence: stripMdFence,
-    extractNoteUpdate: extractNoteUpdate, extractPdfClips: extractPdfClips, extractNewNotes: extractNewNotes, extractSectionUpdates: extractSectionUpdates, replaceSection: replaceSection, stripNoteBlocks: stripNoteBlocks, extractKumikoRules: extractKumikoRules, extractMemories: extractMemories, extractPlanProposals: extractPlanProposals, extractActions: extractActions, ensureSlideClips: ensureSlideClips, linkifyRefs: linkifyRefs, resolveRefTarget: resolveRefTarget, historyText: historyText, NOTE_OPEN: NOTE_OPEN, NOTE_CLOSE: NOTE_CLOSE
+    extractNoteUpdate: extractNoteUpdate, extractPdfClips: extractPdfClips, extractNewNotes: extractNewNotes, extractSectionUpdates: extractSectionUpdates, replaceSection: replaceSection, stripNoteBlocks: stripNoteBlocks, extractKumikoRules: extractKumikoRules, extractMemories: extractMemories, extractPlanProposals: extractPlanProposals, extractActions: extractActions, liveActivity: liveActivity, ensureSlideClips: ensureSlideClips, linkifyRefs: linkifyRefs, resolveRefTarget: resolveRefTarget, historyText: historyText, NOTE_OPEN: NOTE_OPEN, NOTE_CLOSE: NOTE_CLOSE
   };
 });

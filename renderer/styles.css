@@ -2473,6 +2473,25 @@ button.tg-chip { cursor: pointer; text-align: left; }
 
 /* ---- waiting bubble proof-of-work: elapsed clock + latest-thought ticker ---- */
 .wait-clock { color: var(--muted); font-weight: 500; font-size: 12px; opacity: .75; font-variant-numeric: tabular-nums; }
+
+/* ---- W2 live activity console: spinner + last-3 activity rows at the live bubble's end.
+   Paper tone per the mock; dark theme rides the existing tokens. ---- */
+.act-con { margin-top: 9px; background: #fdf8f1; border: 1px solid #eee7d8; border-radius: var(--r-paper); padding: 8px 11px 9px; }
+.act-head { display: flex; align-items: center; gap: 9px; }
+.act-lbl { font: 600 12.5px/1.4 var(--font); color: var(--text); }
+.act-head .clock { margin-left: auto; font: 10.5px "Space Mono", var(--mono, monospace); color: #b3ab9a; font-variant-numeric: tabular-nums; }
+.act-rows { margin-top: 4px; display: flex; flex-direction: column; gap: 1px; }
+.act-row { display: flex; align-items: baseline; gap: 7px; font: 12px/1.5 var(--font); color: #b3ab9a; padding-left: 43px; }
+.act-row .ic { flex: none; }
+.act-row .lbl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.act-row .ts { flex: none; font: 10.5px "Space Mono", var(--mono, monospace); color: #b3ab9a; opacity: .85; font-variant-numeric: tabular-nums; }
+.act-row.cur, .act-row.cur .ts { color: #5d574c; font-weight: 600; }
+.act-row.ghost .lbl { font-style: italic; opacity: .85; }
+:root[data-theme="dark"] .act-con { background: var(--sheet); border-color: var(--line); }
+:root[data-theme="dark"] .act-row, :root[data-theme="dark"] .act-row .ts, :root[data-theme="dark"] .act-head .clock { color: var(--muted); }
+:root[data-theme="dark"] .act-row.cur, :root[data-theme="dark"] .act-row.cur .ts { color: var(--text); }
+@media (prefers-reduced-motion: reduce) { .act-con .spin-kaza { animation: none; } }
+
 .toast-x { border: none; background: transparent; color: inherit; opacity: .55; font-size: 12px; margin-left: 2px; padding: 2px 4px; cursor: pointer; }
 .toast-x:hover { opacity: 1; }
 .nn-propose .nn-name { color: var(--text); }

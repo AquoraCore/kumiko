@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mdToHtml, _mdInline, stripMdFence, extractNoteUpdate, extractPdfClips, extractNewNotes, extractSectionUpdates, replaceSection, stripNoteBlocks, extractKumikoRules, extractPlanProposals, extractActions, linkifyRefs, historyText, NOTE_OPEN, NOTE_CLOSE } from '../../core/markdown.js';
+import { mdToHtml, _mdInline, stripMdFence, extractNoteUpdate, extractPdfClips, extractNewNotes, extractSectionUpdates, replaceSection, stripNoteBlocks, extractKumikoRules, extractPlanProposals, extractActions, linkifyRefs, historyText, liveActivity, NOTE_OPEN, NOTE_CLOSE } from '../../core/markdown.js';
 
 describe('mdToHtml (happy)', () => {
   it('renders **bold** as <strong>', () => {
@@ -770,5 +770,80 @@ describe('extractActions — plan verbs', () => {
     expect(r.planSteps).toEqual([]);
     expect(r.planDone).toBeNull();
     expect(r.any).toBe(false);
+  });
+});
+
+// W2 live activity console (2026-09-22): liveActivity reads the RAW streaming buffer and
+// reports what the AI is doing right now — rows in first-seen order, an OPEN note block
+// becomes `writing` (name + chars) instead of a finished row.
+describe('liveActivity', () => {
+  it('HAPPY: verbs become rows in first-seen order; READ-NOTE merges into ONE row', () => {
+    const r = liveActivity([
+      'ขอดูก่อนครับ',
+      '===READ-NOTE name=OES Process===',
+      '===READ-NOTE name=DFD===',
+      '===SEARCH query=data flow===',
+      '===ADD-TAGS name=A tags=exam===',
+      '===REMOVE-TAGS name=B tags=old===',
+      '===CANVAS-PLACE board=X note=Y at=0,2===',
+      '===PLAN-STEP n=1 status=done note=รวบรวมแล้ว===',
+      '===PLAN-STEP n=2 status=blocked note=ไม่พบไฟล์===',
+      'จบรอบ',
+    ].join('\n'));
+    expect(r.rows.map((x) => x.label)).toEqual([
+      'อ่าน: OES Process · DFD',
+      'ค้นหา: data flow',
+      'แก้แท็ก: 2 รายการ',
+      'จัดแคนวาส: 1 รายการ',
+      'ขั้น 1 ✓ รวบรวมแล้ว',
+      'ขั้น 2 ✗ ไม่พบไฟล์',
+    ]);
+    expect(r.writing).toBeNull();
+  });
+  it('HAPPY: an OPEN note block → writing {name, chars}; UPDATED-SECTION falls back to heading', () => {
+    const open = liveActivity('โอเค\n===NEW-NOTE name=สรุป บท 3===\n# สรุป\nเนื้อหายังเขียนอยู่');
+    expect(open.rows).toEqual([]);
+    expect(open.writing.name).toBe('สรุป บท 3');
+    expect(open.writing.chars).toBe('# สรุป\nเนื้อหายังเขียนอยู่'.length);
+    const sec = liveActivity('===UPDATED-SECTION heading=หัวข้อ 4===\nแก้ครึ่งๆ');
+    expect(sec.writing.name).toBe('หัวข้อ 4');
+  });
+  it('HAPPY: a CLOSED block becomes a finished row; two blocks → two rows in order', () => {
+    const r = liveActivity('===UPDATED-NOTE name=X===\nbody\n' + NOTE_CLOSE + '\n===NEW-NOTE name=Y===\nbody2\n' + NOTE_CLOSE);
+    expect(r.writing).toBeNull();
+    expect(r.rows.map((x) => x.label)).toEqual(['เขียนโน้ต "X" เสร็จ', 'เขียนโน้ต "Y" เสร็จ']);
+    // unnamed UPDATED-NOTE (targets the open note) still yields a row, without quotes
+    expect(liveActivity('===UPDATED-NOTE===\nb\n' + NOTE_CLOSE).rows[0].label).toBe('เขียนโน้ต เสร็จ');
+  });
+  it('EDGE: plain text / null → empty rows, null writing', () => {
+    expect(liveActivity('คำตอบล้วนๆ ไม่มี verb')).toEqual({ rows: [], writing: null });
+    expect(liveActivity('')).toEqual({ rows: [], writing: null });
+    expect(liveActivity(null)).toEqual({ rows: [], writing: null });
+  });
+  it('EDGE: broken verbs are skipped, valid ones still land', () => {
+    const r = liveActivity([
+      '===READ-NOTE X===',            // no name=
+      '===SEARCH query===',           // no value
+      '===PLAN-STEP status=done===',  // no n=
+      '===CANVAS-WIRE to=Z===',       // no from=
+      '===CANVAS-ARRANGE===',         // valid, no-arg form
+      '===READ-NOTE name=จริง===',
+    ].join('\n'));
+    expect(r.rows.map((x) => x.label)).toEqual(['จัดแคนวาส: 1 รายการ', 'อ่าน: จริง']);
+  });
+  it('passes labels through the supplied translate fn (i18n seam) and uses no lookbehind', () => {
+    const r = liveActivity('===READ-NOTE name=A===', (s2) => s2 === 'อ่าน' ? 'Read' : s2);
+    expect(r.rows[0].label).toBe('Read: A');
+  });
+});
+
+// W2 guard: the console must be built ONCE per bubble — an innerHTML rebuild per render
+// restarts the spinner's CSS animation (the buildWaitInto lesson, log 2026-08-25).
+describe('live activity console guard (W2)', () => {
+  it('chat.js creates .act-con only when absent, then updates text nodes', () => {
+    const js = require('fs').readFileSync(require('path').join(__dirname, '../../renderer/chat.js'), 'utf8');
+    expect(js).toMatch(/if \(!el\.querySelector\('\.act-con'\)\)/);
+    expect(js).toMatch(/liveActivity/);          // wired to the core extractor
+    expect(js).toMatch(/_actAt/);                // 400ms throttle state, not per-token parses
   });
 });
