@@ -246,15 +246,24 @@ function renderHead(){
   const s = activeSession(); head.innerHTML = '';
   const nm = document.createElement('span'); nm.className = 'sh-nm'; nm.innerHTML = icoSvg(s.icon || 'note', 'sm'); nm.appendChild(document.createTextNode(' ' + s.name));
   head.appendChild(nm);
-  // plan-mode progress chip (📋 3/7): live while the plan's auto-continue loop runs. Counts
-  // come from the renderPlanRunCard cache (the plan NOTE is the source of truth, read async).
-  if (s.plan && s.plan.active) {
-    const chip = document.createElement('button'); chip.type = 'button'; chip.className = 'sh-plan-chip'; chip.id = 'shPlanChip';
+  // plan-mode progress chip (📋 3/7): live (indigo) while the auto-continue loop runs; a
+  // paused/unfinished plan gets a GRAY 📋 ค้าง x/y chip instead. Counts come from the
+  // renderPlanRunCard cache (the plan NOTE is the source of truth, read async).
+  if (s.plan && s.plan.rel) {
     const p = s.plan._prog;
-    chip.textContent = '📋 ' + (p && p.total ? p.done + '/' + p.total : '…');
-    chip.title = t('แผนงานกำลังทำ — คลิกเพื่อไปที่การ์ดแผน');
-    chip.onclick = (e) => { e.stopPropagation(); const m = document.getElementById('chatMessages'); if (m) m.scrollTo({ top: 0, behavior: 'smooth' }); };
-    head.appendChild(chip);
+    const settled = !!(s.plan.finished || (p && p.total && p.done + (p.blocked || 0) >= p.total));
+    if (s.plan.active || !settled) {
+      const chip = document.createElement('button'); chip.type = 'button'; chip.className = 'sh-plan-chip' + (s.plan.active ? '' : ' paused'); chip.id = 'shPlanChip';
+      if (s.plan.active) {
+        chip.textContent = '📋 ' + (p && p.total ? p.done + '/' + p.total : '…');
+        chip.title = t('แผนงานกำลังทำ — คลิกเพื่อไปที่การ์ดแผน');
+      } else {
+        chip.textContent = '📋 ' + t('ค้าง') + ' ' + (p && p.total ? p.done + '/' + p.total : '…');
+        chip.title = t('แผนงานค้าง — คลิกเพื่อไปที่การ์ดแผน');
+      }
+      chip.onclick = (e) => { e.stopPropagation(); const m = document.getElementById('chatMessages'); if (m) m.scrollTo({ top: 0, behavior: 'smooth' }); };
+      head.appendChild(chip);
+    }
   }
   // Scope dropdown removed — context is now injected automatically by PRIORITY
   // (open note first, then RAG-related notes). See buildPriorityContext in renderer.js.
@@ -592,7 +601,17 @@ window.api.onEngineDone(async (payload) => {
   // ---- plan auto-continue (Plan Mode): with an ACTIVE plan every finished round rolls into
   // the next step. Runs LAST so this reply's note executors (above) land before round N+1.
   if (last && last.role === 'ai' && !last.stopped && s.plan && s.plan.active && typeof planContinueRound === 'function') {
-    try { await planContinueRound(s); } catch (_) {}
+    // ENGINE FAILURE = full stop, never another round. A claude that dies in ~1s (auth gone)
+    // plus auto-continue used to respawn it every second, forever (live loop, 2026-09-22).
+    const _failed = payload && payload.code != null && payload.code !== 0;
+    if (_failed) {
+      s.plan.active = false;
+      s.messages.push({ role: 'ai', text: t('แผนหยุดชั่วคราว: engine ล้มเหลว (ดู error ด้านบน) — แก้แล้วกด ▶ ทำต่อ ที่ชิป 📋 ได้เลย') });
+      persistSessions(); renderHead();
+      if (s.id === activeId) renderChat(); else if (typeof renderPlanRunCard === 'function') renderPlanRunCard();
+    } else {
+      try { await planContinueRound(s); } catch (_) {}
+    }
   }
 });
 

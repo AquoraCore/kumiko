@@ -96,3 +96,63 @@ describe('CorePlan planAllowContinue', () => {
     expect(CP.PLAN_ROUND_CAP).toBe(12);
   });
 });
+
+describe('CorePlan planLogEntry (worklog entry)', () => {
+  const plan = CP.parsePlan('# สรุปวิชา DS\n\n- [x] อ่านบท 5 — ลิงก์ [[Sorting]]\n- [x] ทำแบบฝึกหัด\n- [ ] สรุปลงโน้ต\n');
+  it('HAPPY: header + done/total + minutes + summary, every step line kept verbatim (wikilinks intact)', () => {
+    const t1 = Date.now(), t0 = t1 - 25 * 60000;
+    const e = CP.planLogEntry(plan, { date: '2026-09-22', summary: 'จบบท 5', startedAt: t0, endedAt: t1 });
+    expect(e).toBe('## 2026-09-22 · สรุปวิชา DS\n\n' +
+      '✓ 2/3 ขั้น · ใช้เวลา 25 นาที — จบบท 5\n' +
+      '- [x] อ่านบท 5 — ลิงก์ [[Sorting]]\n' +
+      '- [x] ทำแบบฝึกหัด\n' +
+      '- [ ] สรุปลงโน้ต\n');
+  });
+  it('EDGE: no summary → no dash tail; no times → no minutes part', () => {
+    const e = CP.planLogEntry(plan, { date: '2026-09-22' });
+    expect(e).toContain('✓ 2/3 ขั้น\n');
+    expect(e).not.toContain('ใช้เวลา');
+    expect(e.split('\n')[2]).toBe('✓ 2/3 ขั้น');   // headline carries no " — summary" tail
+    expect(e).toContain('- [ ] สรุปลงโน้ต\n');
+  });
+  it('EDGE: a plan with blocked steps logs them as [ ]/[!] as they really are', () => {
+    const blocked = CP.parsePlan('# แผนติดขัด\n\n- [x] อ่านแล้ว\n- [!] ติดขัด — ไม่พบไฟล์\n- [ ] ยังไม่ทำ\n');
+    const e = CP.planLogEntry(blocked, { date: '2026-09-22', summary: 'เลิกกลางคัน' });
+    expect(e).toContain('✓ 1/3 ขั้น — เลิกกลางคัน\n');
+    expect(e).toContain('- [!] ติดขัด — ไม่พบไฟล์\n');
+    expect(e).toContain('- [ ] ยังไม่ทำ\n');
+  });
+});
+
+describe('CorePlan planLogPrepend (newest entry under the worklog header)', () => {
+  const HEAD = '# KUMIKO-LOG\n\nสมุดบันทึกงานที่ AI ทำตามแผน\n\n';
+  it('HAPPY: new entry lands between the header and the previous entry', () => {
+    const cur = HEAD + '## 2026-09-20 · เก่า\n\n✓ 1/1 ขั้น — เก่า\n';
+    const out = CP.planLogPrepend(cur, '## 2026-09-22 · ใหม่\n\n✓ 1/1 ขั้น\n');
+    expect(out.indexOf('# KUMIKO-LOG')).toBeLessThan(out.indexOf('## 2026-09-22'));
+    expect(out.indexOf('## 2026-09-22')).toBeLessThan(out.indexOf('## 2026-09-20'));
+    expect(out.startsWith(HEAD)).toBe(true);
+    expect(out).toContain('## 2026-09-20');   // the old entry survives below
+  });
+  it('EDGE: empty/absent worklog → the entry alone; headerless file → entry on top', () => {
+    expect(CP.planLogPrepend('', '## a\n')).toBe('## a\n');
+    expect(CP.planLogPrepend(null, '## a\n')).toBe('## a\n');
+    expect(CP.planLogPrepend('no header shape\n', '## a\n')).toBe('## a\n\nno header shape\n');
+  });
+});
+
+describe('plan loop guards — the 1s respawn loop can never come back (live bug 2026-09-22)', () => {
+  const fs = require('fs'); const path = require('path');
+  const read = (f) => fs.readFileSync(path.join(__dirname, '../..', f), 'utf8');
+  it('engine failure while a plan is active pauses the plan instead of refiring (happy)', () => {
+    const chat = read('renderer/chat.js');
+    expect(chat).toMatch(/_failed = payload && payload\.code != null && payload\.code !== 0/);
+    expect(chat).toMatch(/if \(_failed\) \{\s*\n\s*s\.plan\.active = false/);
+  });
+  it('the stall gate counts the PLAN round counter, never the resettable tool counter (edge)', () => {
+    const r = read('renderer/renderer.js');
+    expect(r).toMatch(/planAllowContinue\(\{ round: \(s\.plan\.rounds \|\| 0\)/);
+    expect(r).not.toMatch(/planAllowContinue\(\{ round: s\._toolRounds/);
+    expect(r).toMatch(/s\.plan\.rounds = \(s\.plan\.rounds \|\| 0\) \+ 1/);
+  });
+});
