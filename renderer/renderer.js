@@ -1599,25 +1599,59 @@ function planProposalCard(bubble, m, s){
   bubble.appendChild(card);
 }
 
-// The ONE run-status card (mock stages 2-3): pinned at the top of #chatMessages as a
-// separate element (never a history message), re-rendered from the plan file after every
-// round/step/skip. Shows while the session HAS a plan: running / paused / blocked / finished.
+// The ONE run-status dock (mock P2 2026-09-23): a strip pinned ABOVE the chat input, not
+// inside #chatMessages — the chat scrolls with new messages, the dock stays in view. Tapping
+// the strip opens a sheet (absolutely positioned above the dock) with the full step list +
+// actions. Re-rendered from the plan file after every round/step/skip; shows while the
+// session HAS a plan: running / paused / blocked / finished.
 let __planCardSeq = 0;
+let __planDockOpen = false;      // sheet open state — never persisted, kept across re-renders mid-run
+let __planDockLsn = false;
+function planDockClose(){ __planDockOpen = false; renderPlanRunCard(); }
+function planDockListenOnce(){   // one delegated outside-click + Esc pair, added once ever
+  if (__planDockLsn) return; __planDockLsn = true;
+  document.addEventListener('click', (e) => {
+    if (!__planDockOpen) return;
+    // a click on a dock button re-renders the dock BEFORE this bubble arrives — the old target
+    // is then detached and contains() would lie "outside", closing the sheet it just updated
+    if (!e.target || !e.target.isConnected) return;
+    const dock = document.getElementById('planDock');
+    if (dock && !dock.contains(e.target)) planDockClose();   // sheet lives INSIDE the dock → covered by contains()
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && __planDockOpen) planDockClose(); });
+}
+function ensurePlanDock(){       // created dynamically — index.html is never touched
+  let dock = document.getElementById('planDock');
+  if (dock) return dock;
+  const panel = document.getElementById('chatPanel');
+  const input = panel && panel.querySelector('.chat-input');
+  if (!panel || !input) return null;
+  dock = document.createElement('div'); dock.id = 'planDock'; dock.className = 'plan-dock';
+  panel.insertBefore(dock, input);   // after #attachBar, right before .chat-input
+  return dock;
+}
 async function renderPlanRunCard(){
-  const box = document.getElementById('chatMessages');
-  const old = document.getElementById('planRunCard'); if (old) old.remove();
   const s = (typeof activeSession === 'function') ? activeSession() : null;
-  if (!box || !s || !window.CorePlan) return;
+  if (!s || !window.CorePlan) return;
+  if (!s.plan && !s._planLogged) {   // plan stored/dropped mid-run → dock leaves, sheet state resets
+    __planDockOpen = false;
+    const d = document.getElementById('planDock'); if (d) d.remove();
+    return;
+  }
+  const dock = ensurePlanDock();
+  if (!dock) return;
+  planDockListenOnce();
+  dock.textContent = '';
   // after ✓ บันทึกลงสมุดงาน: one short line + a link into the worklog (s.plan is gone)
   if (s._planLogged) {
-    const done = document.createElement('div'); done.id = 'planRunCard'; done.className = 'plan-card plan-run plan-logged';
+    const row = document.createElement('div'); row.className = 'plan-dock-strip';
     const ln = document.createElement('button'); ln.type = 'button'; ln.className = 'plan-loglink';
     ln.textContent = '✓ ' + t('บันทึกแล้ว · เปิดสมุดงาน');
     ln.onclick = () => openNote(PLAN_LOG_REL);
     const x = document.createElement('button'); x.type = 'button'; x.className = 'plan-skip'; x.textContent = '×'; x.title = t('ปิด');
-    x.onclick = () => { delete s._planLogged; done.remove(); };
-    done.appendChild(ln); done.appendChild(x);
-    box.insertBefore(done, box.firstChild);
+    x.onclick = () => { delete s._planLogged; planDockClose(); };
+    row.appendChild(ln); row.appendChild(x);
+    dock.appendChild(row);
     return;
   }
   if (!s.plan || !s.plan.rel) return;
@@ -1629,19 +1663,46 @@ async function renderPlanRunCard(){
   s.plan._prog = { done: prog.done, total: prog.total, blocked: prog.blocked };
   const chip = document.getElementById('shPlanChip');
   if (chip) chip.textContent = '📋 ' + (prog.total ? prog.done + '/' + prog.total : '…');
-  const card = document.createElement('div'); card.id = 'planRunCard'; card.className = 'plan-card plan-run';
   const mk = (label, cls) => { const b = document.createElement('button'); b.type = 'button'; b.className = cls; b.textContent = label; return b; };
-  // head: title + live count + start time (เวลาเริ่ม, mock)
-  const hd = document.createElement('div'); hd.className = 'plan-head';
-  const ht = document.createElement('span'); ht.className = 'plan-title'; ht.textContent = '📋 ' + (s.plan.title || plan.title || t('แผนงาน'));
+  const settled = prog.total && prog.done + prog.blocked >= prog.total;
+  const title = '📋 ' + (s.plan.title || plan.title || t('แผนงาน'));
+  // strip: 📋 title + x/y pill + live status + caret; the whole row toggles the sheet
+  const strip = document.createElement('div'); strip.className = 'plan-dock-strip';
+  strip.onclick = (e) => { if (e) e.stopPropagation(); __planDockOpen = !__planDockOpen; renderPlanRunCard(); };
+  const ht = document.createElement('span'); ht.className = 'plan-title'; ht.textContent = title;
   const hc = document.createElement('span'); hc.className = 'plan-count'; hc.textContent = prog.done + '/' + prog.total;
-  hd.appendChild(ht); hd.appendChild(hc);
-  if (s.plan.t0) { const hm = document.createElement('span'); hm.className = 'plan-t0'; hm.textContent = t('เริ่ม') + ' ' + new Date(s.plan.t0).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); hd.appendChild(hm); }
-  card.appendChild(hd);
-  // progress bar (done share of total)
+  strip.appendChild(ht); strip.appendChild(hc);
+  const cur = document.createElement('span'); cur.className = 'plan-cur';
+  if (s.plan.finished || settled) { cur.classList.add('done'); cur.textContent = '✓ ' + t('เสร็จตามแผน — แตะเพื่อบันทึก'); }
+  else if (s.plan.active) {
+    const sp = document.createElement('i'); sp.className = 'spin-kaza sm';
+    strip.appendChild(sp);
+    const doing = plan.steps[prog.doing - 1];
+    cur.textContent = doing ? t('ขั้น') + ' ' + prog.doing + ': ' + doing.text : '…';
+  }
+  else { cur.textContent = t('หยุดชั่วคราว — แตะเพื่อทำต่อ'); }
+  strip.appendChild(cur);
+  const car = document.createElement('span'); car.className = 'plan-caret'; car.textContent = __planDockOpen ? '▼' : '▲';
+  strip.appendChild(car);
+  dock.appendChild(strip);
+  // progress bar (done share of total), full dock width
   const bar = document.createElement('div'); bar.className = 'plan-bar';
   const fill = document.createElement('i'); fill.style.width = (prog.total ? Math.round(prog.done / prog.total * 100) : 0) + '%';
-  bar.appendChild(fill); card.appendChild(bar);
+  bar.appendChild(fill); dock.appendChild(bar);
+  if (!__planDockOpen) return;
+
+  // sheet (open): head + bar + full step list + actions — same step render as before
+  const sheet = document.createElement('div'); sheet.className = 'plan-sheet';
+  const hd = document.createElement('div'); hd.className = 'plan-head'; hd.title = t('ปิด');
+  hd.onclick = planDockClose;
+  const st2 = document.createElement('span'); st2.className = 'plan-title'; st2.textContent = title;
+  const sc = document.createElement('span'); sc.className = 'plan-count'; sc.textContent = prog.done + '/' + prog.total;
+  const car2 = document.createElement('span'); car2.className = 'plan-caret'; car2.textContent = '▼';
+  hd.appendChild(st2); hd.appendChild(sc); hd.appendChild(car2);
+  sheet.appendChild(hd);
+  const bar2 = document.createElement('div'); bar2.className = 'plan-bar';
+  const fill2 = document.createElement('i'); fill2.style.width = fill.style.width;
+  bar2.appendChild(fill2); sheet.appendChild(bar2);
   // steps ✓ / doing+spinner / ✗+note+buttons / ○
   const ol = document.createElement('div'); ol.className = 'plan-steps';
   plan.steps.forEach((st, i) => {
@@ -1665,13 +1726,12 @@ async function renderPlanRunCard(){
     else { r.textContent = '○ ' + st.text; }
     ol.appendChild(r);
   });
-  card.appendChild(ol);
+  sheet.appendChild(ol);
   // state row: finished → green bar; running → ⏸ + ข้ามขั้นนี้; paused → ▶ ทำต่อ
-  const settled = prog.total && prog.done + prog.blocked >= prog.total;
   if (s.plan.finished || settled) {
     const fin = document.createElement('div'); fin.className = 'plan-donebar';
     fin.textContent = '✓ ' + t('เสร็จตามแผน') + (s.plan.finished && s.plan.finished !== t('เสร็จตามแผน') ? ' — ' + s.plan.finished : '');
-    card.appendChild(fin);
+    sheet.appendChild(fin);
     const acts = document.createElement('div'); acts.className = 'plan-acts';
     const log = mk(t('✓ บันทึกลงสมุดงาน'), 'plan-go');
     log.onclick = () => { log.disabled = true; planFinishAndLog(s); };
@@ -1679,7 +1739,7 @@ async function renderPlanRunCard(){
     keep.onclick = () => { s.plan = null; persistSessions(); renderHead(); renderPlanRunCard(); };
     const x = mk('×', 'plan-skip'); x.title = t('ปิดการ์ดแผน');
     x.onclick = () => { s.plan = null; persistSessions(); renderHead(); renderPlanRunCard(); };
-    acts.appendChild(log); acts.appendChild(keep); acts.appendChild(x); card.appendChild(acts);
+    acts.appendChild(log); acts.appendChild(keep); acts.appendChild(x); sheet.appendChild(acts);
   } else {
     const acts = document.createElement('div'); acts.className = 'plan-acts';
     if (s.plan.active) {
@@ -1707,9 +1767,9 @@ async function renderPlanRunCard(){
       drop.onclick = () => planDiscard(s);
       acts.appendChild(resume); acts.appendChild(finlog); acts.appendChild(drop);
     }
-    card.appendChild(acts);
+    sheet.appendChild(acts);
   }
-  box.insertBefore(card, box.firstChild);
+  dock.appendChild(sheet);
 }
 
 // Skip: mark the step done ("ข้ามโดยผู้ใช้"), write the file, fire the next round. A user

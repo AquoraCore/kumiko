@@ -2662,8 +2662,19 @@ button.tg-chip { cursor: pointer; text-align: left; }
    blocked #a04434. */
 .plan-card { margin: 6px 2px 2px; padding: 9px 11px; background: var(--ai-bubble); border-radius: var(--r-paper); display: flex; flex-direction: column; gap: 7px; min-width: 0; font-size: 12.5px; }
 .plan-prop { border: 1.5px dashed var(--wa-indigo); background: color-mix(in srgb, var(--wa-indigo) 5%, var(--ai-bubble)); }
-.plan-run { border: 1.5px solid color-mix(in srgb, var(--wa-indigo) 55%, var(--line-strong)); }
-#planRunCard { margin: 0 0 8px; }
+/* plan run dock (mock P2 2026-09-23): status strip pinned above the chat input — strip
+   (title + count + live step + caret) with the progress bar under it; tapping opens the
+   sheet that floats ABOVE the dock. Same indigo-on-paper family as the proposal card. */
+.plan-dock { position: relative; margin: 0 10px 6px; background: color-mix(in srgb, var(--wa-indigo) 4%, var(--ai-bubble)); border: 1.5px solid color-mix(in srgb, var(--wa-indigo) 45%, var(--line-strong)); border-radius: 10px; padding: 6px 9px; }
+.plan-dock-strip { display: flex; align-items: center; gap: 7px; font: 400 11.5px var(--font); min-width: 0; cursor: pointer; }
+.plan-dock-strip .plan-title { flex: none; max-width: 45%; color: var(--wa-indigo); font-weight: 700; }
+.plan-cur { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.plan-cur.done { color: #3f7d4e; font-weight: 600; }
+.plan-caret { color: var(--muted); font-size: 9px; cursor: pointer; flex: none; }
+.plan-dock .plan-bar { margin-top: 5px; }
+.plan-sheet { position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); background: color-mix(in srgb, var(--wa-indigo) 4%, var(--ai-bubble)); border: 1.5px solid color-mix(in srgb, var(--wa-indigo) 45%, var(--line-strong)); border-radius: 10px; padding: 8px 10px; box-shadow: 0 -6px 20px rgba(0,0,0,.14); z-index: 30; max-height: 55vh; overflow-y: auto; display: flex; flex-direction: column; gap: 7px; font-size: 12px; }
+.plan-sheet .plan-title { color: var(--wa-indigo); }
+:root[data-theme="dark"] .plan-cur.done { color: #7fb98f; }
 .plan-head { display: flex; align-items: baseline; gap: 8px; color: var(--wa-indigo); font: 700 12.5px var(--font); min-width: 0; }
 .plan-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plan-count { flex: none; font: 700 12px var(--mono); padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--wa-indigo) 14%, transparent); }
@@ -2693,7 +2704,6 @@ button.tg-chip { cursor: pointer; text-align: left; }
 .sh-plan-chip:hover { background: var(--wa-indigo); color: #fff; }
 .sh-plan-chip.paused { border-color: #9aa0a6; color: #9aa0a6; background: color-mix(in srgb, #9aa0a6 8%, transparent); }
 .sh-plan-chip.paused:hover { background: #9aa0a6; color: #fff; }
-.plan-logged { flex-direction: row; align-items: center; gap: 8px; }
 .plan-loglink { border: none; background: none; color: var(--wa-indigo); font: 700 12px var(--font); cursor: pointer; padding: 2px 0; text-decoration: underline; }
 :root[data-theme="dark"] .plan-step.done { color: #7fb98f; }
 :root[data-theme="dark"] .plan-step.doing { background: #2e2a26; }

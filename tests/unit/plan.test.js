@@ -228,3 +228,42 @@ describe('plan stall fix — nudge once, then pause without looking like an erro
     expect(r).toMatch(/window\.__turnReads = \[\]/);      // …and again on a fresh user message
   });
 });
+
+describe('plan dock placement (P2 2026-09-23)', () => {
+  const fs = require('fs'); const path = require('path');
+  const read = (f) => fs.readFileSync(path.join(__dirname, '../..', f), 'utf8');
+  it('HAPPY: the dock is created dynamically and inserted right before .chat-input (index.html untouched)', () => {
+    const r = read('renderer/renderer.js');
+    expect(r).toContain('plan-dock');
+    expect(r).toMatch(/querySelector\('\.chat-input'\)/);
+    expect(r).toMatch(/insertBefore\(dock, input\)/);
+  });
+  it('EDGE: nothing plan-related is inserted into #chatMessages anymore — the old card id is dead', () => {
+    const r = read('renderer/renderer.js');
+    expect(r).not.toMatch(/planRunCard/);   // id (lowercase) gone everywhere — only renderPlanRunCard remains
+    const fn = r.slice(r.indexOf('async function renderPlanRunCard'), r.indexOf('async function planSkipStep'));
+    expect(fn).not.toMatch(/insertBefore\(card, box\.firstChild\)/);
+    expect(fn).not.toContain("getElementById('chatMessages')");
+  });
+  it('EDGE: the sheet open state lives in a module-level flag that survives re-renders', () => {
+    expect(read('renderer/renderer.js')).toContain('__planDockOpen');
+  });
+  it('styles.css ships the dock tone and drops the dead card rule', () => {
+    const css = read('renderer/styles.css');
+    expect(css).toContain('.plan-dock');
+    expect(css).not.toContain('#planRunCard');
+  });
+});
+
+describe('plan dock toggle survives its own re-render (live bug caught in packaged-app probe 2026-09-23)', () => {
+  const fs = require('fs'); const path = require('path');
+  const read = (f) => fs.readFileSync(path.join(__dirname, '../..', f), 'utf8');
+  it('the strip click stops propagation so the outside-click listener never sees it', () => {
+    const r = read('renderer/renderer.js');
+    expect(r).toMatch(/strip\.onclick = \(e\) => \{ if \(e\) e\.stopPropagation\(\);/);
+  });
+  it('the outside-click listener ignores targets detached by a re-render (isConnected guard)', () => {
+    const r = read('renderer/renderer.js');
+    expect(r).toMatch(/if \(!e\.target \|\| !e\.target\.isConnected\) return;/);
+  });
+});
