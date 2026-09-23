@@ -81,6 +81,21 @@
     return round < cap && (round < 2 || !!o.progressed);
   }
 
+  // Stall verdict for the plan loop (live bug 2026-09-23: the model kept re-reading the same
+  // note, never ticked a step, and the boolean gate cut it off looking like an error). The
+  // FIRST stalled round past the free ones gets ONE nudge round; a second stall pauses.
+  // Order matters: cap beats everything, progress beats nudged, free rounds beat nudged.
+  function planStallAction(o) {
+    o = o || {};
+    var round = Number(o.round) || 0;
+    var cap = (typeof o.cap === 'number' && o.cap > 0) ? o.cap : PLAN_ROUND_CAP;
+    if (round >= cap) return 'pause';
+    if (o.progressed) return 'continue';
+    if (round < 2) return 'continue';
+    if (!o.nudged) return 'nudge';
+    return 'pause';
+  }
+
   // Work-log entry (KUMIKO-LOG.md) for a FINISHED plan: date/title header, result line
   // (done/total, optional minutes when startedAt+endedAt are present, optional summary) and
   // EVERY step line kept verbatim as a record — real marks (blocked shows [!]), notes and
@@ -122,6 +137,7 @@
     applyStepUpdate: applyStepUpdate,
     planProgress: planProgress,
     planAllowContinue: planAllowContinue,
+    planStallAction: planStallAction,
     planLogEntry: planLogEntry,
     planLogPrepend: planLogPrepend
   };

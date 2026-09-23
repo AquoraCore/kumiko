@@ -1350,6 +1350,9 @@ async function buildToolResults(acts){
     // remember it so a name-less UPDATED-SECTION with no open note still lands (log 2026-08-24:
     // 4 sections for "Asymptotic formulae" evaporated because the PDF was in front)
     if (!window.__aiReadTarget) window.__aiReadTarget = rel;
+    // same-note re-reads fed the plan stall loop (live 2026-09-23): track what this turn
+    // already delivered so the continuation prompt can forbid asking for it again
+    (window.__turnReads = window.__turnReads || []).push(rel.replace(/\.md$/i, ''));
     let body = '';
     try { body = String(await window.api.readNote(rel) || ''); } catch (_) {}
     // embedded data-URI images: pull them OUT of the text (the 6,000-char slice used to fill up
@@ -1400,8 +1403,13 @@ async function buildToolContinuationPrompt(userMsg, results, ownPlan){
   let planCtx = '';
   const ps = (typeof activeSession === 'function') ? activeSession() : null;
   if (ps && ps.plan && ps.plan.active && ps.plan.rel) { try { planCtx = await planStatusBlock(ps); } catch (_) {} }
+  const readNames = [...new Set(window.__turnReads || [])];
+  const readLine = readNames.length
+    ? 'ไฟล์ที่อ่านแล้วในงานนี้ (เนื้อหาอยู่ด้านบน ห้ามขออ่านซ้ำ): ' + readNames.join(', ') + '\n'
+    : '';
   return planCtx + 'คุณขอข้อมูลด้วยเครื่องมือ และนี่คือผลลัพธ์:\n\n' + results + '\n\n' +
     (ownPlan ? 'สิ่งที่คุณบอกผู้ใช้ไว้ก่อนใช้เครื่องมือ (ทำตามนี้ให้จบ): ' + ownPlan + '\n' : '') +
+    readLine +
     'ห้ามคัดลอกเนื้อหาที่อ่านมาส่งกลับโดยไม่แก้ — ใช้มันทำงานตามที่รับปากไว้ และถ้าจะแก้โน้ตเดิม ใช้ UPDATED-NOTE name= ไม่ใช่ NEW-NOTE\n' +
     noteEditCapabilityPrompt() + pdfClipCapabilityPrompt() + kumikoToolsPrompt() +
     '\nตอบคำถามเดิมของผู้ใช้ต่อให้จบโดยใช้ข้อมูลข้างบน: ' + userMsg;
@@ -1437,13 +1445,16 @@ async function planStatusBlock(s){
   const plan = window.CorePlan.parsePlan(body);
   let next = 0;
   plan.steps.forEach((st, i) => { if (!next && (st.status === 'todo' || st.status === 'doing')) next = i + 1; });
-  return 'แผนงานที่กำลังทำ (ไฟล์ ' + s.plan.rel + ' — ไฟล์นี้คือสถานะจริง):\n' + body + '\nขั้นถัดไปคือ ขั้นที่ ' + next + '\n';
+  return 'แผนงานที่กำลังทำ (ไฟล์ ' + s.plan.rel + ' — ไฟล์นี้คือสถานะจริง):\n' + body +
+    '\nขั้นที่กำลังทำ (doing) คือขั้นที่ ' + next +
+    ' — ถ้าเนื้อหา/ผลลัพธ์ที่มีในบทสนทนานี้ทำให้ขั้นนี้เสร็จแล้ว ให้พิมพ์ ===PLAN-STEP n=' + next + ' status=done=== ทันที แล้วทำขั้นถัดไปเลย ห้ามทำขั้นที่เสร็จแล้วซ้ำ\n';
 }
 
 async function planRoundPrompt(s, instruction){
   const st = await planStatusBlock(s);
   return st + instruction + '\n' +
     'ทำตามแผนทีละขั้น: เมื่อขั้นเสร็จให้พิมพ์ ===PLAN-STEP n=เลขขั้น status=done note=สรุปสั้น=== ทุกครั้ง · ติดขัดใช้ status=blocked พร้อมเหตุผลใน note= · เมื่อทุกขั้นเสร็จต้องปิดแผนด้วย ===PLAN-DONE summary=สรุปสั้นๆ=== เสมอ ห้ามสร้าง KUMIKO-LOG.md เอง (ระบบจดให้)\n' +
+    'ห้ามเรียก READ-NOTE กับไฟล์ที่เนื้อหาถูกส่งให้แล้วในรอบนี้/รอบก่อน — ใช้เนื้อหาที่ได้มาแล้วทำงานต่อ\n' +
     noteEditCapabilityPrompt() + pdfClipCapabilityPrompt() + kumikoToolsPrompt();
 }
 
@@ -1479,13 +1490,21 @@ async function planContinueRound(s){
     return false;
   }
   if (prog.blocked) { renderPlanRunCard(); return false; }   // blocked → the card asks, no auto-continue
-  if (!CP.planAllowContinue({ round: (s.plan.rounds || 0), cap: CP.PLAN_ROUND_CAP, progressed: s._lastRoundProgressed })) {
-    s.plan.active = false;   // stall cut: the file stays; resume by typing or ▶ ทำต่อ
-    s.messages.push({ role: 'ai', text: t('แผนหยุดชั่วคราว: รอบล่าสุดไม่มีความคืบหน้า — พิมพ์สั่งต่อหรือปรับแผนได้') });
+  const act = CP.planStallAction({ round: (s.plan.rounds || 0), cap: CP.PLAN_ROUND_CAP,
+                                   progressed: s._lastRoundProgressed, nudged: !!s.plan._nudged });
+  if (act === 'pause') {
+    s.plan.active = false; s.plan._nudged = false;   // stall cut: the file stays; resume by typing or ▶ ทำต่อ
+    s.messages.push({ role: 'ai', text: t('แผนพักไว้ก่อน (ยังไม่เห็นความคืบหน้าในรอบล่าสุด) — กด ▶ ทำต่อ ที่ชิป 📋 หรือพิมพ์สั่งต่อได้เลย') });
     persistSessions(); renderHead();
     if (s.id === activeId) renderChat(); else renderPlanRunCard();
     return false;
   }
+  if (act === 'nudge') {
+    s.plan._nudged = true;   // one self-correction round; a second stall pauses above
+    firePlanRound(s, t('รอบที่แล้วยังไม่มีการอัปเดตสถานะขั้น — ถ้าขั้นปัจจุบันเสร็จแล้วให้พิมพ์ ===PLAN-STEP n=เลขขั้น status=done note=สรุป=== ก่อน แล้วทำขั้นถัดไปต่อทันที ถ้าติดขัดใช้ status=blocked พร้อมเหตุผล ห้ามเรียก READ-NOTE ซ้ำไฟล์ที่อ่านไปแล้ว'));
+    return true;
+  }
+  s.plan._nudged = false;   // progressing again (or still in free rounds) — fresh nudge budget
   firePlanRound(s, t('ทำขั้นถัดไปตามแผนต่อ'));
   return true;
 }
@@ -3387,6 +3406,7 @@ async function sendChat(){
   const mem = (typeof kumikoMemoryPrompt === 'function') ? await kumikoMemoryPrompt(msg) : '';
   const reviewFb = reviewOutcomeLine();
   s._toolRounds = 0;   // fresh user message → fresh read/search budget
+  window.__turnReads = [];   // and a fresh same-turn read-memory (no stale "ห้ามอ่านซ้ำ" list)
   // an ACTIVE or PAUSED plan attaches its live status to typed messages too — the user
   // steers mid-plan, and "ทำต่อ"/"ปรับแผน" after a pause must reach an AI that knows the file
   let planCtx = '';

@@ -97,6 +97,31 @@ describe('CorePlan planAllowContinue', () => {
   });
 });
 
+describe('CorePlan planStallAction (stall verdict: continue | nudge | pause)', () => {
+  it('HAPPY: free rounds continue; progress continues even when already nudged', () => {
+    expect(CP.planStallAction({ round: 0, progressed: false })).toBe('continue');
+    expect(CP.planStallAction({ round: 1, progressed: false })).toBe('continue');
+    expect(CP.planStallAction({ round: 5, progressed: true, nudged: true })).toBe('continue');   // progressed beats nudged
+  });
+  it('HAPPY: first stall past the free rounds nudges; a second stall pauses', () => {
+    expect(CP.planStallAction({ round: 2, progressed: false, nudged: false })).toBe('nudge');
+    expect(CP.planStallAction({ round: 3, progressed: false, nudged: false })).toBe('nudge');
+    expect(CP.planStallAction({ round: 3, progressed: false, nudged: true })).toBe('pause');     // nudged already → never nudge twice
+  });
+  it('EDGE: the cap beats everything — even real progress', () => {
+    expect(CP.planStallAction({ round: 12, cap: 12, progressed: true })).toBe('pause');
+    expect(CP.planStallAction({ round: 12, cap: 12, progressed: false, nudged: false })).toBe('pause');
+    expect(CP.planStallAction({ round: 20, progressed: true })).toBe('pause');   // default cap = 12
+  });
+  it('EDGE: round 0 nudged=true still continues (free round beats nudged); empty input is a free round', () => {
+    expect(CP.planStallAction({ round: 0, nudged: true })).toBe('continue');
+    expect(CP.planStallAction({})).toBe('continue');
+  });
+  it('REGRESSION (live 2026-09-23): nudged + still no progress → pause, so the nudge itself can never loop', () => {
+    expect(CP.planStallAction({ round: 4, progressed: false, nudged: true })).toBe('pause');
+  });
+});
+
 describe('CorePlan planLogEntry (worklog entry)', () => {
   const plan = CP.parsePlan('# สรุปวิชา DS\n\n- [x] อ่านบท 5 — ลิงก์ [[Sorting]]\n- [x] ทำแบบฝึกหัด\n- [ ] สรุปลงโน้ต\n');
   it('HAPPY: header + done/total + minutes + summary, every step line kept verbatim (wikilinks intact)', () => {
@@ -144,6 +169,7 @@ describe('CorePlan planLogPrepend (newest entry under the worklog header)', () =
 describe('plan loop guards — the 1s respawn loop can never come back (live bug 2026-09-22)', () => {
   const fs = require('fs'); const path = require('path');
   const read = (f) => fs.readFileSync(path.join(__dirname, '../..', f), 'utf8');
+  const fnSrc = (f, name) => { const r = read(f); const i = r.indexOf('function ' + name); return r.slice(i); };
   it('engine failure while a plan is active pauses the plan instead of refiring (happy)', () => {
     const chat = read('renderer/chat.js');
     expect(chat).toMatch(/_failed = payload && payload\.code != null && payload\.code !== 0/);
@@ -151,8 +177,54 @@ describe('plan loop guards — the 1s respawn loop can never come back (live bug
   });
   it('the stall gate counts the PLAN round counter, never the resettable tool counter (edge)', () => {
     const r = read('renderer/renderer.js');
-    expect(r).toMatch(/planAllowContinue\(\{ round: \(s\.plan\.rounds \|\| 0\)/);
+    // 2026-09-23: the boolean gate became planStallAction — the guard intent is unchanged
+    expect(r).toMatch(/planStallAction\(\{ round: \(s\.plan\.rounds \|\| 0\)/);
+    expect(r).not.toMatch(/planStallAction\(\{ round: s\._toolRounds/);
     expect(r).not.toMatch(/planAllowContinue\(\{ round: s\._toolRounds/);
     expect(r).toMatch(/s\.plan\.rounds = \(s\.plan\.rounds \|\| 0\) \+ 1/);
+  });
+});
+
+describe('plan stall fix — nudge once, then pause without looking like an error (live bug 2026-09-23)', () => {
+  const fs = require('fs'); const path = require('path');
+  const read = (f) => fs.readFileSync(path.join(__dirname, '../..', f), 'utf8');
+  const fnSrc = (r, name) => r.slice(r.indexOf('async function ' + name));
+  it('planContinueRound routes through planStallAction, not the old boolean gate', () => {
+    const fn = fnSrc(read('renderer/renderer.js'), 'planContinueRound');
+    expect(fn).toMatch(/planStallAction\(\{ round: \(s\.plan\.rounds \|\| 0\)/);
+    expect(fn).not.toContain('planAllowContinue');
+  });
+  it('the nudge branch arms s.plan._nudged = true and carries the tick instruction', () => {
+    const fn = fnSrc(read('renderer/renderer.js'), 'planContinueRound');
+    expect(fn).toMatch(/s\.plan\._nudged = true/);
+    expect(fn).toMatch(/status=done note=สรุป===/);
+    expect(fn).toMatch(/ห้ามเรียก READ-NOTE ซ้ำ/);
+  });
+  it('the pause message reads as a pause, not an error: ▶ ทำต่อ present, bare "ไม่มีความคืบหน้า" gone', () => {
+    const fn = fnSrc(read('renderer/renderer.js'), 'planContinueRound');
+    expect(fn).toContain('▶ ทำต่อ');
+    expect(fn).not.toContain('ไม่มีความคืบหน้า');
+  });
+  it('planStatusBlock tells the model to tick the current doing step immediately', () => {
+    const r = read('renderer/renderer.js');
+    const fn = r.slice(r.indexOf('async function planStatusBlock'), r.indexOf('async function planRoundPrompt'));
+    expect(fn).toContain('status=done=== ทันที');
+    expect(fn).toContain('ห้ามทำขั้นที่เสร็จแล้วซ้ำ');
+  });
+  it('a progressing round resets the nudge flag (fresh nudge budget each time work moves)', () => {
+    const fn = fnSrc(read('renderer/renderer.js'), 'planContinueRound');
+    expect(fn).toMatch(/s\.plan\._nudged = false/);
+  });
+  it('the nudge round rides the same round counter via firePlanRound — nudges are bounded by the cap too', () => {
+    const r = read('renderer/renderer.js');
+    expect(r).toMatch(/s\.plan\.rounds = \(s\.plan\.rounds \|\| 0\) \+ 1/);
+  });
+  it('turn read-memory: reads are tracked and fed to the continuation prompt with a no-reread order', () => {
+    const r = read('renderer/renderer.js');
+    expect(r).toMatch(/window\.__turnReads = window\.__turnReads \|\| \[\]\)\.push/);
+    expect(r).toContain('ไฟล์ที่อ่านแล้วในงานนี้ (เนื้อหาอยู่ด้านบน ห้ามขออ่านซ้ำ): ');
+    const chat = read('renderer/chat.js');
+    expect(chat).toMatch(/window\.__turnReads = \[\]/);   // reset at end of turn…
+    expect(r).toMatch(/window\.__turnReads = \[\]/);      // …and again on a fresh user message
   });
 });

@@ -670,6 +670,7 @@ window.api.onEngineDone(async (payload) => {
   s._toolRounds = 0;
   window.__aiReadTarget = null;   // implicit section target only lives within one tool round
   window.__toolImages = [];
+  window.__turnReads = [];   // per-turn read-memory too — the next plan round starts clean
   // If the AI emitted a note update, open the review automatically (matches the CLI path, where
   // the file-watcher opens it) — the user confirms once instead of pressing "apply" first.
   if (runId === activeId && last && last.role === 'ai' && typeof maybeAutoReviewReply === 'function') {
