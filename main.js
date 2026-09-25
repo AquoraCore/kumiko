@@ -692,15 +692,25 @@ ipcMain.handle('engine:run', (e, { engine, model, prompt, runId, images, overrid
   runApiProvider({ provider: apiProvider, model: apiModel, prompt, key, rid, emit, thinking: aicfg.thinking, images });
 });
 
-// data URIs → temp .jpg/.png files for the CLI path; best-effort cleanup after 10 minutes
+// data URIs → temp .jpg/.png files for the CLI path; best-effort cleanup after 10 minutes.
+// Files MUST live inside the vault (CLI cwd = NOTES_DIR; non-interactive CLIs can't read
+// outside cwd without a permission prompt) and the path we hand back MUST be relative.
 function _imagesToTempFiles(images){
-  const os = require('os');
+  const dir = path.join(NOTES_DIR, '.washi', 'tmp');
+  try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
+  try { // ponytail: linear sweep of one small dir, fine at CLI-chat frequency
+    for (const old of fs.readdirSync(dir)) {
+      if (!old.startsWith('kumiko-img-')) continue;
+      const fp = path.join(dir, old);
+      if (Date.now() - fs.statSync(fp).mtimeMs > 3600000) { try { fs.unlinkSync(fp); } catch (_) {} }
+    }
+  } catch (_) {}
   const out = [];
   images.forEach((u, i) => {
     const m = String(u).match(/^data:image\/([a-z+.-]+);base64,(.*)$/s); if (!m) return;
     const ext = m[1] === 'png' ? 'png' : 'jpg';
-    const f = path.join(os.tmpdir(), 'kumiko-img-' + Date.now() + '-' + i + '.' + ext);
-    try { fs.writeFileSync(f, Buffer.from(m[2], 'base64')); out.push(f); setTimeout(() => { try { fs.unlinkSync(f); } catch (_) {} }, 600000); } catch (_) {}
+    const f = path.join(dir, 'kumiko-img-' + Date.now() + '-' + i + '.' + ext);
+    try { fs.writeFileSync(f, Buffer.from(m[2], 'base64')); out.push(path.relative(NOTES_DIR, f).split(path.sep).join('/')); setTimeout(() => { try { fs.unlinkSync(f); } catch (_) {} }, 600000); } catch (_) {}
   });
   return out;
 }
