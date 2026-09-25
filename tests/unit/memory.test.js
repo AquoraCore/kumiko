@@ -75,6 +75,48 @@ describe('CoreMemory select — what gets injected', () => {
   });
 });
 
+// 2026-09-26: the block header must scope the memory to the tab's subject — a cross-subject
+// card ("โจทย์ Business" from CRAFT) hit by bigram relevance in another subject's tab was
+// answered as if it belonged there. The fix is prompt-level only; scoring is untouched.
+describe('CoreMemory promptBlock — tab scoping header', () => {
+  const NOW = Date.parse('2026-09-26T12:00:00Z');
+  const cards = [
+    { id: 'a', type: 'user', text: 'ชอบสรุปเป็นตาราง', ts: '2026-09-01' },
+    { id: 'b', type: 'state', text: 'วิชา CRAFT: โจทย์ Business ชุด 3 ยังไม่ทำ', ts: '2026-09-20' },
+  ];
+  it('happy: with tabName the header names the tab and warns about other subjects', () => {
+    const pb = M.promptBlock(cards, 'ขอตัวอย่างโจทย์ Business ฝึกเขียนหน่อย', { now: NOW, tabName: 'BUS SW REQ ANAL' });
+    expect(pb.text).toContain('แท็บสนทนานี้คือ "BUS SW REQ ANAL"');
+    expect(pb.text).toContain('ความจำรวมทุกวิชา/ทุกเรื่องใน vault');
+    expect(pb.text).toContain('ใบที่เป็นของวิชา/เรื่องอื่นให้เพิกเฉย');
+    expect(pb.text).toContain('ห้ามทึกทักว่าสถานะงาน/โจทย์ของวิชาอื่นเป็นของแท็บนี้');
+  });
+  it('happy: without tabName the tab sentence is gone but the cross-subject warning stays', () => {
+    const pb = M.promptBlock(cards, 'ขอตัวอย่างโจทย์ Business ฝึกเขียนหน่อย', { now: NOW });
+    expect(pb.text).not.toContain('แท็บสนทนานี้คือ');
+    expect(pb.text).toContain('ใบที่เป็นของวิชา/เรื่องอื่นให้เพิกเฉย');
+  });
+  it('edge: tabName is trimmed and capped at 60 chars', () => {
+    const long = '  ' + 'x'.repeat(80) + '  ';
+    const pb = M.promptBlock(cards, 'x', { now: NOW, tabName: long });
+    const m = pb.text.match(/แท็บสนทนานี้คือ "([^"]*)"/);
+    expect(m && m[1]).toBe('x'.repeat(60));
+  });
+  it('edge: empty / whitespace / non-string tabName → treated as absent', () => {
+    for (const bad of ['', '   ', null, 42]) {
+      const pb = M.promptBlock(cards, 'x', { now: NOW, tabName: bad });
+      expect(pb.text).not.toContain('แท็บสนทนานี้คือ');
+    }
+  });
+  it('tabName never changes the selection: ids and sel are identical', () => {
+    const noTab = M.promptBlock(cards, 'ขอตัวอย่างโจทย์ Business', { now: NOW });
+    const withTab = M.promptBlock(cards, 'ขอตัวอย่างโจทย์ Business', { now: NOW, tabName: 'BUS SW REQ ANAL' });
+    expect(withTab.ids).toEqual(noTab.ids);
+    expect(withTab.sel.profile.map((c) => c.id)).toEqual(noTab.sel.profile.map((c) => c.id));
+    expect(withTab.sel.relevant.map((c) => c.id)).toEqual(noTab.sel.relevant.map((c) => c.id));
+  });
+});
+
 describe('CoreMemory detectType — auto classification', () => {
   it('happy: one clear example per type', () => {
     expect(M.detectType('ชอบสรุปเป็นตารางเทียบ มีตัวอย่างตัวเลข')).toBe('user');
@@ -201,9 +243,21 @@ describe('wiring guards', () => {
   const read = (p) => fs.readFileSync(path.join(__dirname, '../../', p), 'utf8');
   it('sendChat injects memory + the learn prompt (both prompt branches)', () => {
     const r = read('renderer/renderer.js');
-    expect(r).toContain('await kumikoMemoryPrompt(msg)');
+    expect(r).toContain('await kumikoMemoryPrompt(msg, s.name || \'\')');
     expect((r.match(/rules \+ mem \+ reviewFb/g) || []).length).toBe(2);
     expect((r.match(/kumikoMemoryLearnPrompt\(\)/g) || []).length).toBeGreaterThanOrEqual(2);
+  });
+  it('sendChat states the tab subject in BOTH branches (tabLine before rules)', () => {
+    const r = read('renderer/renderer.js');
+    expect(r).toMatch(/const tabLine = \(s && s\.name\) \?\n?\s*\('หัวข้อของแท็บสนทนานี้: "' \+ s\.name \+ '"\\n'\) : '';/);
+    expect((r.match(/tabLine \+ rules \+ mem/g) || []).length).toBe(2);
+  });
+  it('memsys passes tabName through to promptBlock; learn prompt demands subject context', () => {
+    const ms = read('renderer/memsys.js');
+    expect(ms).toContain('async function kumikoMemoryPrompt(query, tabName)');
+    expect(ms).toMatch(/promptBlock\(cards, query \|\| '', \{ now: Date\.now\(\), profileExtra: gcards, tabName: tabName \}\)/);
+    expect(ms).toContain('ทุกใบความจำต้องระบุวิชา/บริบทของมันในข้อความเสมอ');
+    expect(ms).toContain('ใบที่ไม่ระบุวิชาจะถูกฉีดข้ามแท็บแล้วทำให้ตอบผิดวิชา');
   });
   it('chat wires the confirm card + display scrub + 🧠 desk button', () => {
     const c = read('renderer/chat.js');

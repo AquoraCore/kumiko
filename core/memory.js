@@ -131,14 +131,21 @@
     scored.forEach(function (c) { if (used + c.text.length <= budget) { rel.push(c); used += c.text.length; } });
     return { profile: prof, relevant: rel, total: live.length, chars: used };
   }
+  // The block header warns the AI that cards come from the WHOLE vault (every subject), not
+  // just this chat tab — with opts.tabName it also names the tab so cross-subject cards
+  // ("โจทย์ Business" from CRAFT showing up in a REQ ANAL tab) get ignored, not answered.
   function promptBlock(cards, query, opts) {
     var sel = select(cards, query, opts);
     if (!sel.profile.length && !sel.relevant.length) return { text: '', ids: [], sel: sel };
+    var tab = (opts && typeof opts.tabName === 'string') ? opts.tabName.trim().slice(0, 60) : '';
     var lines = [];
     if (sel.profile.length) lines.push('[ความจำ · โปรไฟล์] ' + sel.profile.map(function (c) { return c.text; }).join(' · '));
     if (sel.relevant.length) lines.push('[ความจำ · เกี่ยวกับคำถามนี้ ' + sel.relevant.length + '/' + sel.total + '] ' + sel.relevant.map(function (c) { return c.text; }).join(' · '));
+    var head = 'ความจำของ vault นี้ (ข้อเท็จจริงที่ผู้ใช้ยืนยันแล้ว — เป็นความจำรวมทุกวิชา/ทุกเรื่องใน vault ไม่ใช่ของแท็บนี้อย่างเดียว)' +
+      (tab ? ' แท็บสนทนานี้คือ "' + tab + '" — ใช้เฉพาะใบที่ตรงกับหัวข้อของแท็บนี้' : '') +
+      ' ใบที่เป็นของวิชา/เรื่องอื่นให้เพิกเฉย ห้ามทึกทักว่าสถานะงาน/โจทย์ของวิชาอื่นเป็นของแท็บนี้ และไม่ต้องท่องความจำซ้ำให้ฟัง):\n';
     return {
-      text: 'ความจำของ vault นี้ (ข้อเท็จจริงที่ผู้ใช้ยืนยันแล้ว — ใช้ประกอบคำตอบ ไม่ต้องท่องซ้ำให้ฟัง):\n' + lines.join('\n') + '\n\n',
+      text: head + lines.join('\n') + '\n\n',
       ids: sel.profile.concat(sel.relevant).map(function (c) { return c.id; }),
       sel: sel
     };

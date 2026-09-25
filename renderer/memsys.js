@@ -49,12 +49,12 @@ async function memSaveRouted(type, text){
 function _memUse(){ return (typeof vsGet === 'function' && (vsGet('memUse', {}) || {})) || {}; }
 
 // ---- injection: profile always + top-K relevant to THIS question, inside the budget --------
-async function kumikoMemoryPrompt(query){
+async function kumikoMemoryPrompt(query, tabName){
   try {
     if (!window.CoreMemory) return '';
     const [gcards, cards] = await Promise.all([memReadGlobal(), memReadCards()]);
     if (!cards.length && !gcards.length) return '';
-    const pb = window.CoreMemory.promptBlock(cards, query || '', { now: Date.now(), profileExtra: gcards });
+    const pb = window.CoreMemory.promptBlock(cards, query || '', { now: Date.now(), profileExtra: gcards, tabName: tabName });
     if (pb.ids.length && typeof vsSet === 'function') {
       const use = _memUse();
       pb.ids.forEach((id) => { use[id] = (use[id] || 0) + 1; });
@@ -69,6 +69,7 @@ function kumikoMemoryLearnPrompt(){
   return '\nความจำถาวร: เมื่อพบข้อเท็จจริงที่ควรจำข้ามบทสนทนา (กำหนดสอบ จุดที่อาจารย์เน้น เล่มหลักของวิชา ความชอบของผู้ใช้ สถานะการอ่าน) ให้เสนอด้วยบล็อกนี้ (สั้น 1 บรรทัด ไม่เกิน 2 ข้อต่อคำตอบ):\n' +
     '===REMEMBER===\n(ข้อเท็จจริง)\n' + window.CoreMarkdown.NOTE_CLOSE + '\n' +
     'ระบบจำแนกประเภทจากข้อความเอง — ความชอบ/สไตล์ของผู้ใช้จะติดตัวข้ามทุก vault ส่วนข้อเท็จจริงของวิชาอยู่เฉพาะ vault นี้\n' +
+    'ทุกใบความจำต้องระบุวิชา/บริบทของมันในข้อความเสมอ เช่น ขึ้นต้นว่า "วิชา CRAFT: …" หรือวงเล็บท้าย — ใบที่ไม่ระบุวิชาจะถูกฉีดข้ามแท็บแล้วทำให้ตอบผิดวิชา\n' +
     'ถ้าความจำเดิมผิดหรือหมดอายุ: ===FORGET text=ข้อความบางส่วนของใบนั้น===\n' +
     'ระบบจะถามผู้ใช้ก่อนบันทึก/ลบเสมอ — ห้ามแก้ไฟล์ KUMIKO-MEMORY.md ผ่านช่องทางโน้ต\n';
 }

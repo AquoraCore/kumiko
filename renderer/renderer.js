@@ -3500,7 +3500,10 @@ async function sendChat(){
   // just another history line, so long contexts steered answers away from what was actually asked.
   await ensureKumikoSeed();
   const rules = await kumikoRulesPrompt();
-  const mem = (typeof kumikoMemoryPrompt === 'function') ? await kumikoMemoryPrompt(msg) : '';
+  // the AI must know WHICH subject this tab is even when no memory gets injected — otherwise
+  // a cross-subject card or generic question gets answered with another subject's status
+  const tabLine = (s && s.name) ? ('หัวข้อของแท็บสนทนานี้: "' + s.name + '"\n') : '';
+  const mem = (typeof kumikoMemoryPrompt === 'function') ? await kumikoMemoryPrompt(msg, s.name || '') : '';
   const reviewFb = reviewOutcomeLine();
   s._toolRounds = 0;   // fresh user message → fresh read/search budget
   window.__turnReads = [];   // and a fresh same-turn read-memory (no stale "ห้ามอ่านซ้ำ" list)
@@ -3510,14 +3513,14 @@ async function sendChat(){
   if (s.plan && s.plan.rel && !s.plan.finished && typeof planStatusBlock === 'function') { try { planCtx = await planStatusBlock(s); } catch (_) {} }
   const finalPrompt = planCtx + (context
     ? ('คำถามล่าสุดของผู้ใช้: ' + msg + '\n\n' +
-       rules + mem + reviewFb +
+       tabLine + rules + mem + reviewFb +
        'ด้านล่างคือบริบทจากโน้ตของผู้ใช้ เรียงตามความสำคัญ (บนสุด = เอกสารที่เปิดอยู่ — ยึดเป็นหลัก)\n' +
        'ใช้เฉพาะส่วนที่เกี่ยวข้องกับคำถามจริง ๆ และอ้าง [source: …] เฉพาะแหล่งที่ใช้เนื้อหาจริง — ถ้าคำถามไม่เกี่ยวกับเอกสารเหล่านี้ ห้ามอ้างถึงหรือดึงเนื้อหาจากมัน ให้ตอบจากความรู้ทั่วไปตามปกติ\n' +
        noteEditCapabilityPrompt() + pdfClipCapabilityPrompt() + kumikoLearnPrompt() + kumikoMemoryLearnPrompt() + kumikoToolsPrompt() + '\n' +
        context + '\n\n' +
        (history ? 'บทสนทนาก่อนหน้า:\n' + history + '\n\n' : '') +
        'ตอบคำถามนี้: ' + msg)
-    : (rules + mem + reviewFb + noteEditCapabilityPrompt() + pdfClipCapabilityPrompt() + kumikoLearnPrompt() + kumikoMemoryLearnPrompt() + kumikoToolsPrompt() + (history ? 'บทสนทนาก่อนหน้า:\n' + history + '\n\n' : '') + 'ผู้ใช้: ' + msg));
+    : (tabLine + rules + mem + reviewFb + noteEditCapabilityPrompt() + pdfClipCapabilityPrompt() + kumikoLearnPrompt() + kumikoMemoryLearnPrompt() + kumikoToolsPrompt() + (history ? 'บทสนทนาก่อนหน้า:\n' + history + '\n\n' : '') + 'ผู้ใช้: ' + msg));
   beginAiTurn(msg || t('(ส่งภาพ)'), sources, images);
   window.api.runEngine({ override: { sel: s.engineSel, model: s.modelSel }, prompt: finalPrompt, runId: s.id, images: images.map((im) => im.uri) });
 }
