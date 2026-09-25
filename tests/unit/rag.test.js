@@ -740,3 +740,70 @@ describe('incremental index + corpus cache wiring', () => {
     expect(s).toContain("title: _baseName(n.name)");
   });
 });
+
+// ---- anchorKind: "open" = what the user is LOOKING AT (stale-anchor fix 2026-09-25) ----
+// currentNote/currentPdf are never cleared on view switches, so a note opened once kept
+// injecting [ความสำคัญสูงสุด] + anchoring RAG from every other view. anchorKind maps the
+// #left DOM class to the visible document kind.
+import { anchorKind } from '../../core/rag.js';
+
+describe('anchorKind (happy)', () => {
+  it('note editor (no view-* class) -> note, incl. rules-mode', () => {
+    expect(anchorKind('')).toBe('note');
+    expect(anchorKind('rules-mode')).toBe('note');
+  });
+  it('view-pdf -> pdf', () => {
+    expect(anchorKind('view-pdf')).toBe('pdf');
+  });
+  it('other view-* -> null (no visible document)', () => {
+    ['view-graph', 'view-canvas', 'view-table', 'view-dash', 'view-crate', 'view-trash', 'view-tag']
+      .forEach((c) => expect(anchorKind(c)).toBe(null));
+  });
+});
+
+describe('anchorKind (edge)', () => {
+  it('mixed classes: view-pdf wins over everything else', () => {
+    expect(anchorKind('view-canvas rules-mode view-pdf')).toBe('pdf');
+  });
+  it('mixed classes: another view alongside junk -> null', () => {
+    expect(anchorKind('view-canvas rules-mode')).toBe(null);
+  });
+  it('empty / undefined -> note (safe default matching old behaviour)', () => {
+    expect(anchorKind('')).toBe('note');
+    expect(anchorKind(undefined)).toBe('note');
+    expect(anchorKind(null)).toBe('note');
+  });
+  it('does not match a class that merely contains the token as a substring', () => {
+    expect(anchorKind('xview-pdf')).toBe('note');
+    expect(anchorKind('view-canvas2')).toBe('note');
+  });
+  it('extra whitespace between classes is fine', () => {
+    expect(anchorKind('  view-canvas   rules-mode  ')).toBe(null);
+  });
+});
+
+describe('buildPriorityContext gates P1 on the VISIBLE view (source scan)', () => {
+  const R = (f) => require('fs').readFileSync(require('path').join(__dirname, '../../', f), 'utf8');
+  it('decides the anchor from the #left DOM class via CoreRag.anchorKind (web parity)', () => {
+    const s = R('renderer/renderer.js');
+    expect(s).toContain('window.CoreRag.anchorKind');
+    expect(s).toContain("document.getElementById('left')");
+    expect(s).toContain("lf ? lf.className : ''");
+  });
+  it('P1 note block is gated by kind === note', () => {
+    expect(R('renderer/renderer.js')).toMatch(/kind === 'note' && currentNote/);
+  });
+  it('P1 pdf block is gated by kind === pdf (PDF must be actually shown)', () => {
+    expect(R('renderer/renderer.js')).toMatch(/kind === 'pdf' && typeof currentPdf === 'string' && currentPdf/);
+  });
+  it('ragAmbient path untouched — ambient RAG still always runs', () => {
+    expect(R('renderer/renderer.js')).toContain("if (vsGet('ragAmbient', true))");
+    expect(R('renderer/renderer.js')).toContain('exclude, openName, docQuery, outlinks, mentions, weights: ragWeights()');
+  });
+  it('over-cite fix: the prompt header forbids citing unrelated context', () => {
+    expect(R('renderer/renderer.js')).toContain('ห้ามอ้างถึงหรือดึงเนื้อหาจากมัน');
+  });
+  it('anchorKind is exported from core (Node + window.CoreRag UMD)', () => {
+    expect(typeof anchorKind).toBe('function');
+  });
+});

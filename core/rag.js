@@ -365,6 +365,25 @@
     return s.trim();
   }
 
+  // -------------------------------------------------------------- anchorKind
+  // What document is the user ACTUALLY looking at? #left's className carries the active view
+  // (setMainView toggles view-* classes; the note editor has none). currentNote/currentPdf are
+  // never cleared on view switches, so without this a note opened once kept anchoring every
+  // later answer from canvas/dashboard/etc. Decide from the DOM — the shared (desktop+web)
+  // source of truth, not a desktop-only variable.
+  //   contains 'view-pdf'      -> 'pdf'  (a PDF is on screen)
+  //   any other view-*         -> null   (graph/canvas/table/dash/crate/trash/tag — nothing open)
+  //   otherwise                -> 'note' (note editor, incl. rules-mode; empty/undefined too —
+  //                                        safe default matching the old behaviour)
+  function anchorKind(viewClassName) {
+    var s = (typeof viewClassName === 'string') ? viewClassName : '';
+    var cls = s.split(/\s+/);
+    if (cls.indexOf('view-pdf') >= 0) return 'pdf';
+    var otherViews = { 'view-graph': 1, 'view-canvas': 1, 'view-table': 1, 'view-dash': 1, 'view-crate': 1, 'view-trash': 1, 'view-tag': 1 };
+    for (var i = 0; i < cls.length; i++) if (otherViews[cls[i]]) return null;
+    return 'note';
+  }
+
   // -------------------------------------------------------------- passage selection
   // Split a document into retrievable passages. Markdown headings start a new passage (and stay
   // attached to their body, so a passage still says what it is about); anything still oversized is
@@ -558,6 +577,7 @@
     fuseRRF: fuseRRF,
     weightedRRF: weightedRRF,
     fuseRag: fuseRag,
+    anchorKind: anchorKind,
     detectMentions: detectMentions,
     docFamilyKey: docFamilyKey,
     splitPassages: splitPassages,

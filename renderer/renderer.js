@@ -3377,6 +3377,11 @@ async function buildPriorityContext(question, refNames){
   const parts = [], sources = [], seen = new Set();
   const exclude = [];              // basenames already injected as P1 — RAG must NOT re-inject them
   let openName = '', docQuery = '', outlinks = [], openBody = '';
+  // "Open" = what the user is LOOKING AT, not the last thing opened: currentNote/currentPdf are
+  // never cleared on view switches, so a note visited once anchored every later answer. The
+  // #left DOM class is the shared (desktop+web) truth of which view is on screen.
+  const lf = document.getElementById('left');
+  const kind = (window.CoreRag && window.CoreRag.anchorKind) ? window.CoreRag.anchorKind(lf ? lf.className : '') : 'note';
   // P0 — notes the user EXPLICITLY @-mentioned in this message: deliberate, so they outrank
   // even the open document. Passage-selected like everything else; deduped from P1/RAG below.
   for (const nm of (Array.isArray(refNames) ? refNames : []).slice(0, 5)) {
@@ -3390,10 +3395,11 @@ async function buildPriorityContext(question, refNames){
     parts.push('[อ้างอิงโดยผู้ใช้ — @' + nm + '] [source: ' + nm + ']\n' + clipped);
     sources.push({ name: nm, reason: 'open' }); seen.add(k); exclude.push(nm);
   }
-  // P1 — the OPEN document (note or PDF) is the PRIMARY context, placed first and marked
-  // highest-priority. It's always injected when something is open, and also becomes the ANCHOR
-  // for retrieval (its topic + its links feed the RAG channels below).
-  if (currentNote) {
+  // P1 — the VISIBLE document (note or PDF) is the PRIMARY context, placed first and marked
+  // highest-priority. It's injected only when actually on screen (kind gate — a stale
+  // currentNote/currentPdf after switching to canvas/dashboard must NOT anchor), and also
+  // becomes the ANCHOR for retrieval (its topic + its links feed the RAG channels below).
+  if (kind === 'note' && currentNote) {
     let body = ''; try { body = (typeof getFullMarkdown === 'function') ? getFullMarkdown() : ''; } catch (_) {}
     const nm0 = currentNote.replace(/\.md$/i, '');
     if (body && body.trim() && !seen.has(nm0.toLowerCase())) {
@@ -3402,7 +3408,7 @@ async function buildPriorityContext(question, refNames){
       sources.push({ name: nm, reason: 'open' }); seen.add(nm.toLowerCase()); exclude.push(nm);
       openName = nm; openBody = body; const sig = _docSignals(nm, body); docQuery = sig.docQuery; outlinks = sig.outlinks;
     }
-  } else if (typeof currentPdf === 'string' && currentPdf) {
+  } else if (kind === 'pdf' && typeof currentPdf === 'string' && currentPdf) {
     // A PDF is open (not a note) → its extracted text IS the primary context. Prefer the
     // cached PDF-Text note; if the background indexer hasn't produced it yet, extract on demand.
     const base = currentPdf.replace(/\.pdf$/i, '').split('/').pop();
@@ -3475,7 +3481,7 @@ async function sendChat(){
     ? ('คำถามล่าสุดของผู้ใช้: ' + msg + '\n\n' +
        rules + mem + reviewFb +
        'ด้านล่างคือบริบทจากโน้ตของผู้ใช้ เรียงตามความสำคัญ (บนสุด = เอกสารที่เปิดอยู่ — ยึดเป็นหลัก)\n' +
-       'ใช้เฉพาะส่วนที่เกี่ยวข้องกับคำถาม อ้างอิงแหล่งด้วย [source: …] เมื่อใช้ หากคำถามไม่เกี่ยวกับโน้ต ให้ตอบตามปกติได้เลย\n' +
+       'ใช้เฉพาะส่วนที่เกี่ยวข้องกับคำถามจริง ๆ และอ้าง [source: …] เฉพาะแหล่งที่ใช้เนื้อหาจริง — ถ้าคำถามไม่เกี่ยวกับเอกสารเหล่านี้ ห้ามอ้างถึงหรือดึงเนื้อหาจากมัน ให้ตอบจากความรู้ทั่วไปตามปกติ\n' +
        noteEditCapabilityPrompt() + pdfClipCapabilityPrompt() + kumikoLearnPrompt() + kumikoMemoryLearnPrompt() + kumikoToolsPrompt() + '\n' +
        context + '\n\n' +
        (history ? 'บทสนทนาก่อนหน้า:\n' + history + '\n\n' : '') +
