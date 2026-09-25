@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mdToHtml, _mdInline, stripMdFence, extractNoteUpdate, extractPdfClips, extractNewNotes, extractSectionUpdates, replaceSection, stripNoteBlocks, extractKumikoRules, extractPlanProposals, extractActions, linkifyRefs, historyText, liveActivity, NOTE_OPEN, NOTE_CLOSE } from '../../core/markdown.js';
+import { mdToHtml, _mdInline, stripMdFence, extractNoteUpdate, extractPdfClips, pdfClipFailLine, extractNewNotes, extractSectionUpdates, replaceSection, stripNoteBlocks, extractKumikoRules, extractPlanProposals, extractActions, linkifyRefs, historyText, liveActivity, NOTE_OPEN, NOTE_CLOSE } from '../../core/markdown.js';
 
 describe('mdToHtml (happy)', () => {
   it('renders **bold** as <strong>', () => {
@@ -202,6 +202,37 @@ describe('historyText also collapses clip commands', () => {
     const h = historyText('เรียบร้อย\n===PDF-CLIP page=7===');
     expect(h).not.toContain('===PDF-CLIP');
     expect(h).toContain('แปะสไลด์หน้า 7');
+  });
+});
+
+// the failure line pushed into the chat when clips could NOT be resolved (2026-09-25:
+// the note used to be silently saved without the image, with only a 3-second toast)
+describe('pdfClipFailLine', () => {
+  it('no-PDF reason tells the user to open the source PDF first', () => {
+    const s = pdfClipFailLine([12, 3], true);
+    expect(s).toContain('ยังไม่มีไฟล์ PDF เปิดอยู่');
+    expect(s).toContain('เปิดไฟล์ PDF ต้นทางในแอปก่อน');
+    expect(s).toContain('3, 12');   // sorted
+  });
+  it('render-fail reason says the note was saved without the image', () => {
+    const s = pdfClipFailLine([7], false);
+    expect(s).toContain('เรนเดอร์ไม่ผ่าน');
+    expect(s).toContain('โน้ตถูกบันทึกโดยไม่มีภาพ');
+    expect(s).toContain('หน้า 7');
+  });
+  it('empty or non-array pages → empty string (nothing to report)', () => {
+    expect(pdfClipFailLine([], true)).toBe('');
+    expect(pdfClipFailLine(null, true)).toBe('');
+    expect(pdfClipFailLine('12', false)).toBe('');
+  });
+  it('dedupes + sorts; the list caps at 8 pages with an ellipsis', () => {
+    const s = pdfClipFailLine([9, 2, 9, 5, 1, 30, 4, 8, 7, 6, 3], true);
+    expect(s).toContain('1, 2, 3, 4, 5, 6, 7, 8, …');
+    expect(s).not.toContain('30');   // beyond the cap
+  });
+  it('non-numeric values are filtered out', () => {
+    expect(pdfClipFailLine(['x', {}, undefined, '12'], true)).toContain('12');
+    expect(pdfClipFailLine(['x', {}], true)).toBe('');
   });
 });
 

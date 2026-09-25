@@ -147,12 +147,30 @@ describe('AI slide-clip (===PDF-CLIP===) chain', () => {
   const chat2 = read('renderer/chat.js');
   const pdf2 = read('renderer/pdf.js');
 
-  it('the AI is told about the clip capability only while a PDF is open', () => {
+  it('the AI is told about the clip capability while a PDF is open — and told NOT to use it otherwise', () => {
     expect(renderer2).toContain('function pdfClipCapabilityPrompt');
-    expect(renderer2).toMatch(/pdfClipCapabilityPrompt\(\)\{\n  if \(!\(typeof currentPdf === 'string' && currentPdf\)\) return '';/);
+    // 2026-09-25 contract change: with no PDF open the prompt no longer returns '' — the
+    // model remembered the verb from past chats and sent ===PDF-CLIP=== anyway, and the
+    // work vanished silently. It now returns an explicit negative instruction.
+    expect(renderer2).toMatch(/if \(!\(typeof currentPdf === 'string' && currentPdf\)\) return '\\nตอนนี้ไม่มีไฟล์ PDF เปิดอยู่/);
+    expect(renderer2).toContain('ห้ามใช้คำสั่ง ===PDF-CLIP===');
+    // no CoreMarkdown (web parity guard) still returns '' — the old hard-off behavior
+    expect(renderer2).toMatch(/if \(!window\.CoreMarkdown \|\| !window\.CoreMarkdown\.extractPdfClips\) return '';/);
     // wired into BOTH prompt branches + the tool-continuation prompt (2026-08-19)
     // + the plan-round prompt (Plan Mode 2026-09-22) — at least the original three
     expect((renderer2.match(/noteEditCapabilityPrompt\(\) \+ pdfClipCapabilityPrompt\(\)/g) || []).length).toBeGreaterThanOrEqual(3);
+  });
+
+  // 2026-09-25: a failed clip is a CHAT LINE (kept + persisted), not a 3-second toast —
+  // and a no-PDF clip is caught early with the "open the PDF first" explanation.
+  it('clip failures land in the chat, bucketed by reason; no-PDF is caught before per-page work', () => {
+    expect(renderer2).toContain('function pdfClipFailNotify');
+    expect(renderer2).toMatch(/s\.messages\.push\(\{ role: 'ai', text: line \}\)/);
+    expect(renderer2).toMatch(/pdfClipFailNotify\(pages, true\); return;/);                    // standalone executor: early guard
+    expect(renderer2).toMatch(/pdfClipFailNotify\(failedNoPdf, true\)/);                       // in-note markers: no-pdf bucket
+    expect(renderer2).toMatch(/pdfClipFailNotify\(failedRender, false\)/);                     // in-note markers: render-fail bucket
+    // the in-loop vanishing toast is gone
+    expect(renderer2).not.toContain("pdfToast(t('แปะภาพหน้า ') + m[1]");
   });
 
   it('commands run on turn end and each page renders OFFSCREEN', () => {
@@ -582,7 +600,9 @@ describe('2026-08-19 log fixes', () => {
     expect(pdfL).toMatch(/Promise\.race\(\[task\.promise[\s\S]{0,80}setTimeout/);
     expect(pdfL).toContain("return { ok: false, error: 'render-timeout' }");
     // and the in-note resolver TELLS the user instead of failing silently
-    expect(rendererL).toContain('ไม่สำเร็จ — บันทึกโน้ตโดยไม่มีภาพ');
+    // (2026-09-25: now via pdfClipFailNotify's chat line from CoreMarkdown.pdfClipFailLine)
+    expect(rendererL).toContain('pdfClipFailNotify(failedRender, false)');
+    expect(read('core/markdown.js')).toContain('โน้ตถูกบันทึกโดยไม่มีภาพ');
   });
 
   it('named section edits reach ANY note: staged as a deferred review, never dropped', () => {

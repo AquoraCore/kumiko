@@ -1121,19 +1121,40 @@ function noteEditCapabilityPrompt(){
   return create + edit;
 }
 // Tell the AI it can paste PDF slides (only when a PDF is open — the currentPdf handle
-// survives switching to a note, which is the main use case).
+// survives switching to a note, which is the main use case). With NO PDF open it is
+// told the opposite (2026-09-25): the model remembered the verb from past chats and
+// sent ===PDF-CLIP=== anyway, and the work vanished silently.
 // The AI can pick pages from the extracted text; it cannot SEE the images, so this is page-level.
 function pdfClipCapabilityPrompt(){
-  if (!(typeof currentPdf === 'string' && currentPdf)) return '';
   if (!window.CoreMarkdown || !window.CoreMarkdown.extractPdfClips) return '';
+  if (!(typeof currentPdf === 'string' && currentPdf)) return '\nตอนนี้ไม่มีไฟล์ PDF เปิดอยู่ — ห้ามใช้คำสั่ง ===PDF-CLIP=== ในรอบนี้ ถ้างานต้องแปะภาพหน้าสไลด์ ให้ตอบแจ้งผู้ใช้ว่าต้องเปิดไฟล์ PDF ต้นทางก่อน\n';
   return '\nคุณแปะภาพสไลด์จาก PDF ที่เปิดอยู่ได้: เมื่อผู้ใช้ขอให้นำสไลด์/ภาพหน้าใดมาแปะ ให้เพิ่มบรรทัดคำสั่ง (หนึ่งหน้าต่อหนึ่งบรรทัด ห้ามมีข้อความอื่นในบรรทัดนั้น)\n===PDF-CLIP page=เลขหน้า===\n' +
     'ตำแหน่งของบรรทัดนี้สำคัญ: ถ้าวางไว้ในบล็อกโน้ต (UPDATED-NOTE / NEW-NOTE / UPDATED-SECTION) ภาพจะถูกแทรกในโน้ตนั้น ตรงจุดที่วางบรรทัดไว้ — เมื่อผู้ใช้ขอ "เพิ่มภาพ/อ้างอิงหน้า X ในโน้ต Y" ให้วางไว้ในบล็อกของโน้ตนั้นเสมอ; วางนอกบล็อกเมื่อต้องการส่งเข้าโน้ตเป้าหมายของ PDF เท่านั้น\n' +
     'ค่าปกติ (กติกาของผู้ใช้): ทุกหัวข้อที่สรุปจากหน้าสไลด์ ต้องวาง ===PDF-CLIP page=N=== ไว้ใต้หัวข้อนั้นเสมอโดยไม่ต้องรอให้ขอ — ห้ามถามว่า "อยากให้แนบสไลด์ไหม" และเขียนเลขหน้าไว้ในหัวข้อ เช่น "## Merge Sort (หน้า 66)"\n';
 }
+// Push a clip-failure line into the ACTIVE CHAT (2026-09-25: a failed clip used to be
+// only a 3-second toast — the user never learned the note was saved without the image,
+// or that they must open the PDF first). Falls back to the old toast without a session.
+function pdfClipFailNotify(pages, noPdf){
+  try {
+    const line = (window.CoreMarkdown && typeof window.CoreMarkdown.pdfClipFailLine === 'function')
+      ? window.CoreMarkdown.pdfClipFailLine(pages, noPdf, t) : '';
+    if (!line) return;
+    const s = (typeof activeSession === 'function') ? activeSession() : null;
+    if (s && Array.isArray(s.messages)) {
+      s.messages.push({ role: 'ai', text: line });
+      if (typeof persistSessions === 'function') persistSessions();
+      if (typeof renderChat === 'function') renderChat();
+      return;
+    }
+    if (typeof pdfToast === 'function') pdfToast(line);
+  } catch (_) {}
+}
 // Replace ===PDF-CLIP page=N=== marker lines INSIDE a note body with the rendered slide image
 // (at the marker's position, with attribution). The AI places clips where it wants them; the
 // old executor ignored position and dumped every clip into the capture target — and the raw
-// marker line leaked into the saved note. Failed renders remove the line (never leak protocol).
+// marker line leaked into the saved note. Failed renders remove the line (never leak protocol)
+// and report the missing pages in the chat, split by reason (no PDF vs render failure).
 async function resolvePdfClipMarkers(body){
   let s = String(body == null ? '' : body);
   // standing rule: content that cites slide pages carries the slide images — inject missing
@@ -1143,21 +1164,27 @@ async function resolvePdfClipMarkers(body){
     try { s = window.CoreMarkdown.ensureSlideClips(s, pdfDoc.numPages).body; } catch (_) {}
   }
   if (!/^[ \t]*===PDF-CLIP page=\d/m.test(s)) return s;
+  const noPdfAtStart = !(typeof currentPdf === 'string' && currentPdf) || !pdfDoc;
   const lines = s.split('\n');
   let used = 0;
+  const failedNoPdf = [], failedRender = [];
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(/^[ \t]*===PDF-CLIP page=(\d{1,4})===[ \t]*$/);
     if (!m) continue;
+    const pg = parseInt(m[1], 10);
     let rep = '';
     if (used < 5 && typeof renderPdfClipMarkdown === 'function') {
       try {
-        const r = await renderPdfClipMarkdown(parseInt(m[1], 10));
+        const r = await renderPdfClipMarkdown(pg);
         if (r && r.ok) { rep = r.md + '\n\n' + pdfClipAttribution(r.page); used++; }
-        else { try { pdfToast(t('แปะภาพหน้า ') + m[1] + t(' ไม่สำเร็จ — บันทึกโน้ตโดยไม่มีภาพ')); } catch (_) {} }
-      } catch (_) {}
+        else if (noPdfAtStart || (r && r.error === 'no-pdf')) failedNoPdf.push(pg);
+        else failedRender.push(pg);
+      } catch (_) { failedRender.push(pg); }
     }
     lines[i] = rep;
   }
+  if (failedNoPdf.length) pdfClipFailNotify(failedNoPdf, true);
+  if (failedRender.length) pdfClipFailNotify(failedRender, false);
   return lines.join('\n').replace(/\n{3,}/g, '\n\n');
 }
 
@@ -1171,7 +1198,11 @@ async function maybeClipPdfPages(text){
     const scope = window.CoreMarkdown.stripNoteBlocks ? window.CoreMarkdown.stripNoteBlocks(text) : text;
     pages = window.CoreMarkdown.extractPdfClips(scope).pages;
   } catch (_) { return; }
-  if (!pages.length || typeof clipPdfPageToTarget !== 'function') return;
+  if (!pages.length) return;
+  // no open PDF → every page would just fail; tell the user ONCE in the chat instead of
+  // looping clipPdfPageToTarget into per-page failure toasts (2026-09-25)
+  if (!(typeof currentPdf === 'string' && currentPdf) || !pdfDoc) { pdfClipFailNotify(pages, true); return; }
+  if (typeof clipPdfPageToTarget !== 'function') return;
   for (const p of pages.slice(0, 5)) {
     const r = await clipPdfPageToTarget(p);
     try {

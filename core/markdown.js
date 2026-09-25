@@ -521,6 +521,26 @@
     return { pages: pages, chat: chat };
   }
 
+  // The failure line pushed into the chat when ===PDF-CLIP=== markers could NOT be
+  // resolved (2026-09-25: the note was silently saved without the image and only a
+  // 3-second toast knew). Pure: pages are deduped + sorted (max 8 shown, then "…");
+  // non-numeric values are filtered. T = the renderer's translate fn (identity
+  // default, so tests see the Thai source strings). No lookbehind.
+  function pdfClipFailLine(pages, noPdf, T) {
+    T = typeof T === 'function' ? T : function (x) { return x; };
+    var seen = {}, ps = [];
+    (Array.isArray(pages) ? pages : []).forEach(function (p) {
+      var n = Number(p);
+      if (isFinite(n) && n > 0 && !seen[n]) { seen[n] = 1; ps.push(n); }
+    });
+    if (!ps.length) return '';
+    ps.sort(function (a, b) { return a - b; });
+    var list = ps.slice(0, 8).join(', ') + (ps.length > 8 ? ', …' : '');
+    return T('⚠ แปะภาพสไลด์หน้า ') + list + (noPdf
+      ? T(' ไม่สำเร็จ — ยังไม่มีไฟล์ PDF เปิดอยู่ ให้เปิดไฟล์ PDF ต้นทางในแอปก่อน แล้วสั่งใหม่อีกครั้ง')
+      : T(' ไม่สำเร็จ (เรนเดอร์ไม่ผ่าน) — โน้ตถูกบันทึกโดยไม่มีภาพ ลองสั่งใหม่อีกครั้งได้'));
+  }
+
   // ---- live activity console (mock W2 2026-09-22): what the AI is doing RIGHT NOW, read
   // from the raw streaming buffer — the display strip empties the bubble of verbs/note
   // blocks, so without this a long turn reads as frozen. Pure: rows keep first-seen order
@@ -660,6 +680,6 @@
   }
   return {
     mdToHtml: mdToHtml, _mdInline: _mdInline, _mdEsc: _mdEsc, stripMdFence: stripMdFence,
-    extractNoteUpdate: extractNoteUpdate, extractPdfClips: extractPdfClips, extractNewNotes: extractNewNotes, extractSectionUpdates: extractSectionUpdates, replaceSection: replaceSection, stripNoteBlocks: stripNoteBlocks, extractKumikoRules: extractKumikoRules, extractMemories: extractMemories, extractPlanProposals: extractPlanProposals, extractActions: extractActions, liveActivity: liveActivity, ensureSlideClips: ensureSlideClips, linkifyRefs: linkifyRefs, resolveRefTarget: resolveRefTarget, historyText: historyText, NOTE_OPEN: NOTE_OPEN, NOTE_CLOSE: NOTE_CLOSE
+    extractNoteUpdate: extractNoteUpdate, extractPdfClips: extractPdfClips, pdfClipFailLine: pdfClipFailLine, extractNewNotes: extractNewNotes, extractSectionUpdates: extractSectionUpdates, replaceSection: replaceSection, stripNoteBlocks: stripNoteBlocks, extractKumikoRules: extractKumikoRules, extractMemories: extractMemories, extractPlanProposals: extractPlanProposals, extractActions: extractActions, liveActivity: liveActivity, ensureSlideClips: ensureSlideClips, linkifyRefs: linkifyRefs, resolveRefTarget: resolveRefTarget, historyText: historyText, NOTE_OPEN: NOTE_OPEN, NOTE_CLOSE: NOTE_CLOSE
   };
 });
