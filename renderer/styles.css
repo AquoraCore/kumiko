@@ -1407,11 +1407,10 @@ table.db tr:hover .db-delrow { opacity: 1; }
 }
 :root[data-theme="dark"] .crate-card .cc-kind { color: var(--ic-ink); background: var(--ic-wood-bg); }
 
-/* subcrate = ochre washi paper */
-.crate-card.cc-box { background-color: #f3e8cf; background-image: var(--wa-shippo); border-color: rgba(150,112,40,.30); }
-.crate-card.cc-box .cc-ic .ic { color: #9a6f24; }
-:root[data-theme="dark"] .crate-card.cc-box { background-color: #2c2618; background-image: var(--wa-shippo); border-color: rgba(200,160,70,.22); }
-:root[data-theme="dark"] .crate-card.cc-box .cc-ic .ic { color: var(--wa-gold); }
+/* subcrate = washi paper tinted by the PRIMARY accent (user ask 2026-10-05) — tokens are
+   theme-aware (--accent/--accent-bg redefine in dark), so one rule covers both themes */
+.crate-card.cc-box { background-color: var(--accent-bg); background-image: var(--wa-shippo); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+.crate-card.cc-box .cc-ic .ic { color: var(--accent); }
 
 /* regular note = PLAIN paper (no pattern) + indigo icon + top-right dog-ear */
 .crate-card.cc-note .cc-ic .ic { color: var(--wa-indigo); }
